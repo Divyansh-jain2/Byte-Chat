@@ -1,0 +1,889 @@
+
+### Users Table
+### Anonymous Identities Table
+### Groups Table
+### Group Members Table
+### Chats Table
+### Chat Participants Table (for personal chats)
+### Messages Table
+### Polls Table
+### Poll Votes Table
+### Pending Invites Table
+
+### Online Users
+### Socket to User Mapping
+### Active Chats per User
+### Typing Indicators
+### Message Queue (for offline users)
+
+=================================================================
+# Complete System Architecture - Atomic Level
+
+## 1. Database Schema (PostgreSQL)
+### Users Table
+```
+users
+- user_id (PK, UUID)
+- roll_no (unique, encrypted with server key)
+- name (encrypted)
+- gender (encrypted)
+- branch (encrypted)
+- year (derived from roll_no)
+- email_hash (SHA-256, for lookup)
+- password_hash (bcrypt)
+- public_key (for key exchange, base64)
+- created_at
+- last_active
+```
+
+### Anonymous Identities Table
+```
+anonymous_identities
+- anon_id (PK, UUID)
+- user_id (FK, encrypted with server key)
+- group_id (FK)
+- random_string (visible identifier, random 16-char)
+- created_at
+- UNIQUE(user_id, group_id) - enforces one anon per group
+```
+
+### Groups Table
+```
+groups
+- group_id (PK, UUID)
+- group_name (encrypted)
+- type (ENUM: 'private', 'public')
+- created_by (FK user_id, encrypted)
+- created_at
+- is_active
+```
+
+### Group Members Table
+```
+group_members
+- member_id (PK, UUID)
+- group_id (FK)
+- user_id (FK, encrypted)
+- anon_id (FK, nullable - if anonymous mode)
+- is_anonymous (boolean)
+- role (ENUM: 'admin', 'member')
+- joined_at
+- is_active
+- UNIQUE(group_id, user_id)
+```
+
+### Chats Table
+```
+chats
+- chat_id (PK, UUID)
+- type (ENUM: 'personal', 'group')
+- group_id (FK, nullable)
+- created_at
+- symmetric_key_encrypted (JSON blob: {user_id: encrypted_key})
+```
+
+### Chat Participants Table (for personal chats)
+```
+chat_participants
+- participant_id (PK, UUID)
+- chat_id (FK)
+- user_id (FK, encrypted)
+- anon_id (FK, nullable)
+- is_anonymous (boolean)
+- status (ENUM: 'pending', 'accepted', 'blocked', 'rejected')
+- added_at
+- UNIQUE(chat_id, user_id)
+```
+
+### Messages Table
+```
+messages
+- message_id (PK, UUID)
+- chat_id (FK)
+- sender_user_id (encrypted)
+- sender_anon_id (FK, nullable if anonymous)
+- encrypted_content (TEXT - blob)
+- message_type (ENUM: 'text', 'image', 'emoji')
+- encrypted_metadata (JSON: {image_url, emoji_id})
+- timestamp
+- iv (initialization vector for AES)
+- auth_tag (for GCM mode verification)
+```
+
+### Polls Table
+```
+polls
+- poll_id (PK, UUID)
+- group_id (FK)
+- poll_type (ENUM: 'kick_member', 'remove_objection')
+- target_user_id (encrypted)
+- created_by (encrypted)
+- created_at
+- expires_at (created_at + 6 hours)
+- status (ENUM: 'active', 'passed', 'failed')
+- result_option (ENUM: 'kick', 'keep', null)
+```
+
+### Poll Votes Table
+```
+poll_votes
+- vote_id (PK, UUID)
+- poll_id (FK)
+- voter_anon_id (FK) - uses anonymous identity
+- vote_option (ENUM: 'kick', 'keep')
+- voted_at
+- UNIQUE(poll_id, voter_anon_id) - one vote per anon identity
+```
+
+### Pending Invites Table
+```
+pending_invites
+- invite_id (PK, UUID)
+- group_id (FK)
+- user_id (FK, encrypted)
+- invited_by (FK user_id, encrypted)
+- invite_type (ENUM: 'private_group', 'public_group')
+- status (ENUM: 'pending', 'accepted', 'rejected')
+- created_at
+- expires_at (7 days)
+```
+
+---
+
+## 2. Redis Schema
+
+### Online Users
+```
+Key: online:user:{user_id}
+Value: {socket_id, last_ping, status}
+TTL: 5 minutes (refresh on activity)
+```
+
+### Socket to User Mapping
+```
+Key: socket:{socket_id}
+Value: user_id
+TTL: Session duration
+```
+
+### Active Chats per User
+```
+Key: user_chats:{user_id}
+Value: SET of chat_ids
+```
+
+### Typing Indicators
+```
+Key: typing:{chat_id}:{user_id}
+Value: timestamp
+TTL: 5 seconds
+```
+
+### Message Queue (for offline users)
+```
+Key: offline_queue:{user_id}
+Value: LIST of {chat_id, message_id, timestamp}
+TTL: 7 days
+```
+
+---
+
+## 3. Encryption Architecture
+
+### Client-Side Keys (IndexedDB)
+```javascript
+// Per user (generated on signup)
+{
+  userPrivateKey: CryptoKey, // RSA-OAEP for key exchange
+  userPublicKey: exported and stored on server
+}
+
+// Per chat
+{
+  chat_id: {
+    symmetricKey: CryptoKey, // AES-256-GCM
+    keyVersion: 1
+  }
+}
+
+// Mapping for anonymous chats
+{
+  anon_chat_mappings: {
+    chat_id: {real_peer_user_id or 'anonymous'}
+  }
+}
+```
+
+### Server-Side Encryption
+```
+- Server master key (env variable, rotated quarterly)
+- Used ONLY for encrypting: user_id, roll_no, name references in DB
+- Server NEVER has chat symmetric keys
+```
+
+### Encryption Flow
+
+**Message Send:**
+1. Client retrieves symmetric key for chat_id from IndexedDB
+2. Generate random IV (12 bytes)
+3. Encrypt message: `AES-GCM(symmetricKey, plaintext, IV)`
+4. Get auth_tag from encryption
+5. Send to server: `{chat_id, encrypted_content, iv, auth_tag, message_type}`
+6. Server stores as-is (cannot decrypt)
+
+**Message Receive:**
+1. Server pushes: `{message_id, chat_id, encrypted_content, iv, auth_tag, sender_anon_id/user_id}`
+2. Client retrieves symmetric key from IndexedDB
+3. Decrypt: `AES-GCM-decrypt(symmetricKey, encrypted_content, IV, auth_tag)`
+4. Render plaintext
+
+---
+
+## 4. Key Exchange Mechanisms
+
+### Personal Chat (Known Mode)
+```
+User A → User B (first message)
+
+1. A generates random AES key (chat symmetric key)
+2. A fetches B's public RSA key from server
+3. A encrypts symmetric key with B's public key
+4. A sends: {
+     type: 'chat_request',
+     encrypted_key_for_B: RSA-OAEP(B_publicKey, symmetricKey),
+     encrypted_key_for_A: symmetricKey (A stores locally),
+     mode: 'known'
+   }
+5. Server creates chat, stores encrypted keys blob
+6. B receives notification, decrypts symmetric key with B's private key
+7. B stores symmetric key in IndexedDB
+8. Both can now encrypt/decrypt messages
+```
+
+### Personal Chat (Anonymous Mode)
+```
+User A → User B (anonymous)
+
+1-4. Same as known mode
+5. Server creates anon_id for A in context of this chat
+6. Server sends to B: {
+     chat_id,
+     sender_anon_string: random_16_char,
+     sender_gender: encrypted_then_decrypted_by_server,
+     sender_year: calculated,
+     encrypted_symmetric_key
+   }
+7. B sees anonymous sender, accepts/rejects
+```
+
+### Group Chat Key Exchange
+```
+Group Creation:
+1. Creator generates group symmetric key
+2. For each initial member:
+   - Encrypt group key with member's public RSA key
+   - Store in symmetric_key_encrypted JSON blob
+3. Server creates group, stores encrypted key blob
+
+Adding New Member:
+1. Any existing member (or server triggers admin's client):
+   - Fetches group symmetric key from their IndexedDB
+   - Encrypts it with new member's public RSA key
+   - Sends encrypted key to server
+2. Server updates symmetric_key_encrypted blob
+3. New member decrypts and stores key
+4. New member CANNOT decrypt old messages (no key ratcheting)
+```
+
+---
+
+## 5. API Endpoints (Express REST)
+
+### Personal Chats
+```
+POST /api/chats/request
+- Body: {
+    recipient_user_id,
+    is_anonymous,
+    encrypted_key_for_recipient,
+    encrypted_key_for_sender
+  }
+- Process:
+  1. Create chat (type='personal')
+  2. Create chat_participants (status='pending' for recipient)
+  3. If anonymous: create anon_id
+  4. Store encrypted keys
+  5. Emit socket event to recipient
+  6. Return: {chat_id}
+
+POST /api/chats/:chat_id/respond
+- Body: {action: 'accept'|'reject'|'block'}
+- Process:
+  1. Update chat_participants status
+  2. Emit socket event to sender
+  3. If accept: return {chat_id, encrypted_symmetric_key}
+
+GET /api/chats/my-chats
+- Returns: List of user's active chats
+  [{chat_id, type, participants[], last_message}]
+
+GET /api/chats/:chat_id/messages
+- Query: ?before_id={message_id}&limit=50
+- Returns: Paginated encrypted messages
+```
+
+### Groups
+```
+POST /api/groups/create
+- Body: {
+    name,
+    type: 'private'|'public',
+    initial_members: [{user_id, encrypted_key}]
+  }
+- Process:
+  1. Create group
+  2. Create group_members (creator as admin)
+  3. For private: create pending_invites
+  4. Store encrypted keys blob
+  5. Return: {group_id}
+
+POST /api/groups/:group_id/join
+- Body: {is_anonymous, encrypted_key (if has it)}
+- Process:
+  1. If public: directly add to group_members
+  2. If anonymous: create anon_id, store
+  3. If needs key: request from admin's client via socket
+  4. Return: {member_id, anon_string (if anon)}
+
+POST /api/groups/:group_id/invite
+- Body: {user_ids: [], invited_by}
+- Process:
+  1. Create pending_invites
+  2. Emit socket notifications
+  3. Return: {invite_ids}
+
+POST /api/groups/:group_id/respond-invite
+- Body: {action: 'accept'|'reject', is_anonymous}
+- Process:
+  1. Update invite status
+  2. If accept: add to group_members, create anon_id if needed
+  3. Request encrypted key from existing member
+  4. Return: {member_id}
+
+POST /api/groups/:group_id/remove-member
+- Body: {target_user_id}
+- Process:
+  1. Check if requester is admin
+  2. If private group: create poll (type='remove_objection')
+  3. If public group: directly create poll (type='kick_member')
+  4. Return: {poll_id}
+
+POST /api/groups/:group_id/make-admin
+- Body: {user_id}
+- Process:
+  1. Check requester is admin
+  2. Update group_members role
+  3. Emit notification
+
+GET /api/groups/:group_id/members
+- Returns: List of members [{anon_string, gender, year} or {name, user_id}]
+
+GET /api/groups/public
+- Returns: List of public groups for homepage
+```
+
+### Polls
+```
+POST /api/polls/:poll_id/vote
+- Body: {vote_option: 'kick'|'keep'}
+- Process:
+  1. Get voter's anon_id for this group
+  2. Check if already voted (poll_votes unique constraint)
+  3. Insert vote
+  4. Return: {success}
+
+GET /api/polls/:poll_id/status
+- Returns: {status, votes_count, time_remaining}
+
+Background Job (runs every minute):
+- Check polls where expires_at <= NOW and status='active'
+- Count votes: kick vs keep
+- Update poll status and result_option
+- If kick wins: set group_members.is_active=false for target
+- Emit socket events to group
+```
+
+### Messages
+```
+POST /api/messages/send
+- Body: {
+    chat_id,
+    encrypted_content,
+    iv,
+    auth_tag,
+    message_type,
+    encrypted_metadata (if image)
+  }
+- Process:
+  1. Insert into messages
+  2. Emit via Socket.IO to chat room
+  3. If recipient offline: push to Redis offline_queue
+  4. Return: {message_id, timestamp}
+
+POST /api/messages/upload-image
+- Body: FormData {image_file, chat_id}
+- Process:
+  1. Upload to S3/Cloudinary
+  2. Return: {image_url (client encrypts this in metadata)}
+```
+
+---
+
+## 6. WebSocket Events (Socket.IO)
+
+### Connection
+```
+Event: 'connection'
+Client → Server: {auth_token}
+Server validates JWT, stores socket_id mapping in Redis
+```
+
+### Rooms
+```
+On connect:
+- Join room: user:{user_id}
+- For each active chat: join room chat:{chat_id}
+```
+
+### Real-time Events
+
+**Chat Request**
+```
+Event: 'chat:request'
+Server → Client (recipient): {
+  chat_id,
+  sender_id or anon_string,
+  sender_profile (if known mode),
+  encrypted_symmetric_key
+}
+```
+
+**Chat Response**
+```
+Event: 'chat:response'
+Server → Client (sender): {
+  chat_id,
+  action: 'accepted'|'rejected'|'blocked'
+}
+```
+
+**New Message**
+```
+Event: 'message:new'
+Server → Clients in chat:{chat_id}: {
+  message_id,
+  chat_id,
+  sender_user_id or sender_anon_id,
+  encrypted_content,
+  iv,
+  auth_tag,
+  message_type,
+  encrypted_metadata,
+  timestamp
+}
+```
+
+**Typing Indicator**
+```
+Event: 'typing:start'
+Client → Server: {chat_id}
+Server → Other clients in room: {chat_id, user_id or anon_string}
+
+Event: 'typing:stop'
+Same flow
+```
+
+**Group Invitation**
+```
+Event: 'group:invite'
+Server → Client: {
+  group_id,
+  group_name,
+  invited_by,
+  invite_id
+}
+```
+
+**Poll Created**
+```
+Event: 'poll:created'
+Server → Clients in group:{group_id}: {
+  poll_id,
+  poll_type,
+  target_anon_string or user_name,
+  expires_at
+}
+```
+
+**Poll Result**
+```
+Event: 'poll:result'
+Server → Clients in group:{group_id}: {
+  poll_id,
+  result: 'passed'|'failed',
+  target_removed: boolean
+}
+```
+
+**Member Left/Removed**
+```
+Event: 'group:member_removed'
+Server → Clients in group:{group_id}: {
+  group_id,
+  removed_user: anon_string or user_name,
+  reason: 'left'|'kicked'|'poll'
+}
+```
+
+**Key Exchange Request** (for new group member)
+```
+Event: 'key:request'
+Server → Admin clients: {
+  group_id,
+  new_member_user_id,
+  new_member_public_key
+}
+
+Event: 'key:response'
+Admin client → Server: {
+  group_id,
+  new_member_user_id,
+  encrypted_symmetric_key
+}
+```
+
+---
+
+## 7. Process Flows
+
+### A. User Signup & Verification
+```
+1. User fills form (roll_no, name, gender, branch, password)
+2. Frontend validates roll_no format
+3. POST /api/auth/signup
+4. Backend:
+   - Validates roll_no exists in college mapping
+   - Generates OTP, stores in Redis
+   - Sends email via NodeMailer
+5. User enters OTP
+6. Frontend generates RSA key pair (Web Crypto API)
+7. POST /api/auth/verify-otp with public_key
+8. Backend creates user, stores encrypted data
+9. Returns JWT token
+10. Frontend stores private key in IndexedDB
+```
+
+### B. User Login
+```
+1. User enters roll_no + password
+2. POST /api/auth/login
+3. Backend verifies, returns JWT + user_id
+4. Frontend stores JWT in localStorage
+5. Frontend retrieves private key from IndexedDB
+6. Socket.IO connects with JWT in auth
+7. Backend marks user online in Redis
+```
+
+### C. Send Known Personal Message
+```
+1. User A clicks on User B's profile → "Message"
+2. Frontend checks if existing chat exists (GET /api/chats/my-chats)
+3. If not:
+   a. Generate AES-256 symmetric key
+   b. Fetch B's public RSA key (GET /api/users/B)
+   c. Encrypt symmetric key with B's public key
+   d. POST /api/chats/request
+   e. Store symmetric key in IndexedDB[chat_id]
+4. User A types message
+5. Frontend:
+   a. Retrieves symmetric key from IndexedDB
+   b. Generates IV (12 random bytes)
+   c. Encrypts: ciphertext = AES-GCM(key, plaintext, IV)
+   d. Extracts auth_tag
+6. POST /api/messages/send
+7. Backend stores encrypted blob
+8. Backend emits 'message:new' to room chat:{chat_id}
+9. User B's client receives event
+10. Frontend:
+    a. Checks if has symmetric key (if first message, decrypt from invite)
+    b. Decrypts: plaintext = AES-GCM-decrypt(key, ciphertext, IV, auth_tag)
+    c. Renders message
+```
+
+### D. Send Anonymous Personal Message
+```
+1-6. Same as known message
+7. Backend creates anon_id for sender in DB
+8. Backend emits with sender_anon_id instead of sender_user_id
+9. User B sees: anon_string, gender, year + encrypted message
+10. B decrypts and reads
+11. If B replies: creates new chat window (A knows B, B knows anon_string)
+```
+
+### E. Create Public Group
+```
+1. User clicks "Create Group"
+2. Fills name, selects type='public'
+3. Frontend generates AES-256 group key
+4. POST /api/groups/create
+5. Backend creates group, adds creator as admin
+6. Frontend stores group key in IndexedDB[group_id]
+7. Group appears on public homepage
+```
+
+### F. Join Public Group (Anonymous)
+```
+1. User clicks public group profile
+2. Selects "Join Anonymously"
+3. POST /api/groups/{group_id}/join {is_anonymous: true}
+4. Backend:
+   a. Creates anon_id with random_string
+   b. Adds to group_members
+   c. Emits 'key:request' to admin's socket
+5. Admin's client:
+   a. Receives request
+   b. Retrieves group key from IndexedDB
+   c. Encrypts with new member's public RSA key
+   d. Emits 'key:response'
+6. Backend updates symmetric_key_encrypted blob
+7. New member receives encrypted key
+8. Frontend decrypts with private key, stores in IndexedDB
+9. User can now read/send group messages
+```
+
+### G. Create Poll to Kick Member
+```
+1. Admin right-clicks member → "Remove"
+2. Backend checks group type
+3. POST /api/groups/{group_id}/remove-member
+4. Backend:
+   a. Creates poll (expires_at = now + 6 hours)
+   b. Emits 'poll:created' to group room
+5. All members see poll notification
+6. Members vote: POST /api/polls/{poll_id}/vote
+7. Backend stores votes with voter's anon_id
+8. After 6 hours, background job:
+   a. Counts votes
+   b. If kick > keep: removes member
+   c. Emits 'poll:result'
+```
+
+### H. Message Delivery (Offline User)
+```
+1. User A sends message to offline User B
+2. Backend checks Redis online:user:{B_id} → not found
+3. Backend pushes to Redis offline_queue:{B_id}
+4. When B comes online:
+   a. Socket connects
+   b. Backend checks offline_queue:{B_id}
+   c. Emits all queued messages
+   d. Clears queue
+```
+
+### I. Image Sharing
+```
+1. User selects image from device
+2. Frontend compresses image (client-side)
+3. POST /api/messages/upload-image (multipart/form-data)
+4. Backend uploads to S3, returns public URL
+5. Frontend:
+   a. Retrieves chat symmetric key
+   b. Encrypts image URL + metadata as JSON string
+   c. Generates IV, encrypts
+6. POST /api/messages/send with encrypted_metadata
+7. Recipient decrypts metadata, fetches image from URL
+8. (Image itself not encrypted, but URL is hidden)
+```
+
+---
+
+## 8. Security Measures
+
+### Authentication
+- JWT with 7-day expiry
+- Refresh token rotation (optional)
+- bcrypt password hashing (cost factor 12)
+- Rate limiting on login (5 attempts/15 min per IP)
+
+### Authorization
+- Middleware checks JWT on all protected routes
+- Group admin checks before polls/removals
+- Ownership verification on message send
+
+### Encryption
+- AES-256-GCM for messages (authenticated encryption)
+- RSA-OAEP-256 for key exchange
+- Random IV per message (never reused)
+- Server master key in env (not in code)
+
+### Input Validation
+- Express-validator on all endpoints
+- File upload size limits (5MB images)
+- Roll number format validation (regex)
+- SQL injection prevention (parameterized queries)
+
+### Rate Limiting
+- 100 requests/min per user (express-rate-limit)
+- 10 messages/sec per chat
+- 1 group creation/hour per user
+
+### XSS Prevention
+- Content-Security-Policy headers
+- Sanitize user inputs (DOMPurify on frontend)
+- HttpOnly cookies for refresh tokens
+
+### CORS
+- Whitelist only frontend domain
+- Credentials: true for cookies
+
+---
+
+## 9. Scaling Considerations (500-1000 users, 20-50 concurrent)
+
+### Single Server Setup (Sufficient)
+```
+- 1 Node.js server (4 CPU, 8GB RAM)
+- 1 PostgreSQL (2 CPU, 4GB RAM)
+- 1 Redis (1 CPU, 2GB RAM)
+- Total: ~$100-150/month (DigitalOcean/AWS)
+```
+
+### If Growth to 5000 users:
+```
+- 2-3 Node.js servers (load balanced)
+- Redis Cluster (3 nodes)
+- PostgreSQL read replicas
+- Socket.IO Redis adapter (sticky sessions)
+```
+
+### Database Indexing
+```sql
+CREATE INDEX idx_messages_chat_timestamp ON messages(chat_id, timestamp DESC);
+CREATE INDEX idx_group_members_group ON group_members(group_id);
+CREATE INDEX idx_anon_identities_group_user ON anonymous_identities(group_id, user_id);
+CREATE INDEX idx_chat_participants_user ON chat_participants(user_id);
+```
+
+### Caching Strategy
+- User profiles in Redis (1 hour TTL)
+- Group member lists in Redis (refresh on changes)
+- Public groups list in Redis (5 min TTL)
+
+---
+
+## 10. Monitoring & Logging
+
+### Logs (Winston)
+- Error logs: DB errors, encryption failures
+- Access logs: API requests (no sensitive data)
+- Socket logs: Connection/disconnection events
+- NO logging of message content or user_ids in plaintext
+
+### Metrics
+- Active WebSocket connections
+- Messages per second
+- API response times (P50, P95, P99)
+- Redis memory usage
+- PostgreSQL connection pool
+
+### Alerts
+- Server CPU > 80%
+- Database connections > 90% pool
+- Error rate > 1% of requests
+- Redis memory > 75%
+
+---
+
+## 11. Frontend State Management
+
+### React Context/Redux Store
+```javascript
+{
+  user: {
+    user_id,
+    profile,
+    jwt_token,
+    private_key_ref // IndexedDB key
+  },
+  
+  chats: {
+    chat_id: {
+      chat_id,
+      type,
+      participants,
+      messages: [],
+      symmetric_key_ref, // IndexedDB key
+      is_anonymous,
+      peer_identity // 'known' or anon_string
+    }
+  },
+  
+  groups: {
+    group_id: {
+      name,
+      type,
+      members: [],
+      my_identity: 'anon_string' or 'user_id',
+      symmetric_key_ref
+    }
+  },
+  
+  ui: {
+    active_chat_id,
+    online_users: Set,
+    typing_indicators: Map
+  }
+}
+```
+
+---
+
+## 12. Edge Cases Handled
+
+1. **User leaves during poll**: Vote still counts, poll completes
+2. **Last admin leaves group**: Random member promoted
+3. **All admins leave**: Random member becomes admin
+4. **Double-join prevention**: UNIQUE constraint on (group_id, user_id)
+5. **Key exchange fails**: Retry mechanism, fallback to admin notification
+6. **Message send fails**: Client retries 3 times, shows "Failed to send"
+7. **Offline messages pile up**: Batch delivery on reconnect(max 100 at once)
+8. **Poll expires during downtime**: Background job catches on next run
+9. **Anonymous user votes twice**: DB constraint prevents, returns error
+10. **Image upload fails**: Show error, don't create message entry
+
+=================================================================
+
+Metadata Privacy: Admin sees no connection and msgs but can see gender, timestamp and if issue, encrypt all
+Real Time: Must messages appear instantly, or is slight delay acceptable
+
+
+## Encryption
+    - **E2EE approach**: Client-side encryption using **Web Crypto API**
+    - Each chat/group gets unique symmetric key (AES-256-GCM)
+    - Keys stored in user's IndexedDB, never on server
+    - Server only stores encrypted message blobs
+
+1. **Key exchange problem**: When User A messages User B first time, how does B get the decryption key? Options:
+   - Diffie-Hellman key exchange
+   - Pre-shared keys (users exchange keys when accepting chat request)
+   - Signal Protocol (complex but gold standard)
+
+2. **Group encryption**: When user joins group, how do they get message history decryption keys?
+   - New member cannot read old messages (simplest)
+
+3. **Anonymous ID persistence**: Store `user_id → anonymous_id → group_id` mapping encrypted with what key? Admin needs to enforce "one vote" but shouldn't see who voted.
+
+==================================================================
+
+
+

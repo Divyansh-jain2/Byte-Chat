@@ -1,0 +1,345 @@
+
+3. Chat
+    a. 1v1
+        Send msg endpoint
+        Sender Authorization
+        Retry and ACK behavior
+        Get conversation history
+        Delete messages (Soft, hard or me, all)
+        Message status (Sent, delivered, read)
+
+    b. Group
+        Create/Delete Group
+        Add members
+        Remove members by voting
+        Group settings
+        Group msg broadcasting
+        Private-Public
+        Kick out users
+
+
+
+==========================================================
+
+### **1. `chat_conversations`** (Track all conversations)
+```sql
+CREATE TABLE chat_conversations (
+    conversation_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    conversation_type VARCHAR(10) NOT NULL CHECK (conversation_type IN ('direct', 'group')),
+
+    -- For direct messages (1v1)
+    user1_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
+    user2_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
+
+    -- For group chats
+    group_id UUID, -- Will reference groups table
+
+    -- Direct conversation unique constraint
+    UNIQUE(user1_id, user2_id) WHERE conversation_type = 'direct',
+
+    -- Status
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW(),
+    last_message_at TIMESTAMP,
+    deleted_at TIMESTAMP
+);
+```
+
+### **2. `chat_messages`** (E2E Encrypted messages)
+```sql
+CREATE TABLE chat_messages (
+    message_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    conversation_id UUID REFERENCES chat_conversations(conversation_id) ON DELETE CASCADE,
+    sender_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
+    
+    -- E2E Encrypted Content (YOUR ENCRYPTION LAYER)
+    encrypted_content TEXT NOT NULL, -- Encrypted on client/app layer
+    content_hash VARCHAR(64) NOT NULL, -- SHA-256 hash of original content (for verification)
+    
+    -- Message metadata (NOT encrypted)
+    message_type VARCHAR(20) DEFAULT 'text' CHECK (message_type IN ('text', 'image', 'file', 'emoji')),
+    file_url TEXT, -- For images/files (encrypted URL or path)
+    file_size INT,
+    file_name TEXT,
+    
+    -- Status flags
+    is_deleted BOOLEAN DEFAULT FALSE,
+    delete_type VARCHAR(10) CHECK (delete_type IN ('soft', 'hard', 'me', 'all')),
+    deleted_by UUID REFERENCES users(user_id),
+    
+    -- Timestamps
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW(),
+    delivered_at TIMESTAMP,
+    read_at TIMESTAMP,
+    
+    -- Indexes
+    INDEX idx_msg_conversation ON chat_messages(conversation_id, created_at),
+    INDEX idx_msg_sender ON chat_messages(sender_id),
+    INDEX idx_msg_created ON chat_messages(created_at)
+);
+```
+
+### **3. `message_status`** (For read receipts - separate for group scalability)
+```sql
+CREATE TABLE message_status (
+    message_id UUID REFERENCES chat_messages(message_id) ON DELETE CASCADE,
+    user_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
+    status VARCHAR(10) DEFAULT 'sent' CHECK (status IN ('sent', 'delivered', 'read')),
+    status_at TIMESTAMP DEFAULT NOW(),
+    UNIQUE(message_id, user_id)
+);
+```
+
+### **4. `groups`** (Group chat management)
+```sql
+CREATE TABLE groups (
+    group_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    group_name VARCHAR(255) NOT NULL,
+    group_type VARCHAR(10) NOT NULL CHECK (group_type IN ('public', 'private')),
+    description TEXT,
+    dp_url TEXT,
+    
+    -- Admin management
+    created_by UUID REFERENCES users(user_id),
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW(),
+    
+    -- Group settings
+    invite_token TEXT UNIQUE, -- For private groups
+    token_expires_at TIMESTAMP,
+    max_members INT DEFAULT 1000,
+    
+    -- Voting settings for public groups
+    vote_duration_hours INT DEFAULT 6,
+    vote_quorum_percent INT DEFAULT 51, -- 51% majority
+    
+    INDEX idx_group_type ON groups(group_type)
+);
+```
+
+### **5. `group_members`** (Group membership with roles)
+```sql
+CREATE TABLE group_members (
+    group_id UUID REFERENCES groups(group_id) ON DELETE CASCADE,
+    user_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
+    
+    -- Role hierarchy
+    role VARCHAR(15) DEFAULT 'member' CHECK (role IN ('creator', 'admin', 'moderator', 'member')),
+    
+    -- Join details
+    joined_at TIMESTAMP DEFAULT NOW(),
+    invited_by UUID REFERENCES users(user_id),
+    invite_accepted_at TIMESTAMP,
+    
+    -- For private groups
+    invite_token_used TEXT,
+    
+    -- Status
+    is_active BOOLEAN DEFAULT TRUE,
+    removed_at TIMESTAMP,
+    removed_by UUID REFERENCES users(user_id),
+    removal_reason TEXT,
+    
+    PRIMARY KEY (group_id, user_id),
+    
+    INDEX idx_member_user ON group_members(user_id),
+    INDEX idx_member_role ON group_members(role)
+);
+```
+
+### **6. `group_votes`** (For public group member removal voting)
+```sql
+CREATE TABLE group_votes (
+    vote_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    group_id UUID REFERENCES groups(group_id) ON DELETE CASCADE,
+    target_user_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
+    
+    -- Vote details
+    vote_type VARCHAR(20) DEFAULT 'remove_member' CHECK (vote_type IN ('remove_member')),
+    initiated_by UUID REFERENCES users(user_id), -- Usually admin
+    initiated_at TIMESTAMP DEFAULT NOW(),
+    
+    -- Voting window
+    vote_ends_at TIMESTAMP, -- 6 hours after start
+    result VARCHAR(10) CHECK (result IN ('pending', 'approved', 'rejected', 'expired')),
+    
+    -- Voting counts (updated via trigger)
+    votes_for INT DEFAULT 0,
+    votes_against INT DEFAULT 0,
+    total_voters INT, -- Total eligible voters at start
+    
+    INDEX idx_vote_group ON group_votes(group_id, result),
+    INDEX idx_vote_ends ON group_votes(vote_ends_at)
+);
+```
+
+### **7. `user_votes`** (Individual votes)
+```sql
+CREATE TABLE user_votes (
+    vote_id UUID REFERENCES group_votes(vote_id) ON DELETE CASCADE,
+    user_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
+    vote_value VARCHAR(10) CHECK (vote_value IN ('for', 'against', 'abstain')),
+    voted_at TIMESTAMP DEFAULT NOW(),
+    PRIMARY KEY (vote_id, user_id)
+);
+```
+
+### **8. `reports`** (User reporting system)
+```sql
+CREATE TABLE reports (
+    report_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    reporter_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
+    reported_user_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
+    
+    -- Report details (encrypted for admin privacy)
+    encrypted_reason TEXT NOT NULL, -- Why reporting
+    report_type VARCHAR(20) CHECK (report_type IN ('spam', 'harassment', 'inappropriate', 'other')),
+    
+    -- Message reference (if any)
+    message_id UUID REFERENCES chat_messages(message_id),
+    
+    -- Admin cannot see message content due to E2E
+    admin_notes TEXT, -- Admin internal notes
+    status VARCHAR(15) DEFAULT 'pending' CHECK (status IN ('pending', 'reviewing', 'resolved', 'dismissed')),
+    
+    -- Auto-block logic
+    is_auto_blocked BOOLEAN DEFAULT FALSE, -- if 5+ unique reports
+    auto_block_reason TEXT,
+    
+    created_at TIMESTAMP DEFAULT NOW(),
+    reviewed_at TIMESTAMP,
+    reviewed_by UUID REFERENCES users(user_id),
+    
+    INDEX idx_reports_reported ON reports(reported_user_id, status),
+    INDEX idx_reports_created ON reports(created_at)
+);
+```
+
+A. The "Message Status" Bottleneck Your message_status table will grow exponentially. In a group of 500 people, 1 message = 500 status rows.
+    For large groups, don't track "Read" status per-user per-message. Instead, track last_read_message_id in the group_members table. 
+    You can calculate who has read what on the fly without millions of rows.
+
+B. Conversation "Last Message" Denormalization Querying the latest message for 50 chat threads in a list view is slow if you have to join chat_messages.
+    Store last_message_preview (encrypted) and last_message_id directly in the chat_conversations table. Update it via a 
+    trigger or application logic whenever a message is sent.
+
+C. Partitioning The chat_messages and message_status tables will eventually reach billions of rows.
+    Consider Time-Based Partitioning (e.g., one partition per month). This makes deleting 
+    old data and indexing much faster.
+
+D. Users love reacting to messages with emojis. Adding this later can be messy; a message_reactions 
+    table (mapping user_id, message_id, and emoji) is essential.
+
+
+==========================================================
+
+
+## **🔄 FLOW OF DATA & LOGIC**
+
+### **A. 1v1 MESSAGING FLOW:**
+```
+1. User A sends message to User B
+   → POST /api/messages/send
+   → Encrypt message on CLIENT SIDE (E2E)
+   → Store encrypted_content in DB
+   → Create chat_conversation if not exists
+   → Create chat_message record
+   → Emit Socket.io event to User B if online
+
+2. Delivery/Read Receipts:
+   User B receives message → update message_status to 'delivered'
+   User B reads message → update message_status to 'read'
+
+3. Message Deletion:
+   - 'soft': mark is_deleted = true
+   - 'me': sender sees deleted, receiver still sees
+   - 'all': both sides marked deleted
+   - 'hard': physically remove from DB (rare)
+```
+
+### **B. GROUP CHAT FLOW:**
+
+#### **Private Groups:**
+```
+1. Create Group:
+   → User creates group with type='private'
+   → Generate invite_token
+   → Admin adds members via token
+
+2. Admin Management:
+   → Admin can add/remove members directly
+   → Admin can promote/demote roles
+   → If admin leaves: promote oldest/random admin/member
+```
+
+#### **Public Groups:**
+```
+1. Join Public Group:
+   → Anyone can join without invite
+   → No admin approval needed
+
+2. Member Removal (Voting System):
+   → Admin initiates vote (24h cooldown per user)
+   → 6-hour voting window starts
+   → Members vote 'for' or 'against'
+   → After 6 hours: check majority
+   → If votes_for > votes_against: remove user
+```
+
+### **C. ENCRYPTION FLOW (E2E):**
+```
+BEFORE DB STORAGE:
+Original Message → Client Encryption → Encrypted Text → DB
+
+ON RETRIEVAL:
+DB Encrypted Text → Client Decryption → Original Message
+
+ADMINS SEE:
+- Only encrypted_content (unreadable)
+- content_hash (for integrity check)
+- Metadata (timestamps, message_type)
+- NO decryption keys stored on server
+```
+
+### **D. REPORTING & AUTO-BLOCK FLOW:**
+```
+1. User A reports User B:
+   → Encrypt reason (E2E for admin privacy)
+   → Store report without message content (admins can't read)
+
+2. Auto-block Logic:
+   → Count reports for User B
+   → If unique reporters ≥ 5:
+     → Auto-block User B for all users
+     → Send email to admins
+     → User B can appeal
+```
+
+
+==========================================================
+
+1v1:
+
+    user clicks on a profile and then:
+        he is being directed to new page where he sees the all the details of a profile which he choose
+        On that profile he can browse all details or he can msg the user as known or as an anonymous
+
+        Seeing profile is simple, just show him/her every data
+
+        Messaging as a known is pretty much simple we have to only encrypt the chat via session keys and
+        it will be available via redis or by database means firstly via database and then will encrypt
+        by password and in timely manner will keep the cache to the dbs
+
+        when doing via anonymous id then will generate the same and it will be that id and 
+        name for the sender for lifetime between the current sender and current reciever and if
+        at some point of time they think that they must know each other then by mutual consent both 
+        can reveal and if they don't agree then another user can block or whatever he/she want
+
+
+
+
+
+
+

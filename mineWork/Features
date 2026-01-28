@@ -1,0 +1,98 @@
+1. name, rollno, gender, branch, dob, dpurl, bio: That's all what we will collect from users
+2. Login via rollno and password
+3. Assume that we have mapping of the rollno to the mailid(we actually have the same)
+4. When creating new account they need to give name, roll no, gender, branch; all of them will be uneditable but via a link they can request us if something messed up
+5. otp via mail for the account verification and password forget/reset
+And you know all the chat features and so
+
+
+Msg are stored encrypted from client side only.
+
+Admin should not be able see who is talking to whom, and if we are making then make like nothing could be seen by admin
+
+We are making webapp
+
+yes, it's real-time but slight delay might be acceptable(by not totally so try to be much faster)
+
+ => How should users prove identity without admin knowing who they are? Anonymous accounts or some zero-knowledge proof system?: No user will login by roll no of format b23XXX.
+
+Ok let's make our app clear, we focus on our batch student only and they can create account like roll no, name, gender, branch and will verify it;s rollno and send otp to mapped mail-id which we have for every student and then their account will be verified and now then they can use our web and when logging in they can do the same by roll no and password which they have created.
+So all auths done and now on homepage and they will see profile of other students and they can click and chat with them, create groups private(can add anyone from the users by searching or by any means and the incoming user has the option to drop the group means join or not); if public then group created they can add like public but also that group will now act as new profile on home and anyone can join and admin cannot throw them off until admin creates a poll and in 6 hours members voted to kick off them
+
+
+Groups:
+When joining public group user have two option make their profile public in the group where users can see the profile of them or they can keep it anonymous means only a long random string will be shown in profile but will show Gender and Year (1st, 2nd or 3rd on basis of roll no) and we would store that string mapped to somehow to users and if he joins two group then that string need not to be same they are by random so will be different. When admin creates a poll to kick out then after 6 hours result automatically evaluated and based on that either in or out, Admin can also make someone as admin and when any admin left then if there are other admins then nothing else any random member will become the new admin
+
+When someone is added in any group then they have (pvt/pbl) option to accept or reject the same, if accepts then join else nothing.
+
+In pvt group admin can make many admins and same functionality as in pbl grp of admins but admin here can remove any member but now member has the right to object the same and create the poll and if voted in 6 hours to be removed then user will be removed but if voted to be in group then admin cannot remove him and he wants then create new polling or voting.
+
+
+Personal chats: 
+user sees the profile and every profile will be public except the private grps and user clicks on the same and if it's public grp he joins the same and if profile then he can lookup profiles and he can msg
+Looking profile is obvious now wants to msg, so he clicks msg and there is two options for him msg anonyms or msg by known if chosen known then when sender msgs receiver then receiver can see the sender's profile and either block sender or accept the same and whatever he does sender knows whether blocked or accepted or whatever
+
+But if msg as anonymous receiver will see only gender and year of sender and a random string will appear and same functionality accept or reject and receiver sees only random string(if sender msg different person then string will be diff as we are generating random string and associating the same), gender and year.
+
+When A->B anonymous then a chat window where A knows B's profile but B knows a random msg and when B->A anonymous then an another window wher now B knows A but A knows that a random user msged so it's directed in anonymous but if as know then similar to simple chat apps
+
+in msg we have text, emoji form our side and can share images (no call or video in the same)
+
+it's for our college students so we are using rollno as we have mapping to rollno and we will verify via otp 
+
+============================================
+
+Password requirements: user can keep whatever they want
+OTP expiry - 2-3 mins
+Session management - could be arbitary not sure
+Client-side encryption - AES, and no idea will deal with this later
+
+Anonymous string persistence - It should stay forever once generated then it will be dummy username for that account
+Traceability - No let them do what they want
+
+Message history - No they cannot see past msgs, they will see from when they join
+Message editing/deletion - Not sure but will try that they can
+Media storage - in supabase only for images of around 2 mb
+Read receipts - yes will try best to include it
+
+
+Group size limits - 500 for both
+Poll voting - they can change their vote but no multiple votes
+Group discovery - they will appear on homepage or they can also search
+
+
+Backend framework: Node, Express
+Database: Postgres, supabase
+Real-time communication: Socket.io
+Frontend framework: next
+
+==========================================
+
+Roll number format - Will handle it via backend
+Initial data - I will do in my way no need to worry about it
+
+Anonymous chat windows:
+    If A messages B anonymously → Chat Window 1 (A sees B's profile, B sees random string for A)
+    If B messages A anonymously → Chat Window 2 (B sees A's profile, A sees random string for B)
+    These are completely separate conversations, correct?
+
+        Yessss
+
+
+Switching modes - Can users reveal their identity mid-conversation (anonymous → known), or is it permanent once chosen?
+    Yees they can reveal from (anonymous → known) not in back.
+
+
+Platform admins - only group admins no platform admin
+Content moderation - no this for chats only, no posts
+
+=========================================
+
+
+
+
+
+
+
+
+
