@@ -91,11 +91,10 @@
 
 
 1. Core User Tables
-
 -- ========== USERS TABLE ==========
 -- Main user table - verified students only
 CREATE TABLE users (
-    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    user_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     roll_no VARCHAR(10) UNIQUE NOT NULL,  -- B23XX format
     name VARCHAR(100) NOT NULL,
     gender VARCHAR(10) NOT NULL CHECK (gender IN ('male', 'female', 'other')),
@@ -104,15 +103,6 @@ CREATE TABLE users (
     dp_url TEXT,
     dob DATE,
     bio TEXT,
-    year INTEGER GENERATED ALWAYS AS (
-        CASE 
-            WHEN roll_no LIKE 'B21%' THEN 4
-            WHEN roll_no LIKE 'B22%' THEN 3
-            WHEN roll_no LIKE 'B23%' THEN 2
-            WHEN roll_no LIKE 'B24%' THEN 1
-            ELSE 1
-        END
-    ) STORED,
     is_verified BOOLEAN DEFAULT FALSE,
     is_active BOOLEAN DEFAULT TRUE,
     last_login TIMESTAMPTZ,
@@ -123,31 +113,29 @@ CREATE TABLE users (
 -- Indexes for users
 CREATE INDEX idx_users_roll_no ON users(roll_no);
 CREATE INDEX idx_users_branch ON users(branch);
-CREATE INDEX idx_users_year ON users(year);
+
 
 -- ========== USER_VERIFICATIONS TABLE ==========
 -- OTP and email verification records
 CREATE TABLE user_verifications (
-    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    verification_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    user_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
     verification_type VARCHAR(20) NOT NULL CHECK (verification_type IN ('signup', 'reset_password', 'change_email')),
     otp_code VARCHAR(6) NOT NULL,
-    token VARCHAR(255) UNIQUE,
+    verification_token VARCHAR(255) UNIQUE,
     is_used BOOLEAN DEFAULT FALSE,
     expires_at TIMESTAMPTZ NOT NULL,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    verified_at TIMESTAMPTZ -- Think to use or not
+    created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_user_verifications_token ON user_verifications(token);
+CREATE INDEX idx_user_verifications_token ON user_verifications(verification_token);
 CREATE INDEX idx_user_verifications_user ON user_verifications(user_id);
-CREATE INDEX idx_user_verifications_expires ON user_verifications(expires_at); -- Think about it
 
 -- ========== USER_SESSIONS TABLE ==========
 -- Alternative to Redis for sessions (can use both)
 CREATE TABLE user_sessions (
-    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    session_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    user_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
     session_token VARCHAR(255) UNIQUE NOT NULL,
     device_info JSONB,
     ip_address INET,
@@ -157,13 +145,12 @@ CREATE TABLE user_sessions (
 
 CREATE INDEX idx_user_sessions_token ON user_sessions(session_token);
 CREATE INDEX idx_user_sessions_user ON user_sessions(user_id);
-CREATE INDEX idx_user_sessions_expires ON user_sessions(expires_at);  -- Think about it
 
 -- ========== USER_SETTINGS TABLE ==========
 -- User preferences and settings
 CREATE TABLE user_settings (
-    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    user_id UUID UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+    setting_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    user_id UUID UNIQUE REFERENCES users(user_id) ON DELETE CASCADE,
     theme VARCHAR(10) DEFAULT 'light' CHECK (theme IN ('light', 'dark', 'system')),
     notification_enabled BOOLEAN DEFAULT TRUE,
     email_notifications BOOLEAN DEFAULT TRUE,
@@ -177,8 +164,8 @@ CREATE INDEX idx_settings_user_id ON user_settings(user_id);
 
 -- ========== USER_PASSWORD_RESETS TABLE ==========
 CREATE TABLE user_password_resets (
-    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    reset_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    user_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
     reset_token VARCHAR(255) UNIQUE NOT NULL,
     is_used BOOLEAN DEFAULT FALSE,
     expires_at TIMESTAMPTZ NOT NULL,
@@ -202,23 +189,26 @@ CREATE TABLE chat_conversations (
     is_accepted BOOLEAN DEFAULT FALSE,
     is_blocked BOOLEAN DEFAULT FALSE,
     blocked_by_user_id UUID REFERENCES users(user_id),
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    last_message_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    last_message_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(user1_id, user2_id)
 );
 
 
 CREATE INDEX idx_conversations_user1 ON chat_conversations(user1_id);
 CREATE INDEX idx_conversations_user2 ON chat_conversations(user2_id);
 CREATE INDEX idx_conversations_last_message ON chat_conversations(last_message_at DESC);
+CREATE INDEX IF NOT EXISTS idx_conversations_accepted ON chat_conversations(is_accepted);
+CREATE INDEX IF NOT EXISTS idx_conversations_blocked ON chat_conversations(is_blocked);
 
 -- ========== CHAT_MESSAGES TABLE ==========
 -- ALL messages (personal + group)
 CREATE TABLE chat_messages (
-    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    conversation_id UUID REFERENCES chat_conversations(id) ON DELETE CASCADE,
-    group_id UUID REFERENCES groups(id) ON DELETE CASCADE, -- NULL for personal
-    sender_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    message_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    conversation_id UUID REFERENCES chat_conversations(conversation_id) ON DELETE CASCADE,
+    group_id UUID REFERENCES groups(group_id) ON DELETE CASCADE, -- NULL for personal
+    sender_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
     message_type VARCHAR(20) DEFAULT 'text' CHECK (message_type IN ('text', 'image', 'emoji')),
     
     -- Encrypted content
@@ -234,7 +224,7 @@ CREATE TABLE chat_messages (
     
     -- Anonymous messaging
     is_anonymous BOOLEAN DEFAULT FALSE,
-    anonymous_identity_id UUID REFERENCES anonymous_identities(id) ON DELETE SET NULL,
+    anonymous_identity_id UUID REFERENCES anonymous_identities(identity_id) ON DELETE SET NULL,
     
     -- Status
     is_edited BOOLEAN DEFAULT FALSE,
@@ -242,14 +232,20 @@ CREATE TABLE chat_messages (
     deleted_at TIMESTAMPTZ,
     
     -- Parent message for replies
-    parent_message_id UUID REFERENCES chat_messages(id) ON DELETE SET NULL,
+    parent_message_id UUID REFERENCES chat_messages(message_id) ON DELETE SET NULL,
 
     -- Encryption info
     encryption_key_version INTEGER DEFAULT 1,
-    key_id UUID REFERENCES chat_session_keys(id) ON DELETE SET NULL,
+    key_id UUID REFERENCES chat_session_keys(session_key_id) ON DELETE SET NULL,
     
     created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+
+    CHECK (
+        (conversation_id IS NOT NULL AND group_id IS NULL)
+        OR
+        (conversation_id IS NULL AND group_id IS NOT NULL)
+    )
 );
 
 CREATE INDEX idx_messages_conversation ON chat_messages(conversation_id, created_at DESC);
@@ -260,9 +256,9 @@ CREATE INDEX idx_messages_created_at ON chat_messages(created_at DESC);
 -- ========== MESSAGE_STATUS TABLE ==========
 -- Read receipts and delivery status
 CREATE TABLE message_status (
-    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    message_id UUID REFERENCES chat_messages(id) ON DELETE CASCADE,
-    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    status_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    message_id UUID REFERENCES chat_messages(message_id) ON DELETE CASCADE,
+    user_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
     status VARCHAR(20) DEFAULT 'sent' CHECK (status IN ('sent', 'delivered', 'read')),
     read_at TIMESTAMPTZ,
     delivered_at TIMESTAMPTZ,
@@ -275,11 +271,11 @@ CREATE INDEX idx_message_status_user ON message_status(user_id);
 
 -- ========== CHAT_REQUESTS TABLE ==========
 CREATE TABLE chat_requests (
-    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    sender_id UUID REFERENCES users(id) ON DELETE CASCADE,
-    receiver_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    request_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    sender_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
+    receiver_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
     request_type VARCHAR(20) DEFAULT 'normal' CHECK (request_type IN ('normal', 'anonymous')),
-    anonymous_identity_id UUID REFERENCES anonymous_identities(id) ON DELETE SET NULL,
+    anonymous_identity_id UUID REFERENCES anonymous_identities(identity_id) ON DELETE SET NULL,
     status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'rejected', 'blocked', 'expired')),
     expires_at TIMESTAMPTZ DEFAULT (NOW() + INTERVAL '24 hours'),
     created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -294,29 +290,25 @@ CREATE INDEX idx_chat_requests_sender ON chat_requests(sender_id);
 -- Core of anonymous system
 CREATE TABLE anonymous_identities (
     identity_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
-    target_user_id UUID REFERENCES users(id) ON DELETE CASCADE, -- NULL for group anonymous
-    conversation_id UUID REFERENCES chat_conversations(id) ON DELETE CASCADE,
-    group_id UUID REFERENCES groups(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
+    target_user_id UUID REFERENCES users(user_id) ON DELETE CASCADE, -- NULL for group anonymous
+    conversation_id UUID REFERENCES chat_conversations(conversation_id) ON DELETE CASCADE,
+    group_id UUID REFERENCES groups(group_id) ON DELETE CASCADE,
     
     -- Display info
     random_string VARCHAR(50) UNIQUE NOT NULL,
     display_gender VARCHAR(10) NOT NULL CHECK (display_gender IN ('male', 'female', 'other')),
-    display_year INTEGER NOT NULL CHECK (display_year BETWEEN 1 AND 4),
-    
+
     -- Metadata
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     last_used_at TIMESTAMPTZ DEFAULT NOW(),
     is_revealed BOOLEAN DEFAULT FALSE,
-    revealed_at TIMESTAMP WITH TIME ZONE,
+    revealed_at TIMESTAMPTZ,
     
-    -- Constraint: either target_user (1:1) OR group_id (group), not both
-    -- Optional and see if can avoid this constraint
     CONSTRAINT chk_anon_target CHECK (
         (target_user_id IS NOT NULL AND group_id IS NULL) OR
-        (target_user_id IS NULL AND group_id IS NOT NULL) OR
-        (target_user_id IS NULL AND group_id IS NULL AND conversation_id IS NOT NULL)
+        (target_user_id IS NULL AND group_id IS NOT NULL)
     )
 );
 
@@ -328,8 +320,8 @@ CREATE INDEX idx_anon_identities_group ON anonymous_identities(group_id);
 -- ========== USER_BLOCKS TABLE ==========
 CREATE TABLE user_blocks (
     block_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    blocker_id UUID REFERENCES users(id) ON DELETE CASCADE,
-    blocked_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    blocker_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
+    blocked_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
     block_type VARCHAR(20) DEFAULT 'permanent' CHECK (block_type IN ('permanent', 'temporary')),
     expires_at TIMESTAMPTZ,
     reason TEXT,
@@ -345,15 +337,14 @@ CREATE INDEX idx_user_blocks_blocked ON user_blocks(blocked_id);
 
 -- ========== GROUPS TABLE ==========
 CREATE TABLE groups (
-    grp_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    grp_name VARCHAR(100) NOT NULL,
-    grp_description TEXT,
-    grp_dp_url TEXT,
+    group_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    group_name VARCHAR(100) NOT NULL,
+    group_desc TEXT,
+    group_dp_url TEXT,
     is_public BOOLEAN DEFAULT TRUE,
     is_active BOOLEAN DEFAULT TRUE,
     max_members INTEGER DEFAULT 500,
-    current_member_count INTEGER DEFAULT 0,
-    created_by UUID REFERENCES users(id) ON DELETE CASCADE,
+    created_by UUID REFERENCES users(user_id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -363,16 +354,16 @@ CREATE INDEX idx_groups_creator ON groups(created_by);
 
 -- ========== GROUP_MEMBERS TABLE ==========
 CREATE TABLE group_members (
-    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    group_id UUID REFERENCES groups(id) ON DELETE CASCADE,
-    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    member_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    group_id UUID REFERENCES groups(group_id) ON DELETE CASCADE,
+    user_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
     is_admin BOOLEAN DEFAULT FALSE,
     is_owner BOOLEAN DEFAULT FALSE,
     
     -- Anonymous in group
     is_anonymous BOOLEAN DEFAULT FALSE,
     anonymous_display_name VARCHAR(50),
-    anonymous_identity_id UUID REFERENCES anonymous_identities(id) ON DELETE SET NULL,
+    anonymous_identity_id UUID REFERENCES anonymous_identities(identity_id) ON DELETE SET NULL,
     
     -- Permissions
     -- See if we can avoid the same
@@ -392,31 +383,34 @@ CREATE INDEX idx_group_members_admin ON group_members(group_id) WHERE is_admin =
 
 -- ========== GROUP_INVITES TABLE ==========
 CREATE TABLE group_invites (
-    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    group_id UUID REFERENCES groups(id) ON DELETE CASCADE,
-    invited_by UUID REFERENCES users(id) ON DELETE CASCADE,
-    invitee_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    invite_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    group_id UUID REFERENCES groups(group_id) ON DELETE CASCADE,
+    invited_by UUID REFERENCES users(user_id) ON DELETE CASCADE,
+    invitee_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
 
     -- these 2 can be avoided
     invite_token VARCHAR(255) UNIQUE,
     invite_type VARCHAR(20) DEFAULT 'private' CHECK (invite_type IN ('private', 'public_link')),
     
     status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'rejected', 'expired')),
-    expires_at TIMESTAMPTZ DEFAULT (NOW() + INTERVAL '7 days'),
+    expires_at TIMESTAMPTZ DEFAULT (NOW() + INTERVAL '30 days'),
     created_at TIMESTAMPTZ DEFAULT NOW(),
-    UNIQUE(group_id, invitee_id)
+    
+    UNIQUE(group_id, invitee_id) WHERE status = 'pending'
 );
 
-CREATE INDEX idx_group_invites_invitee ON group_invites(invitee_id, status);
-CREATE INDEX idx_group_invites_token ON group_invites(invite_token);
+CREATE INDEX IF NOT EXISTS idx_group_invites_invitee ON group_invites(invitee_id, status);
+CREATE INDEX IF NOT EXISTS idx_group_invites_group ON group_invites(group_id, status);
+CREATE INDEX IF NOT EXISTS idx_group_invites_inviter ON group_invites(invited_by);
+CREATE INDEX IF NOT EXISTS idx_group_invites_expires ON group_invites(expires_at);
 
 -- ========== GROUP_BANS TABLE ==========
 -- After poll kicks or manual bans
 CREATE TABLE group_bans (
     ban_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    group_id UUID REFERENCES groups(id) ON DELETE CASCADE,
-    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
-    banned_by UUID REFERENCES users(id) ON DELETE CASCADE,
+    group_id UUID REFERENCES groups(group_id) ON DELETE CASCADE,
+    user_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
+    banned_by UUID REFERENCES users(user_id) ON DELETE CASCADE,
     reason TEXT,
     expires_at TIMESTAMPTZ, -- NULL = permanent
     created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -432,10 +426,10 @@ CREATE INDEX idx_group_bans_user ON group_bans(user_id);
 
 -- ========== POLLS TABLE ==========
 CREATE TABLE polls (
-    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    group_id UUID REFERENCES groups(id) ON DELETE CASCADE,
-    created_by UUID REFERENCES users(id) ON DELETE CASCADE,
-    target_user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    poll_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    group_id UUID REFERENCES groups(group_id) ON DELETE CASCADE,
+    created_by UUID REFERENCES users(user_id) ON DELETE CASCADE,
+    target_user_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
     
     poll_type VARCHAR(20) NOT NULL CHECK (poll_type IN (
         'kick_member', 'make_admin', 'remove_admin', 
@@ -461,21 +455,20 @@ CREATE TABLE polls (
     executed_at TIMESTAMPTZ,
     
     -- For objection polls
-    parent_poll_id UUID REFERENCES polls(id) ON DELETE SET NULL,
+    parent_poll_id UUID REFERENCES polls(poll_id) ON DELETE SET NULL,
     objection_reason TEXT
 );
 
 CREATE INDEX idx_polls_group ON polls(group_id, status, expires_at);
 CREATE INDEX idx_polls_creator ON polls(created_by);
 CREATE INDEX idx_polls_target ON polls(target_user_id);
-CREATE INDEX idx_polls_expires ON polls(expires_at) WHERE status = 'active'; -- can be avoided
 
 -- ========== VOTES TABLE ==========
 CREATE TABLE votes (
-    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    poll_id UUID REFERENCES polls(id) ON DELETE CASCADE,
-    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
-    anonymous_identity_id UUID REFERENCES anonymous_identities(id) ON DELETE SET NULL,
+    vote_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    poll_id UUID REFERENCES polls(poll_id) ON DELETE CASCADE,
+    user_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
+    anonymous_identity_id UUID REFERENCES anonymous_identities(identity_id) ON DELETE SET NULL,
     vote_value BOOLEAN NOT NULL, -- TRUE = for, FALSE = against
     voted_at TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE(poll_id, user_id),
@@ -491,10 +484,10 @@ CREATE INDEX idx_votes_user ON votes(user_id);
 -- ========== MEDIA_UPLOADS TABLE ==========
 CREATE TABLE media_uploads (
     media_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
-    conversation_id UUID REFERENCES chat_conversations(id) ON DELETE CASCADE,
-    group_id UUID REFERENCES groups(id) ON DELETE CASCADE,
-    message_id UUID REFERENCES chat_messages(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
+    conversation_id UUID REFERENCES chat_conversations(conversation_id) ON DELETE CASCADE,
+    group_id UUID REFERENCES groups(group_id) ON DELETE CASCADE,
+    message_id UUID REFERENCES chat_messages(message_id) ON DELETE CASCADE,
     
     -- File info
     file_name VARCHAR(255) NOT NULL,
@@ -530,8 +523,8 @@ CREATE INDEX idx_media_uploads_message ON media_uploads(message_id);
 
 -- ========== AUDIT_LOGS TABLE ==========
 CREATE TABLE audit_logs (
-    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    log_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    user_id UUID REFERENCES users(user_id) ON DELETE SET NULL,
     action_type VARCHAR(50) NOT NULL,
     entity_type VARCHAR(50),
     entity_id UUID,
@@ -553,13 +546,13 @@ CREATE INDEX idx_audit_logs_created ON audit_logs(created_at DESC);
 -- ========== REPORTS TABLE ==========
 CREATE TABLE reports (
     report_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    reporter_user_id UUID REFERENCES users(id) ON DELETE CASCADE,
-    reported_user_id UUID REFERENCES users(id) ON DELETE CASCADE,
-    reported_group_id UUID REFERENCES groups(id) ON DELETE CASCADE,
-    reported_message_id UUID REFERENCES chat_messages(id) ON DELETE CASCADE,
+    reporter_user_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
+    reported_user_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
+    reported_group_id UUID REFERENCES groups(group_id) ON DELETE CASCADE,
+    reported_message_id UUID REFERENCES chat_messages(message_id) ON DELETE CASCADE,
     
     report_type VARCHAR(50) NOT NULL CHECK (report_type IN (
-        'spam', 'harassment', 'inappropriate_content', 
+        'spam', 'harassment', 'inappropriate_content', 'impersonating',
         'fake_profile', 'other'
     )),
     
@@ -567,20 +560,20 @@ CREATE TABLE reports (
     evidence_urls TEXT[],
     
     status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'reviewing', 'resolved', 'dismissed')),
-    resolved_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    resolved_by UUID REFERENCES users(user_id) ON DELETE SET NULL,
     resolution_notes TEXT,
     
     created_at TIMESTAMPTZ DEFAULT NOW(),
     resolved_at TIMESTAMPTZ
 );
 
-CREATE INDEX idx_reports_reporter ON reports(reporter_id);
+CREATE INDEX idx_reports_reporter ON reports(reporter_user_id);
 CREATE INDEX idx_reports_status ON reports(status);
 
 -- ========== SYSTEM_NOTIFICATIONS TABLE ==========
 CREATE TABLE system_notifications (
-    notifi_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    notification_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    user_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
     notification_type VARCHAR(50) NOT NULL CHECK (notification_type IN (
         'chat_request', 'group_invite', 'poll_created', 
         'vote_result', 'message', 'system_alert'
@@ -601,34 +594,18 @@ CREATE INDEX idx_notifications_user ON system_notifications(user_id, is_read, cr
 
 7. Encryption & Security
 
--- ========== USER_ENCRYPTION_KEYS TABLE ==========
-CREATE TABLE user_encryption_keys (  -- Only public keys stored
-    key_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    user_id UUID UNIQUE REFERENCES users(id) ON DELETE CASCADE,
-    
-    -- RSA keys for asymmetric encryption
-    public_key TEXT NOT NULL,
-    key_version INTEGER DEFAULT 1,
-    
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE INDEX idx_user_keys_user ON user_encryption_keys(user_id);
-
-
 -- ========= Chat Session Keys (AES keys per chat) ========
 CREATE TABLE chat_session_keys (
-    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    conversation_id UUID REFERENCES chat_conversations(id) ON DELETE CASCADE,
-    group_id UUID REFERENCES groups(id) ON DELETE CASCADE,
+    session_key_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    conversation_id UUID REFERENCES chat_conversations(conversation_id) ON DELETE CASCADE,
+    group_id UUID REFERENCES groups(group_id) ON DELETE CASCADE,
     
     -- Single AES key for this chat/group (encrypted for each member)
     aes_key_encrypted TEXT NOT NULL, -- Base64 encoded
     aes_key_iv VARCHAR(50) NOT NULL, -- IV for AES key encryption
     
     -- Who encrypted this key copy
-    encrypted_for_user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    encrypted_for_user_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
     encrypted_with_key_version INTEGER DEFAULT 1,
     
     created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -651,8 +628,8 @@ CREATE INDEX idx_chat_keys_user ON chat_session_keys(encrypted_for_user_id);
 
 -- ============= User Encryption Keys ===========
 CREATE TABLE user_encryption_keys (
-    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    user_id UUID UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+    user_encrypt_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    user_id UUID UNIQUE REFERENCES users(user_id) ON DELETE CASCADE,
     
     -- Only store public key (private key stays on client)
     public_key TEXT NOT NULL, -- RSA public key in PEM format
