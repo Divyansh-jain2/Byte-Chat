@@ -1,0 +1,765 @@
+import type { Request, Response } from 'express';
+import { pool } from '../lib/db.js';
+import { hashPassword, verifyPassword } from '../utils/password.util.js';
+import { generateAccessToken, generateRefreshToken } from '../utils/jwt.util.js';
+import { generateOTP, hashOTP, getOTPExpiry, generateRandomToken, hashToken } from '../utils/otp.util.js';
+import {
+  validateRollNumber,
+  constructRollNumber,
+  generateEmail,
+  validatePassword,
+  validateName,
+  validateBranch,
+  validate5DigitRoll
+} from '../utils/validation.util.js';
+import { sendOTPEmail } from '../utils/email.util.js';
+import type { SignupRequest, VerifyOTPRequest, LoginRequest, ForgotPasswordRequest, ResetPasswordRequest } from '../types/auth.types.js';
+import { config } from '../config/index.js';
+
+/**
+ * SIGNUP - Step 1: Create user and send OTP
+ */
+export async function signup(req: Request, res: Response) {
+  try {
+    const { degreeType, rollNumber, name, gender, branch, password } = req.body as SignupRequest;
+
+    // Validate inputs
+    if (!degreeType || !rollNumber || !name || !gender || !branch || !password) {
+      return res.status(400).json({
+        success: false,
+        message: 'All fields are required'
+      });
+    }
+
+    // Validate 5-digit roll number
+    if (!validate5DigitRoll(rollNumber)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Roll number must be 1-5 digits'
+      });
+    }
+
+    // Validate name
+    if (!validateName(name)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid name format'
+      });
+    }
+
+    // Validate branch
+    if (!validateBranch(branch)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid branch'
+      });
+    }
+
+    // Validate gender
+    if (!['male', 'female', 'other'].includes(gender)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid gender'
+      });
+    }
+
+    // Validate password
+    const passwordValidation = validatePassword(password);
+    if (!passwordValidation.valid) {
+      return res.status(400).json({
+        success: false,
+        message: passwordValidation.message
+      });
+    }
+
+    // Construct full roll number
+    const fullRollNo = constructRollNumber(degreeType, rollNumber);
+
+    // Check if user already exists (case-insensitive)
+    const existingUser = await pool.query(
+      'SELECT user_id FROM users WHERE UPPER(roll_no) = UPPER($1)',
+      [fullRollNo]
+    );
+
+    if (existingUser.rows.length > 0) {
+      return res.status(409).json({
+        success: false,
+        message: 'Roll number already registered'
+      });
+    }
+
+    // Hash password
+    const passwordHash = await hashPassword(password);
+
+    // Create user (unverified)
+    const newUser = await pool.query(
+      `INSERT INTO users (roll_no, name, gender, branch, password_hash, is_verified, is_active)
+       VALUES ($1, $2, $3, $4, $5, FALSE, FALSE)
+       RETURNING user_id`,
+      [fullRollNo, name, gender, branch, passwordHash]
+    );
+
+    const userId = newUser.rows[0].user_id;
+
+    // Generate OTP
+    const otp = generateOTP();
+    const expiresAt = getOTPExpiry();
+    const verificationToken = generateRandomToken();
+
+    // Store OTP in database
+    await pool.query(
+      `INSERT INTO user_verifications (user_id, otp_code, verification_token, verification_type, expires_at)
+       VALUES ($1, $2, $3, 'signup', $4)`,
+      [userId, otp, verificationToken, expiresAt]
+    );
+
+    // Generate email and send OTP
+    const email = generateEmail(fullRollNo);
+    const ipAddress = req.ip || req.socket.remoteAddress || 'unknown';
+    const emailSent = await sendOTPEmail({
+      to: email,
+      otp,
+      purpose: 'signup',
+      rollNo: fullRollNo,
+      ipAddress
+    });
+
+    if (!emailSent) {
+      // Rollback: delete user and verification
+      await pool.query('DELETE FROM user_verifications WHERE user_id = $1', [userId]);
+      await pool.query('DELETE FROM users WHERE user_id = $1', [userId]);
+
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to send verification email. Please try again.'
+      });
+    }
+
+    // Log audit event
+    try {
+      await pool.query(
+        `SELECT log_audit_event(
+          $1::UUID, $2, $3, $1::UUID, NULL,
+          jsonb_build_object('roll_no', $4::VARCHAR, 'branch', $5::VARCHAR),
+          $6::INET, $7::TEXT
+        )`,
+        [userId, 'signup_initiated', 'user', fullRollNo, branch, ipAddress || '0.0.0.0', req.get('user-agent') || 'unknown']
+      );
+    } catch (auditError) {
+      // Log audit errors don't block signup
+      console.error('Audit log error:', auditError);
+    }
+
+    return res.status(201).json({
+      success: true,
+      message: 'Account created. Please check your email for OTP.',
+      data: {
+        rollNo: fullRollNo,
+        email,
+        expiresIn: config.otp.expiryMinutes * 60
+      }
+    });
+
+  } catch (error) {
+    console.error('Signup error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+}
+
+/**
+ * SIGNUP - Step 2: Verify OTP
+ */
+export async function verifyOTP(req: Request, res: Response) {
+  try {
+    const { rollNo, otp, purpose } = req.body as VerifyOTPRequest;
+
+    // Validate inputs
+    if (!rollNo || !otp || !purpose) {
+      return res.status(400).json({
+        success: false,
+        message: 'Roll number, OTP, and purpose are required'
+      });
+    }
+
+    if (!validateRollNumber(rollNo)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid roll number format'
+      });
+    }
+
+    // Find user (case-insensitive)
+    const users = await pool.query(
+      'SELECT user_id, is_verified FROM users WHERE UPPER(roll_no) = UPPER($1)',
+      [rollNo]
+    );
+
+    if (users.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    const userId = users.rows[0].user_id;
+
+    // Find verification record
+    const verifications = await pool.query(
+      `SELECT verification_id, otp_code, expires_at
+       FROM user_verifications
+       WHERE user_id = $1
+         AND verification_type = $2
+         AND is_used = FALSE
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [userId, purpose]
+    );
+
+    if (verifications.rows.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid or expired OTP'
+      });
+    }
+
+    const verification = verifications.rows[0];
+
+    // Check if expired
+    if (new Date() > new Date(verification.expires_at)) {
+      await pool.query(
+        'UPDATE user_verifications SET is_used = TRUE WHERE verification_id = $1',
+        [verification.verification_id]
+      );
+
+      return res.status(400).json({
+        success: false,
+        message: 'OTP has expired'
+      });
+    }
+
+    // Verify OTP
+    if (verification.otp_code !== otp) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid OTP'
+      });
+    }
+
+    // Mark OTP as used
+    await pool.query(
+      'UPDATE user_verifications SET is_used = TRUE WHERE verification_id = $1',
+      [verification.verification_id]
+    );
+
+    // Update user as verified and active
+    await pool.query(
+      'UPDATE users SET is_verified = TRUE, is_active = TRUE, updated_at = NOW() WHERE user_id = $1',
+      [userId]
+    );
+
+    // Log audit event
+    const ipAddress = req.ip || req.socket.remoteAddress || 'unknown';
+    try {
+      await pool.query(
+        `SELECT log_audit_event(
+          $1::UUID, $2::VARCHAR, $3::VARCHAR, $1::UUID,
+          jsonb_build_object('is_verified', false),
+          jsonb_build_object('is_verified', true),
+          $4::INET, $5::TEXT
+        )`,
+        [userId, 'email_verified', 'user', ipAddress || '0.0.0.0', req.get('user-agent') || 'unknown']
+      );
+    } catch (auditError) {
+      console.error('Audit log error:', auditError);
+    }
+
+    // For signup, auto-login and return tokens
+    if (purpose === 'signup') {
+      const accessToken = generateAccessToken(userId, rollNo);
+      const refreshToken = generateRefreshToken(userId, rollNo);
+      const refreshTokenHash = hashToken(refreshToken);
+
+      // Store refresh token
+      await pool.query(
+        `INSERT INTO user_sessions (user_id, session_token, expires_at)
+         VALUES ($1, $2, NOW() + INTERVAL '7 days')`,
+        [userId, refreshTokenHash]
+      );
+
+      // Set refresh token as HTTP-only cookie
+      res.cookie('refreshToken', refreshToken, {
+        httpOnly: true,
+        secure: config.server.nodeEnv === 'production',
+        sameSite: 'strict',
+        maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+      });
+
+      // Get user details
+      const userDetails = await pool.query(
+        `SELECT user_id, roll_no, name, branch, gender, is_verified
+         FROM users
+         WHERE user_id = $1`,
+        [userId]
+      );
+
+      return res.status(200).json({
+        success: true,
+        message: 'Email verified successfully. You are now logged in.',
+        data: {
+          accessToken,
+          user: userDetails.rows[0]
+        }
+      });
+    }
+
+    // For password reset, return success
+    return res.status(200).json({
+      success: true,
+      message: 'OTP verified successfully'
+    });
+
+  } catch (error) {
+    console.error('Verify OTP error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+}
+
+/**
+ * LOGIN
+ */
+export async function login(req: Request, res: Response) {
+  try {
+    const { rollNo, password } = req.body as LoginRequest;
+
+    // Validate inputs
+    if (!rollNo || !password) {
+      return res.status(400).json({
+        success: false,
+        message: 'Roll number and password are required'
+      });
+    }
+
+    // Check if input is email or roll number
+    const isEmail = rollNo.includes('@');
+    let query: string;
+    let params: any[];
+
+    if (isEmail) {
+      // Login with email
+      query = `SELECT user_id, roll_no, name, branch, gender, is_verified, is_active, password_hash
+               FROM users
+               WHERE LOWER(email) = LOWER($1)`;
+      params = [rollNo];
+    } else {
+      // Login with roll number
+      if (!validateRollNumber(rollNo)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid roll number format'
+        });
+      }
+      query = `SELECT user_id, roll_no, name, branch, gender, is_verified, is_active, password_hash
+               FROM users
+               WHERE UPPER(roll_no) = UPPER($1)`;
+      params = [rollNo];
+    }
+
+    // Find user
+    const users = await pool.query(query, params);
+
+    if (users.rows.length === 0) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid credentials'
+      });
+    }
+
+    const user = users.rows[0];
+
+    // Check if account is active
+    if (!user.is_active) {
+      return res.status(403).json({
+        success: false,
+        message: 'Account is not active. Please verify your email.'
+      });
+    }
+
+    // Verify password
+    const isPasswordValid = await verifyPassword(user.password_hash, password);
+    const ipAddress = req.ip || req.socket.remoteAddress || 'unknown';
+
+    if (!isPasswordValid) {
+      // Log failed login attempt
+      try {
+        await pool.query(
+          `SELECT log_audit_event(
+            $1::UUID, $2::VARCHAR, $3::VARCHAR, $1::UUID, NULL,
+            jsonb_build_object('reason', 'invalid_password', 'roll_no', $4::VARCHAR),
+            $5::INET, $6::TEXT
+          )`,
+          [user.user_id, 'login_failed', 'user', user.roll_no, ipAddress || '0.0.0.0', req.get('user-agent') || 'unknown']
+        );
+      } catch (auditError) {
+        console.error('Audit log error:', auditError);
+      }
+
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid credentials'
+      });
+    }
+
+    // Update last_login
+    await pool.query(
+      'UPDATE users SET last_login = NOW() WHERE user_id = $1',
+      [user.user_id]
+    );
+
+    // Log successful login
+    try {
+      await pool.query(
+        `SELECT log_audit_event(
+          $1::UUID, $2::VARCHAR, $3::VARCHAR, $1::UUID, NULL,
+          jsonb_build_object('roll_no', $4::VARCHAR),
+          $5::INET, $6::TEXT
+        )`,
+        [user.user_id, 'login_success', 'user', rollNo, ipAddress || '0.0.0.0', req.get('user-agent') || 'unknown']
+      );
+    } catch (auditError) {
+      console.error('Audit log error:', auditError);
+    }
+
+    // Generate tokens
+    const accessToken = generateAccessToken(user.user_id, user.roll_no);
+    const refreshToken = generateRefreshToken(user.user_id, user.roll_no);
+    const refreshTokenHash = hashToken(refreshToken);
+
+    // Store refresh token
+    await pool.query(
+      `INSERT INTO user_sessions (user_id, session_token, expires_at)
+       VALUES ($1, $2, NOW() + INTERVAL '7 days')`,
+      [user.user_id, refreshTokenHash]
+    );
+
+    // Set refresh token as HTTP-only cookie
+    res.cookie('refreshToken', refreshToken, {
+      httpOnly: true,
+      secure: config.server.nodeEnv === 'production',
+      sameSite: 'strict',
+      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Login successful',
+      data: {
+        accessToken,
+        user: {
+          userId: user.user_id,
+          rollNo: user.roll_no,
+          name: user.name,
+          branch: user.branch,
+          gender: user.gender,
+          isVerified: user.is_verified
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Login error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+}
+
+/**
+ * FORGOT PASSWORD - Step 1: Send OTP
+ */
+export async function forgotPassword(req: Request, res: Response) {
+  try {
+    const { rollNo } = req.body as ForgotPasswordRequest;
+
+    if (!rollNo) {
+      return res.status(400).json({
+        success: false,
+        message: 'Roll number is required'
+      });
+    }
+
+    if (!validateRollNumber(rollNo)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid roll number format'
+      });
+    }
+
+    // Find user (case-insensitive)
+    const users = await pool.query(
+      'SELECT user_id, is_active FROM users WHERE UPPER(roll_no) = UPPER($1)',
+      [rollNo]
+    );
+
+    if (users.rows.length === 0 || !users.rows[0].is_active) {
+      // Don't reveal if user exists
+      return res.status(200).json({
+        success: true,
+        message: 'If the account exists, an OTP has been generated.'
+      });
+    }
+
+    const user = users.rows[0];
+
+    // Generate OTP
+    const otp = generateOTP();
+    const expiresAt = getOTPExpiry();
+
+    // Store OTP
+    await pool.query(
+      `INSERT INTO user_password_resets (user_id, reset_token, expires_at)
+       VALUES ($1, $2, $3)`,
+      [user.user_id, otp, expiresAt]
+    );
+
+    // Send OTP email
+    const email = generateEmail(rollNo);
+    const ipAddress = req.ip || req.socket.remoteAddress || 'unknown';
+    const emailSent = await sendOTPEmail({
+      to: email,
+      otp,
+      purpose: 'password_reset',
+      rollNo,
+      ipAddress
+    });
+
+    if (!emailSent) {
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to send reset email. Please try again.'
+      });
+    }
+
+    // Log audit event
+    try {
+      await pool.query(
+        `SELECT log_audit_event(
+          $1::UUID, $2::VARCHAR, $3::VARCHAR, $1::UUID, NULL,
+          jsonb_build_object('roll_no', $4::VARCHAR),
+          $5::INET, $6::TEXT
+        )`,
+        [user.user_id, 'password_reset_requested', 'user', rollNo, ipAddress || '0.0.0.0', req.get('user-agent') || 'unknown']
+      );
+    } catch (auditError) {
+      console.error('Audit log error:', auditError);
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'OTP sent to your registered email.',
+      data: {
+        rollNo,
+        email,
+        expiresIn: config.otp.expiryMinutes * 60
+      }
+    });
+
+  } catch (error) {
+    console.error('Forgot password error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+}
+
+/**
+ * RESET PASSWORD - Step 2: Reset with OTP
+ */
+export async function resetPassword(req: Request, res: Response) {
+  try {
+    const { rollNo, otp, newPassword } = req.body;
+
+    if (!rollNo || !otp || !newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: 'All fields are required'
+      });
+    }
+
+    // Validate password
+    const passwordValidation = validatePassword(newPassword);
+    if (!passwordValidation.valid) {
+      return res.status(400).json({
+        success: false,
+        message: passwordValidation.message
+      });
+    }
+
+    // Find user (case-insensitive)
+    const users = await pool.query(
+      'SELECT user_id FROM users WHERE UPPER(roll_no) = UPPER($1)',
+      [rollNo]
+    );
+
+    if (users.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    const userId = users.rows[0].user_id;
+
+    // Verify OTP
+    const resets = await pool.query(
+      `SELECT reset_id, reset_token, expires_at
+       FROM user_password_resets
+       WHERE user_id = $1
+         AND is_used = FALSE
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [userId]
+    );
+
+    if (resets.rows.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid or expired OTP'
+      });
+    }
+
+    const reset = resets.rows[0];
+
+    // Check expiry
+    if (new Date() > new Date(reset.expires_at)) {
+      return res.status(400).json({
+        success: false,
+        message: 'OTP has expired'
+      });
+    }
+
+    // Verify OTP
+    if (reset.reset_token !== otp) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid OTP'
+      });
+    }
+
+    // Hash new password
+    const newPasswordHash = await hashPassword(newPassword);
+
+    // Update password
+    await pool.query(
+      'UPDATE users SET password_hash = $1, updated_at = NOW() WHERE user_id = $2',
+      [newPasswordHash, userId]
+    );
+
+    // Mark OTP as used
+    await pool.query(
+      'UPDATE user_password_resets SET is_used = TRUE WHERE reset_id = $1',
+      [reset.reset_id]
+    );
+
+    // Invalidate all sessions (force re-login)
+    await pool.query(
+      'DELETE FROM user_sessions WHERE user_id = $1',
+      [userId]
+    );
+
+    // Log audit event
+    const ipAddress = req.ip || req.socket.remoteAddress || 'unknown';
+    try {
+      await pool.query(
+        `SELECT log_audit_event(
+          $1::UUID, $2::VARCHAR, $3::VARCHAR, $1::UUID, NULL,
+          jsonb_build_object('roll_no', $4::VARCHAR, 'sessions_invalidated', true),
+          $5::INET, $6::TEXT
+        )`,
+        [userId, 'password_reset_completed', 'user', rollNo, ipAddress || '0.0.0.0', req.get('user-agent') || 'unknown']
+      );
+    } catch (auditError) {
+      console.error('Audit log error:', auditError);
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Password reset successful. Please login with your new password.'
+    });
+
+  } catch (error) {
+    console.error('Reset password error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+}
+
+/**
+ * LOGOUT
+ */
+export async function logout(req: Request, res: Response) {
+  try {
+    const refreshToken = req.cookies.refreshToken;
+    let userId = null;
+
+    if (refreshToken) {
+      const tokenHash = hashToken(refreshToken);
+      
+      // Get user_id before deleting session
+      const session = await pool.query(
+        'SELECT user_id FROM user_sessions WHERE session_token = $1',
+        [tokenHash]
+      );
+
+      if (session.rows.length > 0) {
+        userId = session.rows[0].user_id;
+      }
+
+      // Delete session
+      await pool.query(
+        'DELETE FROM user_sessions WHERE session_token = $1',
+        [tokenHash]
+      );
+
+      // Log audit event
+      if (userId) {
+        const ipAddress = req.ip || req.socket.remoteAddress || 'unknown';
+        try {
+          await pool.query(
+            `SELECT log_audit_event(
+              $1::UUID, $2::VARCHAR, $3::VARCHAR, $1::UUID, NULL, NULL,
+              $4::INET, $5::TEXT
+            )`,
+            [userId, 'logout', 'user', ipAddress || '0.0.0.0', req.get('user-agent') || 'unknown']
+          );
+        } catch (auditError) {
+          console.error('Audit log error:', auditError);
+        }
+      }
+    }
+
+    // Clear cookie
+    res.clearCookie('refreshToken');
+
+    return res.status(200).json({
+      success: true,
+      message: 'Logout successful'
+    });
+
+  } catch (error) {
+    console.error('Logout error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+}

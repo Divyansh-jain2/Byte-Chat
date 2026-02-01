@@ -1,0 +1,232 @@
+import { pool } from '../lib/db.js';
+import { ApiError } from '../utils/error.util.js';
+import type { Request, Response, NextFunction } from 'express';
+
+export const settingsController = {
+  // Get user settings
+  async getSettings(req: Request, res: Response, next: NextFunction) {
+    try {
+      if (!req.user) {
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
+      const userId = req.user.userId;
+
+      const result = await pool.query(
+        `SELECT 
+          theme, email_notifications, notification_enabled,
+          privacy_profile_public, privacy_show_online_status,
+          privacy_allow_anonymous_chats
+         FROM user_settings 
+         WHERE user_id = $1`,
+        [userId]
+      );
+
+      // If no settings exist, return defaults
+      const settings = result.rows.length > 0 ? result.rows[0] : {
+        theme: 'light',
+        email_notifications: true,
+        notification_enabled: true,
+        privacy_profile_public: true,
+        privacy_show_online_status: true,
+        privacy_allow_anonymous_chats: true
+      };
+
+      res.json({
+        success: true,
+        data: settings
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  // Update user settings
+  async updateSettings(req: Request, res: Response, next: NextFunction) {
+    try {
+      if (!req.user) {
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
+      const userId = req.user.userId;
+      const {
+        theme,
+        email_notifications,
+        notification_enabled,
+        privacy_profile_public,
+        privacy_show_online_status,
+        privacy_allow_anonymous_chats
+      } = req.body;
+
+      // Upsert settings
+      const result = await pool.query(
+        `INSERT INTO user_settings (
+          user_id, theme, email_notifications, notification_enabled,
+          privacy_profile_public, privacy_show_online_status, privacy_allow_anonymous_chats
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        ON CONFLICT (user_id) 
+        DO UPDATE SET
+          theme = COALESCE($2, user_settings.theme),
+          email_notifications = COALESCE($3, user_settings.email_notifications),
+          notification_enabled = COALESCE($4, user_settings.notification_enabled),
+          privacy_profile_public = COALESCE($5, user_settings.privacy_profile_public),
+          privacy_show_online_status = COALESCE($6, user_settings.privacy_show_online_status),
+          privacy_allow_anonymous_chats = COALESCE($7, user_settings.privacy_allow_anonymous_chats),
+          updated_at = NOW()
+        RETURNING *`,
+        [userId, theme, email_notifications, notification_enabled, privacy_profile_public, privacy_show_online_status, privacy_allow_anonymous_chats]
+      );
+
+      res.json({
+        success: true,
+        message: 'Settings updated successfully',
+        data: result.rows[0]
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  // Get blocked users
+  async getBlockedUsers(req: Request, res: Response, next: NextFunction) {
+    try {
+      const userId = req.user?.userId;
+
+      const result = await pool.query(
+        `SELECT 
+          ub.blocker_id, ub.blocked_id, ub.reason, ub.created_at, ub.expires_at,
+          u.roll_no, u.name, u.dp_url
+         FROM user_blocks ub
+         JOIN users u ON ub.blocked_id = u.user_id
+         WHERE ub.blocker_id = $1
+         AND (ub.expires_at IS NULL OR ub.expires_at > NOW())
+         ORDER BY ub.created_at DESC`,
+        [userId]
+      );
+
+      res.json({
+        success: true,
+        data: result.rows
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  // Block a user
+  async blockUser(req: Request, res: Response, next: NextFunction) {
+    try {
+      const userId = req.user?.userId;
+      const { blockedUserId } = req.params;
+      const { reason, expiresAt } = req.body;
+
+      if (userId === blockedUserId) {
+        throw new ApiError(400, 'Cannot block yourself');
+      }
+
+      // Check if user exists
+      const userCheck = await pool.query(
+        'SELECT user_id FROM users WHERE user_id = $1',
+        [blockedUserId]
+      );
+
+      if (userCheck.rows.length === 0) {
+        throw new ApiError(404, 'User not found');
+      }
+
+      const result = await pool.query(
+        `INSERT INTO user_blocks (blocker_id, blocked_id, reason, expires_at)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (blocker_id, blocked_id) 
+         DO UPDATE SET 
+           reason = $3,
+           expires_at = $4,
+           created_at = NOW()
+         RETURNING *`,
+        [userId, blockedUserId, reason, expiresAt]
+      );
+
+      res.json({
+        success: true,
+        message: 'User blocked successfully',
+        data: result.rows[0]
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  // Unblock a user
+  async unblockUser(req: Request, res: Response, next: NextFunction) {
+    try {
+      const userId = req.user?.userId;
+      const { blockedUserId } = req.params;
+
+      const result = await pool.query(
+        'DELETE FROM user_blocks WHERE blocker_id = $1 AND blocked_id = $2 RETURNING *',
+        [userId, blockedUserId]
+      );
+
+      if (result.rows.length === 0) {
+        throw new ApiError(404, 'Block not found');
+      }
+
+      res.json({
+        success: true,
+        message: 'User unblocked successfully'
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  // Delete account
+  async deleteAccount(req: Request, res: Response, next: NextFunction) {
+    try {
+      const userId = req.user?.userId;
+      const { password } = req.body;
+
+      if (!password) {
+        throw new ApiError(400, 'Password is required to delete account');
+      }
+
+      // Verify password
+      const userResult = await pool.query(
+        'SELECT password_hash FROM users WHERE user_id = $1',
+        [userId]
+      );
+
+      if (userResult.rows.length === 0) {
+        throw new ApiError(404, 'User not found');
+      }
+
+      const { verifyPassword } = await import('../utils/password.util.js');
+      const isValid = await verifyPassword(userResult.rows[0].password_hash, password);
+
+      if (!isValid) {
+        throw new ApiError(401, 'Invalid password');
+      }
+
+      // Soft delete - deactivate account
+      await pool.query(
+        `UPDATE users 
+         SET is_active = FALSE, 
+             updated_at = NOW()
+         WHERE user_id = $1`,
+        [userId]
+      );
+
+      // Invalidate all sessions
+      await pool.query(
+        'DELETE FROM user_sessions WHERE user_id = $1',
+        [userId]
+      );
+
+      res.json({
+        success: true,
+        message: 'Account deleted successfully'
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+};

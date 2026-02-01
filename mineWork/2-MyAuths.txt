@@ -1,4 +1,6 @@
 
+=========== Done ================
+
 1. Authentication and Authorization
     Registration and Email Verification
     Login + Logout
