@@ -12,5 +12,6 @@ frontend/.env
 .env
 frontend/.next/
 
+backend/dist/
 
 
