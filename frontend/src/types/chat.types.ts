@@ -54,6 +54,7 @@ export interface MessageSender {
 export interface Message {
   message_id: string;
   conversation_id?: string;
+  group_id?: string;
   sender_id: string;
   sender_name: string;
   sender_gender: string;
@@ -73,4 +74,21 @@ export interface Message {
   read_at?: Date;
   created_at: Date;
   updated_at: Date;
+}
+
+export interface Group {
+  group_id: string;
+  group_name: string;
+  group_desc?: string;
+  group_dp_url?: string;
+  is_public: boolean;
+  max_members: number;
+  created_at: Date;
+  updated_at: Date;
+  creator_name?: string;
+  creator_roll_no?: string;
+  member_count: number;
+  is_member?: boolean;
+  user_is_admin?: boolean;
+  user_is_owner?: boolean;
 }

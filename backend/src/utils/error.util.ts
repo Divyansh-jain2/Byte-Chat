@@ -18,7 +18,10 @@ export const errorHandler = (err: any, req: Request, res: Response, next: NextFu
   const message = err.message || 'Internal server error';
 
   // Log error for debugging (in production, use proper logger)
-  console.error(`[ERROR] ${statusCode} - ${message}`);
+  // Don't log 403 errors - they're expected for access control checks
+  if (statusCode !== 403) {
+    console.error(`[ERROR] ${statusCode} - ${message}`);
+  }
   if (statusCode === 500) {
     console.error(err.stack);
   }
@@ -28,4 +31,10 @@ export const errorHandler = (err: any, req: Request, res: Response, next: NextFu
     message,
     ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
   });
+};
+
+export const asyncHandler = (fn: Function) => {
+  return (req: any, res: any, next: any) => {
+    Promise.resolve(fn(req, res, next)).catch(next);
+  };
 };

@@ -13,6 +13,7 @@ import anonymousRoutes from './routes/anonymous.routes.js';
 import settingsRoutes from './routes/settings.routes.js';
 import chatRoutes from './routes/chat.routes.js';
 import anonymousChatRoutes from './routes/anonymous-chat.routes.js';
+import groupRoutes from './routes/group.routes.js';
 import { errorHandler } from './utils/error.util.js';
 import { initializeSocket } from './socket/index.js';
 
@@ -56,6 +57,7 @@ app.use('/api/anonymous', anonymousRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/anonymous-chat', anonymousChatRoutes); // Separate anonymous chat routes
+app.use('/api/groups', groupRoutes); // Group routes
 
 // Health check
 app.get('/health', (req: Request, res: Response) => {

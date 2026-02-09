@@ -39,10 +39,10 @@ export async function sendOTPEmail({
       ? getSignupEmailHTML(otp, rollNo, ipAddress)
       : getPasswordResetEmailHTML(otp, rollNo, ipAddress);
 
-    console.log('📧 Attempting to send email via Gmail SMTP:');
-    console.log('   To:', to);
-    console.log('   From:', config.email.gmailUser);
-    console.log('   Subject:', subject);
+    // console.log('📧 Attempting to send email via Gmail SMTP:');
+    // console.log('   To:', to);
+    // console.log('   From:', config.email.gmailUser);
+    // console.log('   Subject:', subject);
 
     const info = await transporter.sendMail({
       from: `"BYTE-CHAT - IIT Mandi" <${config.email.gmailUser}>`,
@@ -51,7 +51,7 @@ export async function sendOTPEmail({
       html: htmlContent
     });
 
-    console.log('✅ Email sent successfully:', info.messageId);
+    // console.log('✅ Email sent successfully:', info.messageId);
     return true;
   } catch (error) {
     console.error('❌ Email send error:', error);

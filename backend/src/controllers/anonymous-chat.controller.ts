@@ -47,7 +47,7 @@ export async function createAnonymousConversation(req: Request, res: Response) {
     const user1Id = userId < otherUserId ? userId : otherUserId;
     const user2Id = userId < otherUserId ? otherUserId : userId;
 
-    console.log(`🎭 Creating/finding anonymous conversation: User ${userId} → User ${otherUserId}`);
+    // console.log(`🎭 Creating/finding anonymous conversation: User ${userId} → User ${otherUserId}`);
     
     // Get user's gender
     const userInfo = await pool.query(
@@ -67,7 +67,7 @@ export async function createAnonymousConversation(req: Request, res: Response) {
 
     if (existingAnonIdentity.rows.length > 0) {
       anonymousIdentityId = existingAnonIdentity.rows[0].identity_id;
-      console.log(`✓ Using existing anonymous identity: ${anonymousIdentityId}`);
+      // console.log(`✓ Using existing anonymous identity: ${anonymousIdentityId}`);
     } else {
       // Create new anonymous identity
       const anonIdentity = await pool.query(
@@ -82,11 +82,11 @@ export async function createAnonymousConversation(req: Request, res: Response) {
         ]
       );
       anonymousIdentityId = anonIdentity.rows[0].identity_id;
-      console.log(`✓ Created new anonymous identity: ${anonymousIdentityId}`);
+      // console.log(`✓ Created new anonymous identity: ${anonymousIdentityId}`);
     }
 
     // Check if conversation exists with this specific anonymous initiator
-    console.log(`🔍 Checking for conversation with initiator: ${anonymousIdentityId}`);
+    // console.log(`🔍 Checking for conversation with initiator: ${anonymousIdentityId}`);
     let conversation = await pool.query(
       `SELECT * FROM chat_conversations 
        WHERE user1_id = $1 AND user2_id = $2 AND anonymous_initiator_id = $3`,
@@ -95,7 +95,7 @@ export async function createAnonymousConversation(req: Request, res: Response) {
 
     // If conversation doesn't exist, create it
     if (!conversation || conversation.rows.length === 0) {
-      console.log(`📝 Creating NEW anonymous conversation`);
+      // console.log(`📝 Creating NEW anonymous conversation`);
       
       try {
         // Create new conversation
@@ -106,7 +106,7 @@ export async function createAnonymousConversation(req: Request, res: Response) {
           [user1Id, user2Id, anonymousIdentityId]
         );
 
-        console.log(`✅ NEW anonymous conversation created: ${conversation.rows[0].conversation_id}`);
+        // console.log(`✅ NEW anonymous conversation created: ${conversation.rows[0].conversation_id}`);
 
         // Update anonymous identity with conversation_id
         await pool.query(
@@ -118,7 +118,7 @@ export async function createAnonymousConversation(req: Request, res: Response) {
       } catch (insertError: any) {
         // Handle race condition - another request created it first
         if (insertError.code === '23505') {
-          console.log(`⚠️ Race condition detected - fetching existing anonymous conversation`);
+          // console.log(`⚠️ Race condition detected - fetching existing anonymous conversation`);
           
           conversation = await pool.query(
             `SELECT * FROM chat_conversations 
@@ -126,21 +126,21 @@ export async function createAnonymousConversation(req: Request, res: Response) {
             [user1Id, user2Id, anonymousIdentityId]
           );
           
-          console.log(`✓ Fetched conversation after race condition: ${conversation.rows[0]?.conversation_id}`);
+          // console.log(`✓ Fetched conversation after race condition: ${conversation.rows[0]?.conversation_id}`);
         } else {
           throw insertError;
         }
       }
     } else {
-      console.log(`✓ Found existing anonymous conversation: ${conversation.rows[0].conversation_id}`);
+      // console.log(`✓ Found existing anonymous conversation: ${conversation.rows[0].conversation_id}`);
     }
 
-    console.log(`✅ Anonymous conversation created/retrieved:`, {
-      conversationId: conversation.rows[0].conversation_id,
-      anonymousInitiatorId: anonymousIdentityId,
-      user1Id,
-      user2Id
-    });
+    // console.log(`✅ Anonymous conversation created/retrieved:`, {
+    //   conversationId: conversation.rows[0].conversation_id,
+    //   anonymousInitiatorId: anonymousIdentityId,
+    //   user1Id,
+    //   user2Id
+    // });
 
     res.status(200).json({
       success: true,
@@ -237,7 +237,7 @@ export async function getAnonymousConversations(req: Request, res: Response) {
       [userId]
     );
 
-    console.log(`🎭 Fetched ${result.rows.length} anonymous conversations for user ${userId}`);
+    // console.log(`🎭 Fetched ${result.rows.length} anonymous conversations for user ${userId}`);
 
     res.json({
       success: true,
@@ -300,11 +300,11 @@ export async function getAnonymousMessages(req: Request, res: Response) {
           dp_url: null,
           is_anonymous: true
         };
-        console.log(`🎭 Receiver viewing anonymous sender:`, {
-          anonString: anonIdentity.rows[0].random_string,
-          gender: anonIdentity.rows[0].display_gender,
-          anonymousInitiatorId: conversation.anonymous_initiator_id
-        });
+        // console.log(`🎭 Receiver viewing anonymous sender:`, {
+        //   anonString: anonIdentity.rows[0].random_string,
+        //   gender: anonIdentity.rows[0].display_gender,
+        //   anonymousInitiatorId: conversation.anonymous_initiator_id
+        // });
       } else {
         // Initiator (sender) sees real profile
         const otherUserInfo = await pool.query(
@@ -315,10 +315,10 @@ export async function getAnonymousMessages(req: Request, res: Response) {
           ...otherUserInfo.rows[0],
           is_anonymous: false
         };
-        console.log(`🎭 Sender viewing receiver (real profile):`, {
-          name: otherUserInfo.rows[0].name,
-          roll_no: otherUserInfo.rows[0].roll_no
-        });
+        // console.log(`🎭 Sender viewing receiver (real profile):`, {
+        //   name: otherUserInfo.rows[0].name,
+        //   roll_no: otherUserInfo.rows[0].roll_no
+        // });
       }
     }
 
@@ -430,7 +430,7 @@ export async function sendAnonymousMessage(req: Request, res: Response) {
 
     if (anonResult.rows.length === 0) {
       // Receiver doesn't have an identity yet - create one
-      console.log(`🎭 Creating anonymous identity for receiver in conversation ${conversationId}`);
+      // console.log(`🎭 Creating anonymous identity for receiver in conversation ${conversationId}`);
       
       // Get user's gender
       const userInfo = await pool.query(
@@ -456,7 +456,7 @@ export async function sendAnonymousMessage(req: Request, res: Response) {
       );
       
       anonymousIdentityId = newIdentity.rows[0].identity_id;
-      console.log(`✓ Created anonymous identity for receiver: ${anonymousIdentityId}`);
+      // console.log(`✓ Created anonymous identity for receiver: ${anonymousIdentityId}`);
     } else {
       anonymousIdentityId = anonResult.rows[0].identity_id;
     }
@@ -531,7 +531,7 @@ export async function sendAnonymousMessage(req: Request, res: Response) {
       });
     }
 
-    console.log(`🎭 Anonymous message sent in conversation ${conversationId}`);
+    // console.log(`🎭 Anonymous message sent in conversation ${conversationId}`);
 
     res.status(201).json({
       success: true,
@@ -611,7 +611,7 @@ export async function revealAnonymousIdentity(req: Request, res: Response) {
       conversationId
     });
 
-    console.log(`🎭 Identity revealed in conversation ${conversationId} by user ${userId}`);
+    // console.log(`🎭 Identity revealed in conversation ${conversationId} by user ${userId}`);
 
     res.json({
       success: true,

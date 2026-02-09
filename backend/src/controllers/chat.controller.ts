@@ -47,7 +47,7 @@ export async function getOrCreateConversation(req: Request, res: Response) {
     const user1Id = userId < otherUserId ? userId : otherUserId;
     const user2Id = userId < otherUserId ? otherUserId : userId;
 
-    console.log(`💬 Creating/finding regular conversation between User ${userId} and User ${otherUserId}`);
+    // console.log(`💬 Creating/finding regular conversation between User ${userId} and User ${otherUserId}`);
     
     // Check for existing regular conversation (no anonymous initiator)
     let conversation = await pool.query(
@@ -58,7 +58,7 @@ export async function getOrCreateConversation(req: Request, res: Response) {
 
     // If conversation doesn't exist, create it
     if (!conversation || conversation.rows.length === 0) {
-      console.log(`📝 Creating NEW regular conversation`);
+      // console.log(`📝 Creating NEW regular conversation`);
       
       try {
         // Create new regular conversation
@@ -69,11 +69,11 @@ export async function getOrCreateConversation(req: Request, res: Response) {
           [user1Id, user2Id]
         );
 
-        console.log(`✅ NEW regular conversation created: ${conversation.rows[0].conversation_id}`);
+        // console.log(`✅ NEW regular conversation created: ${conversation.rows[0].conversation_id}`);
       } catch (insertError: any) {
         // Handle race condition - another request created it first
         if (insertError.code === '23505') {
-          console.log(`⚠️ Race condition detected - fetching existing regular conversation`);
+          // console.log(`⚠️ Race condition detected - fetching existing regular conversation`);
           
           // Fetch the conversation that was just created by the other request
           conversation = await pool.query(
@@ -82,21 +82,21 @@ export async function getOrCreateConversation(req: Request, res: Response) {
             [user1Id, user2Id]
           );
           
-          console.log(`✓ Fetched conversation after race condition: ${conversation.rows[0]?.conversation_id}`);
+          // console.log(`✓ Fetched conversation after race condition: ${conversation.rows[0]?.conversation_id}`);
         } else {
           // Re-throw if it's not a duplicate key error
           throw insertError;
         }
       }
     } else {
-      console.log(`✓ Found existing regular conversation: ${conversation.rows[0].conversation_id}`);
+      // console.log(`✓ Found existing regular conversation: ${conversation.rows[0].conversation_id}`);
     }
 
-    console.log(`✅ Regular conversation created/retrieved:`, {
-      conversationId: conversation.rows[0].conversation_id,
-      user1Id,
-      user2Id
-    });
+    // console.log(`✅ Regular conversation created/retrieved:`, {
+    //   conversationId: conversation.rows[0].conversation_id,
+    //   user1Id,
+    //   user2Id
+    // });
 
     res.status(200).json({
       success: true,
@@ -320,7 +320,7 @@ export async function getConversations(req: Request, res: Response) {
       [userId]
     );
 
-    console.log(`💬 Fetched ${result.rows.length} regular conversations for user ${userId}`);
+    // console.log(`💬 Fetched ${result.rows.length} regular conversations for user ${userId}`);
 
     res.json({
       success: true,
@@ -373,10 +373,10 @@ export async function getMessages(req: Request, res: Response) {
       is_anonymous: false
     };
     
-    console.log(`💬 Regular chat - both see real profiles:`, {
-      name: otherUserInfo.rows[0].name,
-      roll_no: otherUserInfo.rows[0].roll_no
-    });
+    // console.log(`💬 Regular chat - both see real profiles:`, {
+    //   name: otherUserInfo.rows[0].name,
+    //   roll_no: otherUserInfo.rows[0].roll_no
+    // });
 
     // Get messages with real sender info
     const result = await pool.query(
@@ -413,7 +413,12 @@ export async function getMessages(req: Request, res: Response) {
       }
     });
   } catch (error) {
-    console.error('💬 Get regular messages error:', error);
+    // Don't log 403 errors as errors - they're expected when checking if conversation is anonymous
+    if (error instanceof ApiError && error.statusCode === 403) {
+      // Silent - this is expected when frontend checks regular vs anonymous
+    } else {
+      console.error('💬 Get regular messages error:', error);
+    }
     if (error instanceof ApiError) throw error;
     throw new ApiError(500, 'Failed to fetch regular messages');
   }
@@ -522,7 +527,7 @@ export async function sendMessage(req: Request, res: Response) {
       });
     }
 
-    console.log(`💬 Regular message sent in conversation ${conversationId}`);
+    // console.log(`💬 Regular message sent in conversation ${conversationId}`);
 
     res.status(201).json({
       success: true,

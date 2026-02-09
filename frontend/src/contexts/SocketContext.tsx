@@ -8,6 +8,8 @@ interface SocketContextType {
   isConnected: boolean;
   joinConversation: (conversationId: string) => void;
   leaveConversation: (conversationId: string) => void;
+  joinGroup: (groupId: string) => void;
+  leaveGroup: (groupId: string) => void;
   sendTyping: (conversationId: string, isTyping: boolean) => void;
 }
 
@@ -16,6 +18,8 @@ const SocketContext = createContext<SocketContextType>({
   isConnected: false,
   joinConversation: () => {},
   leaveConversation: () => {},
+  joinGroup: () => {},
+  leaveGroup: () => {},
   sendTyping: () => {},
 });
 
@@ -75,6 +79,18 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const joinGroup = (groupId: string) => {
+    if (socket && isConnected) {
+      socket.emit('join-group', groupId);
+    }
+  };
+
+  const leaveGroup = (groupId: string) => {
+    if (socket && isConnected) {
+      socket.emit('leave-group', groupId);
+    }
+  };
+
   const sendTyping = (conversationId: string, isTyping: boolean) => {
     if (socket && isConnected) {
       socket.emit('typing', { conversationId, isTyping });
@@ -88,6 +104,8 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
         isConnected,
         joinConversation,
         leaveConversation,
+        joinGroup,
+        leaveGroup,
         sendTyping,
       }}
     >

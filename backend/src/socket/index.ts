@@ -47,7 +47,7 @@ export function initializeSocket(httpServer: HTTPServer) {
 
   io.on('connection', (socket) => {
     const userId = socket.data.userId;
-    console.log(`User ${userId} connected with socket ${socket.id}`);
+    // console.log(`User ${userId} connected with socket ${socket.id}`);
 
     // Track user's socket connections
     if (!userSockets.has(userId)) {
@@ -62,13 +62,25 @@ export function initializeSocket(httpServer: HTTPServer) {
     // Handle joining conversation rooms
     socket.on('join-conversation', (conversationId: string) => {
       socket.join(`conversation:${conversationId}`);
-      console.log(`User ${userId} joined conversation ${conversationId}`);
+      // console.log(`User ${userId} joined conversation ${conversationId}`);
     });
 
     // Handle leaving conversation rooms
     socket.on('leave-conversation', (conversationId: string) => {
       socket.leave(`conversation:${conversationId}`);
-      console.log(`User ${userId} left conversation ${conversationId}`);
+      // console.log(`User ${userId} left conversation ${conversationId}`);
+    });
+
+    // Handle joining group rooms
+    socket.on('join-group', (groupId: string) => {
+      socket.join(`group:${groupId}`);
+      // console.log(`User ${userId} joined group ${groupId}`);
+    });
+
+    // Handle leaving group rooms
+    socket.on('leave-group', (groupId: string) => {
+      socket.leave(`group:${groupId}`);
+      // console.log(`User ${userId} left group ${groupId}`);
     });
 
     // Handle typing indicator
@@ -91,7 +103,7 @@ export function initializeSocket(httpServer: HTTPServer) {
 
     // Handle disconnection
     socket.on('disconnect', () => {
-      console.log(`User ${userId} disconnected from socket ${socket.id}`);
+      // console.log(`User ${userId} disconnected from socket ${socket.id}`);
       
       // Remove socket from tracking
       const userSocketSet = userSockets.get(userId);

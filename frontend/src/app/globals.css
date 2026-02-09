@@ -1,15 +1,15 @@
 @import "tailwindcss";
 
-/* Light mode variables */
+/* Light mode variables - Minimal grayscale */
 :root {
-  --background: #ffffff;
+  --background: #fafafa;
   --foreground: #0a0a0a;
 }
 
-/* Dark mode variables */
+/* Dark mode variables - Deep blacks with white accents */
 .dark {
   --background: #0a0a0a;
-  --foreground: #ededed;
+  --foreground: #fafafa;
 }
 
 @theme inline {
@@ -20,48 +20,65 @@
 }
 
 body {
-  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family: 'Courier New', Courier, monospace, ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Monaco, 'Cascadia Mono', 'Segoe UI Mono', 'Roboto Mono', 'Oxygen Mono', 'Ubuntu Monospace', 'Source Code Pro', 'Fira Mono', 'Droid Sans Mono', 'Courier New', monospace;
 }
 
-/* Custom scrollbar */
+/* Custom scrollbar - Blocky */
 ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 12px;
+  height: 12px;
 }
 
 ::-webkit-scrollbar-track {
-  background: rgba(0, 0, 0, 0.05);
+  background: #f5f5f5;
 }
 
 .dark ::-webkit-scrollbar-track {
-  background: rgba(255, 255, 255, 0.05);
+  background: #171717;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(99, 102, 241, 0.3);
-  border-radius: 5px;
+  background: #0a0a0a;
+  border: 2px solid #f5f5f5;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(99, 102, 241, 0.5);
+  background: #262626;
 }
 
 .dark ::-webkit-scrollbar-thumb {
-  background: rgba(99, 102, 241, 0.5);
+  background: #fafafa;
+  border: 2px solid #171717;
 }
 
 .dark ::-webkit-scrollbar-thumb:hover {
-  background: rgba(99, 102, 241, 0.7);
+  background: #d4d4d4;
 }
 
-/* Smooth transitions for theme changes */
+/* Disable smooth transitions for blocky theme */
 * {
-  transition-property: background-color, border-color, color;
-  transition-duration: 200ms;
+  transition-property: none;
+}
+
+/* Allow specific transitions for interactive elements */
+button, a, input, select, textarea {
+  transition-property: background-color, border-color, box-shadow, transform;
+  transition-duration: 150ms;
   transition-timing-function: ease-in-out;
 }
 
-/* Disable transitions for elements that shouldn't animate */
-input, textarea, select, button {
-  transition-property: none;
+/* Blocky selection */
+::selection {
+  background: #0a0a0a;
+  color: #fafafa;
+}
+
+.dark ::selection {
+  background: #fafafa;
+  color: #0a0a0a;
+}
+
+/* Remove rounded corners globally for blocky feel */
+button, input, select, textarea {
+  border-radius: 0 !important;
 }
