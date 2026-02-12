@@ -41,9 +41,9 @@ const developers: Developer[] = [
   },
   {
     id: 3,
-    name: 'Anamkika',
+    name: 'Anamika',
     role: 'Database Engineer',
-    avatar: 'https://ui-avatars.com/api/?name=Anamkika&background=10b981&color=fff&size=200&bold=true',
+    avatar: 'https://ui-avatars.com/api/?name=Anamika&background=10b981&color=fff&size=200&bold=true',
     bio: 'Designing and optimizing database schemas for optimal performance. Managing data models, writing efficient queries, and ensuring data integrity across the platform.',
     email: 'b23428@students.iitmandi.ac.in',
     expertise: ['PostgreSQL', 'Database Design', 'Query Optimization', 'Data Modeling', 'Supabase'],
@@ -254,8 +254,8 @@ export default function ContactPage() {
                   <FiGithub className="text-purple-300 mt-1 flex-shrink-0 text-xl" />
                   <div>
                     <p className="font-semibold text-white">Contribute on GitHub</p>
-                    <a href="https://github.com/willdo" target="_blank" rel="noopener noreferrer" className="text-purple-300 hover:text-purple-200 underline transition-colors">
-                      github.com/willdo
+                    <a href="https://github.com/dummy" target="_blank" rel="noopener noreferrer" className="text-purple-300 hover:text-purple-200 underline transition-colors">
+                      github.com/dummy
                     </a>
                   </div>
                 </div>
