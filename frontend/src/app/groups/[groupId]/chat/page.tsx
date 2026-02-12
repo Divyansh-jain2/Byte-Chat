@@ -5,7 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { groupService } from '@/services/group.service';
 import { useSocket } from '@/contexts/SocketContext';
-import type { Message } from '@/types/chat.types';
+import type { Message, Poll } from '@/types/chat.types';
 
 interface GroupMessage extends Message {
   sender?: {
@@ -24,12 +24,15 @@ export default function GroupChatPage() {
   const { socket, isConnected, joinGroup, leaveGroup } = useSocket();
 
   const [messages, setMessages] = useState<GroupMessage[]>([]);
+  const [polls, setPolls] = useState<Poll[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
+  const [showCreatePoll, setShowCreatePoll] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+      fetchPolls();
     if (groupId) {
       fetchMessages();
 
@@ -59,9 +62,21 @@ export default function GroupChatPage() {
     };
 
     socket.on('new-group-message', handleNewGroupMessage);
+const handleNewPoll = (poll: Poll) => {
+      setPolls((prev) => [poll, ...prev]);
+    };
+
+    const handlePollUpdated = (poll: Poll) => {
+      setPolls((prev) => prev.map(p => p.poll_id === poll.poll_id ? poll : p));
+    };
+
+    socket.on('new-poll', handleNewPoll);
+    socket.on('poll-updated', handlePollUpdated);
 
     return () => {
       socket.off('new-group-message', handleNewGroupMessage);
+      socket.off('new-poll', handleNewPoll);
+      socket.off('poll-updated', handlePollUpdated);
     };
   }, [socket]);
 
@@ -73,6 +88,26 @@ export default function GroupChatPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
+
+  const fetchPolls = async () => {
+    try {
+      const response = await groupService.getGroupPolls(groupId, 'active');
+      if (response.success && response.data) {
+        setPolls(response.data);
+      }
+    } catch (error: any) {
+      console.error('Failed to fetch polls:', error);
+    }
+  };
+
+  const handleVote = async (pollId: string, voteValue: boolean) => {
+    try {
+      await groupService.voteOnPoll(groupId, pollId, voteValue);
+      fetchPolls();
+    } catch (error: any) {
+      alert(error.message || 'Failed to vote');
+    }
+  };
   const fetchMessages = async () => {
     try {
       const response = await groupService.getGroupMessages(groupId);
@@ -88,61 +123,161 @@ export default function GroupChatPage() {
     }
   };
 
-  const handleSendMessage = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newMessage.trim() || sending) return;
+const handleSendMessage = async (e: React.FormEvent) => {
+  e.preventDefault();
+  if (!newMessage.trim() || sending) return;
 
-    try {
-      setSending(true);
-      await groupService.sendGroupMessage(groupId, {
-        encryptedContent: newMessage,
-        contentIv: 'dummy_iv',
-        contentAuthTag: 'dummy_tag',
-        messageType: 'text'
-      });
-      setNewMessage('');
-    } catch (error: any) {
-      alert(error.message || 'Failed to send message');
-    } finally {
-      setSending(false);
-    }
-  };
+  try {
+    setSending(true);
+    await groupService.sendGroupMessage(groupId, {
+      encryptedContent: newMessage,
+      contentIv: 'dummy_iv',
+      contentAuthTag: 'dummy_tag',
+      messageType: 'text'
+    });
+    setNewMessage('');
+  } catch (error: any) {
+    alert(error.message || 'Failed to send message');
+  } finally {
+    setSending(false);
+  }
+};
 
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-neutral-50 dark:bg-neutral-950">
-        <div className="text-center">
-          <div className="w-16 h-16 border-4 border-neutral-300 dark:border-neutral-700 border-t-neutral-900 dark:border-t-neutral-100 rounded-sm animate-spin mx-auto mb-4"></div>
-          <p className="text-neutral-600 dark:text-neutral-400 font-mono">LOADING...</p>
+if (loading) {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-neutral-50 dark:bg-neutral-950">
+      <div className="text-center">
+        <div className="w-16 h-16 border-4 border-neutral-300 dark:border-neutral-700 border-t-neutral-900 dark:border-t-neutral-100 rounded-sm animate-spin mx-auto mb-4"></div>
+        <p className="text-neutral-600 dark:text-neutral-400 font-mono">LOADING...</p>
+      </div>
+    </div>
+  );
+}
+
+return (
+  <div className="min-h-screen bg-neutral-50 dark:bg-neutral-950 flex flex-col">
+    <header className="border-b-4 border-neutral-900 dark:border-neutral-100 bg-white dark:bg-black p-4">
+      <div className="max-w-5xl mx-auto flex items-center justify-between">
+        <h1 className="text-2xl font-bold text-neutral-900 dark:text-neutral-100 font-mono">[GROUP CHAT]</h1>
+        <div className="flex gap-2">
+          <Link
+            href={`/groups/${groupId}`}
+            className="px-4 py-2 bg-neutral-200 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 font-mono font-bold border-2 border-neutral-900 dark:border-neutral-100 hover:bg-neutral-300 dark:hover:bg-neutral-700 transition-colors"
+          >
+            VIEW GROUP
+          </Link>
+          <Link
+            href="/dashboard"
+            className="px-4 py-2 bg-neutral-200 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 font-mono font-bold border-2 border-neutral-900 dark:border-neutral-100 hover:bg-neutral-300 dark:hover:bg-neutral-700 transition-colors"
+          >
+            BACK
+          </Link>
         </div>
       </div>
-    );
-  }
+    </header>
 
-  return (
-    <div className="min-h-screen bg-neutral-50 dark:bg-neutral-950 flex flex-col">
-      <header className="border-b-4 border-neutral-900 dark:border-neutral-100 bg-white dark:bg-black p-4">
-        <div className="max-w-5xl mx-auto flex items-center justify-between">
-          <h1 className="text-2xl font-bold text-neutral-900 dark:text-neutral-100 font-mono">[GROUP CHAT]</h1>
-          <div className="flex gap-2">
-            <Link
-              href={`/groups/${groupId}`}
-              className="px-4 py-2 bg-neutral-200 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 font-mono font-bold border-2 border-neutral-900 dark:border-neutral-100 hover:bg-neutral-300 dark:hover:bg-neutral-700 transition-colors"
-            >
-              VIEW GROUP
-            </Link>
-            <Link
-              href="/dashboard"
-              className="px-4 py-2 bg-neutral-200 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 font-mono font-bold border-2 border-neutral-900 dark:border-neutral-100 hover:bg-neutral-300 dark:hover:bg-neutral-700 transition-colors"
-            >
-              BACK
-            </Link>
+    <main className="flex-1 max-w-5xl mx-auto w-full p-4">
+      <div className="mb-4 flex gap-2">
+        <button
+          onClick={() => setShowCreatePoll(!showCreatePoll)}
+          className="px-4 py-2 bg-blue-600 dark:bg-blue-500 text-white font-mono font-bold border-2 border-neutral-900 dark:border-neutral-100 hover:bg-blue-700 transition-colors"
+        >
+          {showCreatePoll ? 'HIDE POLL' : '+ POLL'}
+        </button>
+      </div>
+
+      {/* Create Poll Form */}
+      {showCreatePoll && <QuickPollForm groupId={groupId} onSuccess={() => { setShowCreatePoll(false); fetchPolls(); }} />}
+
+      {/* Active Polls Section */}
+      <div className="bg-white dark:bg-black border-4 border-neutral-900 dark:border-neutral-100 p-4 mb-4">
+        {polls.length > 0 && (
+            <div className="mb-6 space-y-3">
+              {polls.map((poll) => (
+                <div key={poll.poll_id} className="bg-blue-50 dark:bg-blue-950 border-2 border-blue-600 dark:border-blue-400 p-3">
+                  <div className="flex items-start gap-2 mb-2">
+                    <span className="text-lg">📊</span>
+                    <div className="flex-1">
+                      <h4 className="font-bold text-neutral-900 dark:text-neutral-100 font-mono text-sm">
+                        {poll.title}
+                      </h4>
+                      {poll.description && (
+                        <p className="text-xs text-neutral-600 dark:text-neutral-400 font-mono mt-1">
+                          {poll.description}
+                        </p>
+                      )}
+                    </div>
+                    <span className={`px-2 py-0.5 text-xs font-mono font-bold border border-neutral-900 dark:border-neutral-100 ${
+                      poll.status === 'active' ? 'bg-green-200 text-green-900' :
+                      poll.status === 'passed' ? 'bg-blue-200 text-blue-900' :
+                      'bg-red-200 text-red-900'
+                    }`}>
+                      {poll.status.toUpperCase()}
+                    </span>
+                  </div>
+
+                  {/* Vote Progress */}
+                  <div className="my-2">
+                    <div className="h-3 border border-neutral-900 dark:border-neutral-100 flex overflow-hidden">
+                      <div 
+                        className="bg-green-500"
+                        style={{ width: `${(poll.votes_for / poll.total_voters) * 100}%` }}
+                      />
+                      <div 
+                        className="bg-red-500"
+                        style={{ width: `${(poll.votes_against / poll.total_voters) * 100}%` }}
+                        />
+                    </div>
+              </div>
+
+              <div className="flex justify-between text-xs font-mono mt-1">
+                <span className="text-green-700 dark:text-green-300">FOR: {poll.votes_for}</span>
+                <span className="text-neutral-600 dark:text-neutral-400">
+                  {poll.votes_for + poll.votes_against}/{poll.total_voters}
+                </span>
+                <span className="text-red-700 dark:text-red-300">AGAINST: {poll.votes_against}</span>
+              </div>
+              
+            {showCreatePoll && <QuickPollForm groupId={groupId} onSuccess={() => { setShowCreatePoll(false); fetchPolls(); }} />}
+
+            {/* Vote Buttons */}
+            {poll.status === 'active' && (
+              <div className="flex gap-2 mt-2">
+                <button
+                  onClick={() => handleVote(poll.poll_id, true)}
+                  disabled={poll.has_voted && poll.user_vote === true}
+                  className={`flex-1 px-3 py-1 text-xs font-mono font-bold border border-neutral-900 dark:border-neutral-100 ${
+                    poll.has_voted && poll.user_vote === true
+                      ? 'bg-green-600 text-white cursor-default'
+                      : 'bg-green-200 text-green-900 hover:bg-green-300'
+                  }`}
+                >
+                  ✓ FOR
+                </button>
+                <button
+                  onClick={() => handleVote(poll.poll_id, false)}
+                  disabled={poll.has_voted && poll.user_vote === false}
+                  className={`flex-1 px-3 py-1 text-xs font-mono font-bold border border-neutral-900 dark:border-neutral-100 ${
+                    poll.has_voted && poll.user_vote === false
+                      ? 'bg-red-600 text-white cursor-default'
+                      : 'bg-red-200 text-red-900 hover:bg-red-300'
+                  }`}
+                >
+                  ✗ AGAINST
+                </button>
+              </div>
+            )}
+            <div className="text-xs text-neutral-500 dark:text-neutral-400 font-mono mt-1">
+              Expires: {new Date(poll.expires_at).toLocaleString()}
+            </div>
           </div>
-        </div>
-      </header>
+        ))}
+      </div>
+    )}
+  </div>
 
-      <main className="flex-1 max-w-5xl mx-auto w-full p-4">
-        <div className="bg-white dark:bg-black border-4 border-neutral-900 dark:border-neutral-100 p-4 h-[70vh] overflow-y-auto">
+  {/* Messages */}
+  <div className="bg-white dark:bg-black border-4 border-neutral-900 dark:border-neutral-100 p-4 h-[70vh] overflow-y-auto mt-4">
           {messages.length === 0 ? (
             <div className="text-center text-neutral-500 dark:text-neutral-400 font-mono mt-10">
               No messages yet. Start the conversation!
@@ -184,5 +319,73 @@ export default function GroupChatPage() {
         </form>
       </main>
     </div>
+  );
+}
+
+// Quick Poll Form Component
+function QuickPollForm({ groupId, onSuccess }: { groupId: string; onSuccess: () => void }) {
+  const [formData, setFormData] = useState({
+    poll_type: 'kick_member',
+    title: '',
+    expires_in_hours: 24
+  });
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      await groupService.createPoll(groupId, formData);
+      onSuccess();
+      setFormData({ poll_type: 'kick_member', title: '', expires_in_hours: 24 });
+    } catch (error: any) {
+      alert(error.message || 'Failed to create poll');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="bg-blue-50 dark:bg-blue-950 border-2 border-blue-600 dark:border-blue-400 p-3 mb-4">
+      <h3 className="font-bold text-neutral-900 dark:text-neutral-100 font-mono text-sm mb-3">CREATE POLL</h3>
+      <div className="space-y-2">
+        <input
+          type="text"
+          required
+          value={formData.title}
+          onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+          placeholder="Poll question..."
+          className="w-full px-3 py-2 border border-neutral-900 dark:border-neutral-100 bg-white dark:bg-black text-neutral-900 dark:text-neutral-100 font-mono text-sm focus:outline-none"
+        />
+        <div className="flex gap-2">
+          <select
+            value={formData.poll_type}
+            onChange={(e) => setFormData({ ...formData, poll_type: e.target.value })}
+            className="flex-1 px-3 py-2 border border-neutral-900 dark:border-neutral-100 bg-white dark:bg-black text-neutral-900 dark:text-neutral-100 font-mono text-sm"
+          >
+            <option value="kick_member">Kick Member</option>
+            <option value="make_admin">Make Admin</option>
+            <option value="remove_admin">Remove Admin</option>
+            <option value="change_group_name">Change Name</option>
+          </select>
+          <input
+            type="number"
+            min={1}
+            max={168}
+            value={formData.expires_in_hours}
+            onChange={(e) => setFormData({ ...formData, expires_in_hours: parseInt(e.target.value) })}
+            className="w-20 px-3 py-2 border border-neutral-900 dark:border-neutral-100 bg-white dark:bg-black text-neutral-900 dark:text-neutral-100 font-mono text-sm"
+            placeholder="hrs"
+          />
+          <button
+            type="submit"
+            disabled={loading}
+            className="px-4 py-2 bg-blue-600 text-white font-mono font-bold border border-neutral-900 dark:border-neutral-100 hover:bg-blue-700 disabled:opacity-50 text-sm"
+          >
+            {loading ? '...' : 'POST'}
+          </button>
+        </div>
+      </div>
+    </form>
   );
 }

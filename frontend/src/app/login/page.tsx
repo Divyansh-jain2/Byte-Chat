@@ -205,6 +205,32 @@ export default function LoginPage() {
             </Link>
           </div>
         </div>
+
+        {/* Footer Links */}
+        <div className="mt-6 pt-4 text-center border-t border-gray-200 dark:border-gray-700">
+          <div className="flex items-center justify-center gap-3 text-xs text-gray-500 dark:text-gray-400">
+            <Link 
+              href="/terms" 
+              className="hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
+            >
+              Terms & Conditions
+            </Link>
+            <span>•</span>
+            <Link 
+              href="/privacy" 
+              className="hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
+            >
+              Privacy Policy
+            </Link>
+            <span>•</span>
+            <Link 
+              href="/contact" 
+              className="hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
+            >
+              Contact Developers
+            </Link>
+          </div>
+        </div>
       </div>
     </div>
   );

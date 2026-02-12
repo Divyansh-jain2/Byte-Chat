@@ -92,3 +92,41 @@ export interface Group {
   user_is_admin?: boolean;
   user_is_owner?: boolean;
 }
+
+export interface Poll {
+  poll_id: string;
+  group_id: string;
+  created_by: string;
+  creator_name?: string;
+  creator_roll_no?: string;
+  target_user_id?: string;
+  target_name?: string;
+  target_roll_no?: string;
+  poll_type: 'kick_member' | 'make_admin' | 'remove_admin' | 'change_group_name' | 'object_removal';
+  title: string;
+  description?: string;
+  votes_required: number;
+  votes_for: number;
+  votes_against: number;
+  total_voters: number;
+  status: 'active' | 'passed' | 'failed' | 'cancelled' | 'expired';
+  is_executed: boolean;
+  created_at: Date;
+  updated_at: Date;
+  expires_at: Date;
+  executed_at?: Date;
+  has_voted?: boolean;
+  user_vote?: boolean; // true = for, false = against
+}
+
+export interface CreatePollData {
+  poll_type: Poll['poll_type'];
+  title: string;
+  description?: string;
+  target_user_id?: string;
+  expires_in_hours?: number;
+}
+
+export interface VoteData {
+  vote_value: boolean; // true = for/yes, false = against/no
+}

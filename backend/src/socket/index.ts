@@ -83,6 +83,15 @@ export function initializeSocket(httpServer: HTTPServer) {
       // console.log(`User ${userId} left group ${groupId}`);
     });
 
+    // Handle poll vote in group (for real-time updates)
+    socket.on('poll-vote', ({ groupId, pollId, vote }: { groupId: string; pollId: string; vote: boolean }) => {
+      socket.to(`group:${groupId}`).emit('poll-vote-cast', {
+        pollId,
+        userId,
+        vote
+      });
+    });
+
     // Handle typing indicator
     socket.on('typing', ({ conversationId, isTyping }: { conversationId: string; isTyping: boolean }) => {
       socket.to(`conversation:${conversationId}`).emit('user-typing', {
@@ -128,6 +137,11 @@ export function emitToUser(io: SocketServer, userId: string, event: string, data
 // Helper function to emit to conversation
 export function emitToConversation(io: SocketServer, conversationId: string, event: string, data: any) {
   io.to(`conversation:${conversationId}`).emit(event, data);
+}
+
+// Helper function to emit to group
+export function emitToGroup(io: SocketServer, groupId: string, event: string, data: any) {
+  io.to(`group:${groupId}`).emit(event, data);
 }
 
 // Check if user is online

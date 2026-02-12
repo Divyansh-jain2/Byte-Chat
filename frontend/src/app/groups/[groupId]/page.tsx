@@ -4,6 +4,9 @@ import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
 import { groupService } from '@/services/group.service';
+import GroupImageManager from '@/components/GroupImageManager';
+
+
 
 interface GroupMember {
   member_id: string;
@@ -67,10 +70,12 @@ export default function GroupDetailsPage() {
           }
         }
       }
-    } catch (error: any) {
+    }
+    catch (error: any) {
       console.error('Failed to fetch group data:', error);
       setError(error.message || 'Failed to load group');
-    } finally {
+    }
+    finally {
       setLoading(false);
     }
   };
@@ -79,7 +84,8 @@ export default function GroupDetailsPage() {
     try {
       await groupService.joinGroup(groupId, isAnonymous);
       fetchGroupData();
-    } catch (error: any) {
+    } 
+    catch (error: any) {
       alert(error.message || 'Failed to join group');
     }
   };
@@ -92,7 +98,8 @@ export default function GroupDetailsPage() {
     try {
       await groupService.leaveGroup(groupId);
       router.push('/dashboard');
-    } catch (error: any) {
+    } 
+    catch (error: any) {
       alert(error.message || 'Failed to leave group');
     }
   };
@@ -412,14 +419,18 @@ function EditGroupModal({
 
           <div>
             <label className="block text-sm font-bold text-neutral-900 dark:text-neutral-100 mb-2 font-mono">
-              GROUP DISPLAY PICTURE URL
+              GROUP DISPLAY PICTURE
             </label>
-            <input
-              type="url"
-              value={formData.group_dp_url}
-              onChange={(e) => setFormData({ ...formData, group_dp_url: e.target.value })}
-              className="w-full px-4 py-2 border-2 border-neutral-900 dark:border-neutral-100 bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 font-mono focus:outline-none focus:ring-4 focus:ring-neutral-400"
-              placeholder="https://..."
+            <GroupImageManager
+              groupId={group.group_id}
+              isAdmin={group.user_is_admin || group.user_is_owner}
+              currentImageUrl={formData.group_dp_url || undefined}
+              onUploadSuccess={(url: string) => {
+                setFormData({ ...formData, group_dp_url: url });
+              }}
+              onDeleteSuccess={() => {
+                setFormData({ ...formData, group_dp_url: '' });
+              }}
             />
           </div>
 
@@ -462,3 +473,5 @@ function EditGroupModal({
     </div>
   );
 }
+
+

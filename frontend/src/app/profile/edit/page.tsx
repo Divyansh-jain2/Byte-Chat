@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import ProfileImageManager from '@/components/ProfileImageManager';
 
 interface UserProfile {
   user_id: string;
@@ -429,22 +430,26 @@ export default function ProfileEditPage() {
                 </div>
 
                 <div>
-                  <label htmlFor="dpUrl" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Profile Picture URL
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+                    Profile Picture
                   </label>
-                  <input
-                    type="url"
-                    id="dpUrl"
-                    value={dpUrl}
-                    onChange={(e) => setDpUrl(e.target.value)}
-                    className="mt-1 block w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                    placeholder="https://example.com/avatar.jpg"
+                  <ProfileImageManager
+                    currentImageUrl={profile?.dp_url || undefined}
+                    onUploadSuccess={(url: string) => {
+                      setDpUrl(url);
+                      if (profile) {
+                        setProfile({ ...profile, dp_url: url });
+                      }
+                      setMessage({ type: 'success', text: 'Profile picture updated successfully!' });
+                    }}
+                    onDeleteSuccess={() => {
+                      setDpUrl('');
+                      if (profile) {
+                        setProfile({ ...profile, dp_url: null });
+                      }
+                      setMessage({ type: 'success', text: 'Profile picture removed successfully!' });
+                    }}
                   />
-                  {dpUrl && (
-                    <div className="mt-2">
-                      <img src={dpUrl} alt="Profile Preview" className="w-24 h-24 rounded-full object-cover" />
-                    </div>
-                  )}
                 </div>
 
                 <button

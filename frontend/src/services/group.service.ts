@@ -273,4 +273,75 @@ export const groupService = {
 
     return response.json();
   },
+
+  // Create a poll (admins only)
+  createPoll: async (groupId: string, pollData: {
+    poll_type: string;
+    title: string;
+    description?: string;
+    target_user_id?: string;
+    expires_in_hours?: number;
+  }) => {
+    const token = localStorage.getItem('accessToken');
+    const response = await fetch(`${API_URL}/${groupId}/polls`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': token ? `Bearer ${token}` : '',
+      },
+      credentials: 'include',
+      body: JSON.stringify(pollData),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message || 'Failed to create poll');
+    }
+
+    return response.json();
+  },
+
+  // Get group polls
+  getGroupPolls: async (groupId: string, status: string = 'active') => {
+    const token = localStorage.getItem('accessToken');
+    const url = new URL(`${API_URL}/${groupId}/polls`);
+    if (status && status !== 'all') {
+      url.searchParams.set('status', status);
+    }
+
+    const response = await fetch(url.toString(), {
+      headers: {
+        'Authorization': token ? `Bearer ${token}` : '',
+      },
+      credentials: 'include',
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message || 'Failed to fetch polls');
+    }
+
+    return response.json();
+  },
+
+  // Vote on a poll
+  voteOnPoll: async (groupId: string, pollId: string, voteValue: boolean) => {
+    const token = localStorage.getItem('accessToken');
+    const response = await fetch(`${API_URL}/${groupId}/polls/${pollId}/vote`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': token ? `Bearer ${token}` : '',
+      },
+      credentials: 'include',
+      body: JSON.stringify({ vote_value: voteValue }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message || 'Failed to vote on poll');
+    }
+
+    return response.json();
+  },
 };

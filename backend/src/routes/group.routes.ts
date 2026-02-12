@@ -12,7 +12,14 @@ import {
   updateGroup,
   promoteMemberToAdmin,
   getGroupMessages,
-  sendGroupMessage
+  sendGroupMessage,
+  createPoll,
+  getGroupPolls,
+  voteOnPoll,
+  uploadGroupPicture,
+  deleteGroupPicture,
+  selectGroupPresetAvatar,
+  uploadGroup
 } from '../controllers/group.controller.js';
 import { authenticateToken } from '../middleware/auth.middleware.js';
 import { asyncHandler } from '../utils/error.util.js';
@@ -37,6 +44,11 @@ router.get('/:groupId', asyncHandler(getGroupDetails));
 // Update group details (for admins)
 router.put('/:groupId', asyncHandler(updateGroup));
 
+// Upload/delete group picture (for admins)
+router.post('/:groupId/upload-picture', uploadGroup.single('image'), asyncHandler(uploadGroupPicture));
+router.post('/:groupId/select-avatar', asyncHandler(selectGroupPresetAvatar));
+router.delete('/:groupId/delete-picture', asyncHandler(deleteGroupPicture));
+
 // Join a public group
 router.post('/:groupId/join', asyncHandler(joinGroup));
 
@@ -58,5 +70,10 @@ router.delete('/:groupId/members/:memberId', asyncHandler(removeMemberFromGroup)
 
 // Promote member to admin (for owners)
 router.post('/:groupId/members/:memberId/promote', asyncHandler(promoteMemberToAdmin));
+
+// Polls
+router.post('/:groupId/polls', asyncHandler(createPoll));
+router.get('/:groupId/polls', asyncHandler(getGroupPolls));
+router.post('/:groupId/polls/:pollId/vote', asyncHandler(voteOnPoll));
 
 export default router;

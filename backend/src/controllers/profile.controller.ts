@@ -1,6 +1,9 @@
 import { pool } from '../lib/db.js';
 import { ApiError } from '../utils/error.util.js';
+import { uploadToCloudinary, deleteFromCloudinary, extractPublicId, getDefaultAvatar } from '../utils/cloudinary.util.js';
+import { getAvatarUrl, isValidPresetAvatar, getRandomAvatar } from '../utils/avatar.util.js';
 import type { Request, Response, NextFunction } from 'express';
+import multer from 'multer';
 
 export const profileController = {
   // Get current user's profile
@@ -317,5 +320,210 @@ export const profileController = {
     } catch (error) {
       next(error);
     }
+  },
+
+  // Upload profile picture
+  async uploadProfilePicture(req: Request, res: Response, next: NextFunction) {
+    try {
+      if (!req.user) {
+        return res.status(401).json({ 
+          error: 'Unauthorized' 
+        });
+      }
+
+      if (!req.file) {
+        throw new ApiError(400, 'No image file provided');
+      }
+
+      const userId = req.user.userId;
+
+      // Get current user data
+      const userResult = await pool.query(
+        'SELECT dp_url, gender FROM users WHERE user_id = $1',
+        [userId]
+      );
+
+      if (userResult.rows.length === 0) {
+        throw new ApiError(404, 'User not found');
+      }
+
+      const currentDpUrl = userResult.rows[0].dp_url;
+
+      // Delete old image from Cloudinary if exists
+      if (currentDpUrl) {
+        const publicId = extractPublicId(currentDpUrl);
+        if (publicId) {
+          await deleteFromCloudinary(publicId);
+        }
+      }
+
+      // Upload new image to Cloudinary
+      const uploadResult = await uploadToCloudinary(
+        req.file.buffer,
+        'profile_pictures',
+        `user_${userId}_${Date.now()}`
+      );
+
+      // Update database with new image URL
+      const updateResult = await pool.query(
+        `UPDATE users 
+         SET dp_url = $1, updated_at = NOW()
+         WHERE user_id = $2
+         RETURNING user_id, roll_no, name, gender, branch, dp_url, dob, bio, updated_at`,
+        [uploadResult.secure_url, userId]
+      );
+
+      res.json({
+        success: true,
+        message: 'Profile picture uploaded successfully',
+        data: {
+          user: updateResult.rows[0],
+          imageUrl: uploadResult.secure_url
+        }
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  // Delete profile picture (set to default)
+  async deleteProfilePicture(req: Request, res: Response, next: NextFunction) {
+    try {
+      if (!req.user) {
+        return res.status(401).json({ 
+          error: 'Unauthorized' 
+        });
+      }
+
+      const userId = req.user.userId;
+
+      // Get current user data
+      const userResult = await pool.query(
+        'SELECT dp_url, gender FROM users WHERE user_id = $1',
+        [userId]
+      );
+
+      if (userResult.rows.length === 0) {
+        throw new ApiError(404, 'User not found');
+      }
+
+      const { dp_url: currentDpUrl, gender } = userResult.rows[0];
+
+      // Delete old image from Cloudinary if exists
+      if (currentDpUrl) {
+        const publicId = extractPublicId(currentDpUrl);
+        if (publicId) {
+          await deleteFromCloudinary(publicId);
+        }
+      }
+
+      // Set to default avatar based on gender
+      const defaultAvatar = getDefaultAvatar(gender);
+
+      // Update database with default avatar
+      const updateResult = await pool.query(
+        `UPDATE users 
+         SET dp_url = $1, updated_at = NOW()
+         WHERE user_id = $2
+         RETURNING user_id, roll_no, name, gender, branch, dp_url, dob, bio, updated_at`,
+        [defaultAvatar, userId]
+      );
+
+      res.json({
+        success: true,
+        message: 'Profile picture deleted and set to default',
+        data: {
+          user: updateResult.rows[0],
+          imageUrl: defaultAvatar
+        }
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  // Select preset avatar
+  async selectPresetAvatar(req: Request, res: Response, next: NextFunction) {
+    try {
+      if (!req.user) {
+        return res.status(401).json({ 
+          error: 'Unauthorized' 
+        });
+      }
+
+      const userId = req.user.userId;
+      const { avatarId } = req.body;
+
+      // Validate avatar ID if provided, otherwise use random
+      let selectedAvatarId = avatarId;
+      
+      if (avatarId) {
+        if (!isValidPresetAvatar(avatarId)) {
+          throw new ApiError(400, 'Invalid avatar ID');
+        }
+      } else {
+        // No avatar selected, assign random
+        selectedAvatarId = getRandomAvatar();
+      }
+
+      // Get current user data
+      const userResult = await pool.query(
+        'SELECT dp_url FROM users WHERE user_id = $1',
+        [userId]
+      );
+
+      if (userResult.rows.length === 0) {
+        throw new ApiError(404, 'User not found');
+      }
+
+      const currentDpUrl = userResult.rows[0].dp_url;
+
+      // Delete old custom uploaded image from Cloudinary if exists (but not preset avatars)
+      if (currentDpUrl) {
+        const publicId = extractPublicId(currentDpUrl);
+        if (publicId && !publicId.startsWith('avatars/')) {
+          await deleteFromCloudinary(publicId);
+        }
+      }
+
+      // Generate avatar URL
+      const avatarUrl = getAvatarUrl(selectedAvatarId);
+
+      // Update database with new avatar
+      const updateResult = await pool.query(
+        `UPDATE users 
+         SET dp_url = $1, updated_at = NOW()
+         WHERE user_id = $2
+         RETURNING user_id, roll_no, name, gender, branch, dp_url, dob, bio, updated_at`,
+        [avatarUrl, userId]
+      );
+
+      res.json({
+        success: true,
+        message: 'Avatar selected successfully',
+        data: {
+          user: updateResult.rows[0],
+          imageUrl: avatarUrl
+        }
+      });
+    } catch (error) {
+      next(error);
+    }
   }
 };
+
+// Configure Multer for memory storage
+export const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 5 * 1024 * 1024, // 5MB limit
+  },
+  fileFilter: (req, file, cb) => {
+    // Accept only image files
+    if (file.mimetype.startsWith('image/')) {
+      cb(null, true);
+    } else {
+      cb(new ApiError(400, 'Only image files are allowed') as any);
+    }
+  },
+});

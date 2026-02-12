@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { useTheme } from '@/contexts/ThemeContext';
 
 export default function ViewProfile() {
@@ -13,6 +14,7 @@ export default function ViewProfile() {
   const [profile, setProfile] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
+  const [isOwnProfile, setIsOwnProfile] = useState(false);
 
   useEffect(() => {
     if (rollNo) {
@@ -23,6 +25,19 @@ export default function ViewProfile() {
   const fetchProfile = async () => {
     try {
       const token = localStorage.getItem('accessToken');
+      
+      // Fetch current user's profile to check if it's their own profile
+      const myProfileResponse = await fetch('http://localhost:3001/api/profile/me', {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      const myProfileData = await myProfileResponse.json();
+      if (myProfileData.success) {
+        setIsOwnProfile(myProfileData.data.roll_no.toUpperCase() === rollNo.toUpperCase());
+      }
+      
+      // Fetch the requested profile
       const response = await fetch(`http://localhost:3001/api/profile/${rollNo}`, {
         headers: {
           'Authorization': `Bearer ${token}`
@@ -165,16 +180,26 @@ export default function ViewProfile() {
 
               {/* Action Buttons */}
               <div className="flex gap-2 mt-16 md:mt-10">
-                <button className="px-6 py-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-lg hover:from-purple-600 hover:to-pink-600 transition-all">
-                  💬 Message
-                </button>
-                <button className={`px-6 py-2 rounded-lg backdrop-blur-md transition-all ${
-                  theme === 'dark'
-                    ? 'bg-white/10 hover:bg-white/20 text-white'
-                    : 'bg-white/50 hover:bg-white/70 text-gray-800'
-                }`}>
-                  🎭 Send Anonymous
-                </button>
+                {isOwnProfile ? (
+                  <Link href="/profile/edit">
+                    <button className="px-6 py-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-lg hover:from-purple-600 hover:to-pink-600 transition-all">
+                      ✏️ Edit Profile
+                    </button>
+                  </Link>
+                ) : (
+                  <>
+                    <button className="px-6 py-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-lg hover:from-purple-600 hover:to-pink-600 transition-all">
+                      💬 Message
+                    </button>
+                    <button className={`px-6 py-2 rounded-lg backdrop-blur-md transition-all ${
+                      theme === 'dark'
+                        ? 'bg-white/10 hover:bg-white/20 text-white'
+                        : 'bg-white/50 hover:bg-white/70 text-gray-800'
+                    }`}>
+                      🎭 Send Anonymous
+                    </button>
+                  </>
+                )}
               </div>
             </div>
 

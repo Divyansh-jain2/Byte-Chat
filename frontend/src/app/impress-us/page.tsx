@@ -127,6 +127,34 @@ export default function ImpressUsPage() {
               </div>
             </div>
           </div>
+
+          {/* Footer Links */}
+          <div className="px-8 pb-6">
+            <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
+              <div className="flex items-center justify-center gap-3 text-xs text-gray-500 dark:text-gray-400">
+                <Link 
+                  href="/terms" 
+                  className="hover:text-purple-600 dark:hover:text-purple-400 transition-colors"
+                >
+                  Terms & Conditions
+                </Link>
+                <span>•</span>
+                <Link 
+                  href="/privacy" 
+                  className="hover:text-purple-600 dark:hover:text-purple-400 transition-colors"
+                >
+                  Privacy Policy
+                </Link>
+                <span>•</span>
+                <Link 
+                  href="/contact" 
+                  className="hover:text-purple-600 dark:hover:text-purple-400 transition-colors"
+                >
+                  Contact Developers
+                </Link>
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Footer Note */}

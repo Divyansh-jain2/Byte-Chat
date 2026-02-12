@@ -1,7 +1,10 @@
 import type { Request, Response } from 'express';
 import { pool, query } from '../lib/db.js';
 import { ApiError } from '../utils/error.util.js';
+import { uploadToCloudinary, deleteFromCloudinary, extractPublicId, getDefaultGroupDP } from '../utils/cloudinary.util.js';
+import { getAvatarUrl, isValidPresetAvatar, getRandomAvatar } from '../utils/avatar.util.js';
 import { io } from '../index.js';
+import multer from 'multer';
 
 // Create a new group (public or private)
 export const createGroup = async (req: Request, res: Response) => {
@@ -39,7 +42,7 @@ export const createGroup = async (req: Request, res: Response) => {
       [
         group_name.trim(),
         group_desc?.trim() || '',
-        group_dp_url?.trim() || null,
+        group_dp_url?.trim() || getDefaultGroupDP(),
         is_public === true,
         userId,
         max_members
@@ -963,6 +966,578 @@ export const promoteMemberToAdmin = async (req: Request, res: Response) => {
   } catch (error: any) {
     await client.query('ROLLBACK');
     console.error('Error promoting member:', error);
+    throw error;
+  } finally {
+    client.release();
+  }
+};
+
+// Create a poll (admins only)
+export const createPoll = async (req: Request, res: Response) => {
+  const { groupId } = req.params;
+  const { poll_type, title, description, target_user_id, expires_in_hours = 24 } = req.body;
+  const userId = req.user?.userId;
+
+  if (!userId) {
+    throw new ApiError(401, 'Unauthorized');
+  }
+
+  // Validate poll type
+  const validPollTypes = ['kick_member', 'make_admin', 'remove_admin', 'change_group_name', 'object_removal'];
+  if (!validPollTypes.includes(poll_type)) {
+    throw new ApiError(400, 'Invalid poll type');
+  }
+
+  if (!title || title.trim().length === 0) {
+    throw new ApiError(400, 'Poll title is required');
+  }
+
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    // Check if user is admin in the group
+    const adminCheck = await client.query(
+      `SELECT is_admin, is_owner FROM group_members 
+       WHERE group_id = $1 AND user_id = $2`,
+      [groupId, userId]
+    );
+
+    if (adminCheck.rows.length === 0) {
+      throw new ApiError(403, 'You are not a member of this group');
+    }
+
+    if (!adminCheck.rows[0].is_admin) {
+      throw new ApiError(403, 'Only admins can create polls');
+    }
+
+    // Get total member count for votes_required calculation
+    const memberCountResult = await client.query(
+      `SELECT COUNT(*) as count FROM group_members WHERE group_id = $1`,
+      [groupId]
+    );
+    const memberCount = parseInt(memberCountResult.rows[0].count);
+    const votesRequired = Math.ceil(memberCount / 2); // Majority
+
+    // Calculate expiration time
+    const expiresAt = new Date();
+    expiresAt.setHours(expiresAt.getHours() + expires_in_hours);
+
+    // Create the poll
+    const pollResult = await client.query(
+      `INSERT INTO polls (
+        group_id, created_by, target_user_id, poll_type, title, description,
+        votes_required, total_voters, expires_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      RETURNING *`,
+      [
+        groupId,
+        userId,
+        target_user_id || null,
+        poll_type,
+        title.trim(),
+        description?.trim() || null,
+        votesRequired,
+        memberCount,
+        expiresAt
+      ]
+    );
+
+    await client.query('COMMIT');
+
+    const poll = pollResult.rows[0];
+
+    // Emit socket event for real-time update
+    io.to(`group-${groupId}`).emit('new-poll', poll);
+
+    res.status(201).json({
+      success: true,
+      message: 'Poll created successfully',
+      data: poll
+    });
+  } catch (error: any) {
+    await client.query('ROLLBACK');
+    console.error('Error creating poll:', error);
+    throw new ApiError(500, error.message || 'Failed to create poll');
+  } finally {
+    client.release();
+  }
+};
+
+// Get all polls for a group
+export const getGroupPolls = async (req: Request, res: Response) => {
+  const { groupId } = req.params;
+  const userId = req.user?.userId;
+  const { status = 'active' } = req.query;
+
+  if (!userId) {
+    throw new ApiError(401, 'Unauthorized');
+  }
+
+  try {
+    // Check if user is a member of the group
+    const memberCheck = await query(
+      `SELECT 1 FROM group_members WHERE group_id = $1 AND user_id = $2`,
+      [groupId, userId]
+    );
+
+    if (memberCheck.rows.length === 0) {
+      throw new ApiError(403, 'You are not a member of this group');
+    }
+
+    // Get polls with creator info and user's vote status
+    let queryText = `
+      SELECT 
+        p.*,
+        u.name as creator_name,
+        u.roll_no as creator_roll_no,
+        tu.name as target_name,
+        tu.roll_no as target_roll_no,
+        EXISTS (
+          SELECT 1 FROM votes v 
+          WHERE v.poll_id = p.poll_id 
+          AND v.user_id = $2
+        ) as has_voted,
+        (
+          SELECT vote_value FROM votes v 
+          WHERE v.poll_id = p.poll_id 
+          AND v.user_id = $2
+        ) as user_vote
+      FROM polls p
+      JOIN users u ON p.created_by = u.user_id
+      LEFT JOIN users tu ON p.target_user_id = tu.user_id
+      WHERE p.group_id = $1
+    `;
+
+    const params: any[] = [groupId, userId];
+
+    if (status && status !== 'all') {
+      queryText += ` AND p.status = $3`;
+      params.push(status);
+    }
+
+    queryText += ` ORDER BY p.created_at DESC`;
+
+    const result = await query(queryText, params);
+
+    res.json({
+      success: true,
+      data: result.rows
+    });
+  } catch (error: any) {
+    console.error('Error fetching group polls:', error);
+    throw error;
+  }
+};
+
+// Vote on a poll
+export const voteOnPoll = async (req: Request, res: Response) => {
+  const { groupId, pollId } = req.params;
+  const { vote_value } = req.body; // true = for, false = against
+  const userId = req.user?.userId;
+
+  if (!userId) {
+    throw new ApiError(401, 'Unauthorized');
+  }
+
+  if (typeof vote_value !== 'boolean') {
+    throw new ApiError(400, 'vote_value must be a boolean (true for yes, false for no)');
+  }
+
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    // Check if user is a member of the group
+    const memberCheck = await client.query(
+      `SELECT 1 FROM group_members WHERE group_id = $1 AND user_id = $2`,
+      [groupId, userId]
+    );
+
+    if (memberCheck.rows.length === 0) {
+      throw new ApiError(403, 'You are not a member of this group');
+    }
+
+    // Check if poll exists and is active
+    const pollCheck = await client.query(
+      `SELECT status, expires_at FROM polls 
+       WHERE poll_id = $1 AND group_id = $2`,
+      [pollId, groupId]
+    );
+
+    if (pollCheck.rows.length === 0) {
+      throw new ApiError(404, 'Poll not found');
+    }
+
+    const poll = pollCheck.rows[0];
+
+    if (poll.status !== 'active') {
+      throw new ApiError(400, `Cannot vote on ${poll.status} poll`);
+    }
+
+    if (new Date(poll.expires_at) < new Date()) {
+      throw new ApiError(400, 'Poll has expired');
+    }
+
+    // Check if user already voted
+    const voteCheck = await client.query(
+      `SELECT vote_id, vote_value FROM votes 
+       WHERE poll_id = $1 AND user_id = $2`,
+      [pollId, userId]
+    );
+
+    if (voteCheck.rows.length > 0) {
+      // Update existing vote
+      await client.query(
+        `UPDATE votes SET vote_value = $1, voted_at = NOW() 
+         WHERE poll_id = $2 AND user_id = $3`,
+        [vote_value, pollId, userId]
+      );
+    } else {
+      // Insert new vote
+      await client.query(
+        `INSERT INTO votes (poll_id, user_id, vote_value) 
+         VALUES ($1, $2, $3)`,
+        [pollId, userId, vote_value]
+      );
+    }
+
+    // Update poll statistics
+    const voteStatsResult = await client.query(
+      `SELECT 
+        COUNT(*) FILTER (WHERE vote_value = true) as votes_for,
+        COUNT(*) FILTER (WHERE vote_value = false) as votes_against,
+        COUNT(*) as total_voters
+       FROM votes 
+       WHERE poll_id = $1`,
+      [pollId]
+    );
+
+    const stats = voteStatsResult.rows[0];
+
+    // Get votes_required from poll
+    const pollDetailsResult = await client.query(
+      `SELECT votes_required FROM polls WHERE poll_id = $1`,
+      [pollId]
+    );
+    const votesRequired = pollDetailsResult.rows[0].votes_required;
+
+    // Determine if poll should be marked as passed/failed
+    let newStatus = 'active';
+    if (parseInt(stats.votes_for) >= votesRequired) {
+      newStatus = 'passed';
+    } else if (parseInt(stats.votes_against) >= votesRequired) {
+      newStatus = 'failed';
+    }
+
+    // Update poll with new statistics and status
+    await client.query(
+      `UPDATE polls 
+       SET votes_for = $1, votes_against = $2, total_voters = $3, status = $4, updated_at = NOW()
+       WHERE poll_id = $5`,
+      [stats.votes_for, stats.votes_against, stats.total_voters, newStatus, pollId]
+    );
+
+    await client.query('COMMIT');
+
+    // Get updated poll data
+    const updatedPoll = await query(
+      `SELECT p.*, 
+        u.name as creator_name,
+        tu.name as target_name
+       FROM polls p
+       JOIN users u ON p.created_by = u.user_id
+       LEFT JOIN users tu ON p.target_user_id = tu.user_id
+       WHERE p.poll_id = $1`,
+      [pollId]
+    );
+
+    // Emit socket event for real-time update
+    io.to(`group-${groupId}`).emit('poll-updated', updatedPoll.rows[0]);
+
+    res.json({
+      success: true,
+      message: voteCheck.rows.length > 0 ? 'Vote updated successfully' : 'Vote cast successfully',
+      data: {
+        poll: updatedPoll.rows[0],
+        user_vote: vote_value
+      }
+    });
+  } catch (error: any) {
+    await client.query('ROLLBACK');
+    console.error('Error voting on poll:', error);
+    throw error;
+  } finally {
+    client.release();
+  }
+};
+
+// Upload group picture (admins/owners only)
+export const uploadGroupPicture = async (req: Request, res: Response) => {
+  const { groupId } = req.params;
+  const userId = req.user?.userId;
+
+  if (!userId) {
+    throw new ApiError(401, 'Unauthorized');
+  }
+
+  if (!req.file) {
+    throw new ApiError(400, 'No image file provided');
+  }
+
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    // Check if user is admin or owner
+    const adminCheck = await client.query(
+      `SELECT is_admin, is_owner FROM group_members 
+       WHERE group_id = $1 AND user_id = $2`,
+      [groupId, userId]
+    );
+
+    if (adminCheck.rows.length === 0 || (!adminCheck.rows[0].is_admin && !adminCheck.rows[0].is_owner)) {
+      throw new ApiError(403, 'Only group admins can update group picture');
+    }
+
+    // Get current group data
+    const groupResult = await client.query(
+      'SELECT group_dp_url FROM groups WHERE group_id = $1',
+      [groupId]
+    );
+
+    if (groupResult.rows.length === 0) {
+      throw new ApiError(404, 'Group not found');
+    }
+
+    const currentDpUrl = groupResult.rows[0].group_dp_url;
+
+    // Delete old image from Cloudinary if exists
+    if (currentDpUrl) {
+      const publicId = extractPublicId(currentDpUrl);
+      if (publicId) {
+        await deleteFromCloudinary(publicId);
+      }
+    }
+
+    // Upload new image to Cloudinary
+    const uploadResult = await uploadToCloudinary(
+      req.file.buffer,
+      'group_pictures',
+      `group_${groupId}_${Date.now()}`
+    );
+
+    // Update database with new image URL
+    const updateResult = await client.query(
+      `UPDATE groups 
+       SET group_dp_url = $1, updated_at = NOW()
+       WHERE group_id = $2
+       RETURNING *`,
+      [uploadResult.secure_url, groupId]
+    );
+
+    await client.query('COMMIT');
+
+    // Emit socket event for real-time update
+    io.to(`group-${groupId}`).emit('group-updated', updateResult.rows[0]);
+
+    res.json({
+      success: true,
+      message: 'Group picture uploaded successfully',
+      data: {
+        group: updateResult.rows[0],
+        imageUrl: uploadResult.secure_url
+      }
+    });
+  } catch (error: any) {
+    await client.query('ROLLBACK');
+    console.error('Error uploading group picture:', error);
+    throw error;
+  } finally {
+    client.release();
+  }
+};
+
+// Delete group picture (admins/owners only)
+export const deleteGroupPicture = async (req: Request, res: Response) => {
+  const { groupId } = req.params;
+  const userId = req.user?.userId;
+
+  if (!userId) {
+    throw new ApiError(401, 'Unauthorized');
+  }
+
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    // Check if user is admin or owner
+    const adminCheck = await client.query(
+      `SELECT is_admin, is_owner FROM group_members 
+       WHERE group_id = $1 AND user_id = $2`,
+      [groupId, userId]
+    );
+
+    if (adminCheck.rows.length === 0 || (!adminCheck.rows[0].is_admin && !adminCheck.rows[0].is_owner)) {
+      throw new ApiError(403, 'Only group admins can delete group picture');
+    }
+
+    // Get current group data
+    const groupResult = await client.query(
+      'SELECT group_dp_url FROM groups WHERE group_id = $1',
+      [groupId]
+    );
+
+    if (groupResult.rows.length === 0) {
+      throw new ApiError(404, 'Group not found');
+    }
+
+    const currentDpUrl = groupResult.rows[0].group_dp_url;
+
+    // Delete old image from Cloudinary if exists
+    if (currentDpUrl) {
+      const publicId = extractPublicId(currentDpUrl);
+      if (publicId) {
+        await deleteFromCloudinary(publicId);
+      }
+    }
+
+    // Update database to remove image URL
+    const updateResult = await client.query(
+      `UPDATE groups 
+       SET group_dp_url = NULL, updated_at = NOW()
+       WHERE group_id = $1
+       RETURNING *`,
+      [groupId]
+    );
+
+    await client.query('COMMIT');
+
+    // Emit socket event for real-time update
+    io.to(`group-${groupId}`).emit('group-updated', updateResult.rows[0]);
+
+    res.json({
+      success: true,
+      message: 'Group picture deleted successfully',
+      data: {
+        group: updateResult.rows[0]
+      }
+    });
+  } catch (error: any) {
+    await client.query('ROLLBACK');
+    console.error('Error deleting group picture:', error);
+    throw error;
+  } finally {
+    client.release();
+  }
+};
+
+// Configure Multer for memory storage
+export const uploadGroup = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 5 * 1024 * 1024, // 5MB limit
+  },
+  fileFilter: (req, file, cb) => {
+    // Accept only image files
+    if (file.mimetype.startsWith('image/')) {
+      cb(null, true);
+    } else {
+      cb(new ApiError(400, 'Only image files are allowed') as any);
+    }
+  },
+});
+
+// Select preset avatar for group (admins/owners only)
+export const selectGroupPresetAvatar = async (req: Request, res: Response) => {
+  const { groupId } = req.params;
+  const userId = req.user?.userId;
+  const { avatarId } = req.body;
+
+  if (!userId) {
+    throw new ApiError(401, 'Unauthorized');
+  }
+
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    // Check if user is admin or owner
+    const adminCheck = await client.query(
+      `SELECT is_admin, is_owner FROM group_members 
+       WHERE group_id = $1 AND user_id = $2`,
+      [groupId, userId]
+    );
+
+    if (adminCheck.rows.length === 0 || (!adminCheck.rows[0].is_admin && !adminCheck.rows[0].is_owner)) {
+      throw new ApiError(403, 'Only group admins can update group picture');
+    }
+
+    // Validate avatar ID if provided, otherwise use random
+    let selectedAvatarId = avatarId;
+    
+    if (avatarId) {
+      if (!isValidPresetAvatar(avatarId)) {
+        throw new ApiError(400, 'Invalid avatar ID');
+      }
+    } else {
+      // No avatar selected, assign random
+      selectedAvatarId = getRandomAvatar();
+    }
+
+    // Get current group data
+    const groupResult = await client.query(
+      'SELECT group_dp_url FROM groups WHERE group_id = $1',
+      [groupId]
+    );
+
+    if (groupResult.rows.length === 0) {
+      throw new ApiError(404, 'Group not found');
+    }
+
+    const currentDpUrl = groupResult.rows[0].group_dp_url;
+
+    // Delete old custom uploaded image from Cloudinary if exists (but not preset avatars)
+    if (currentDpUrl) {
+      const publicId = extractPublicId(currentDpUrl);
+      if (publicId && !publicId.startsWith('avatars/')) {
+        await deleteFromCloudinary(publicId);
+      }
+    }
+
+    // Generate avatar URL
+    const avatarUrl = getAvatarUrl(selectedAvatarId);
+
+    // Update database with new avatar
+    const updateResult = await client.query(
+      `UPDATE groups 
+       SET group_dp_url = $1, updated_at = NOW()
+       WHERE group_id = $2
+       RETURNING *`,
+      [avatarUrl, groupId]
+    );
+
+    await client.query('COMMIT');
+
+    // Emit socket event for real-time update
+    io.to(`group-${groupId}`).emit('group-updated', updateResult.rows[0]);
+
+    res.json({
+      success: true,
+      message: 'Group avatar selected successfully',
+      data: {
+        group: updateResult.rows[0],
+        imageUrl: avatarUrl
+      }
+    });
+  } catch (error: any) {
+    await client.query('ROLLBACK');
+    console.error('Error selecting group avatar:', error);
     throw error;
   } finally {
     client.release();

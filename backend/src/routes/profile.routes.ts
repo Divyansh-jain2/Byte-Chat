@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { profileController } from '../controllers/profile.controller.js';
+import { profileController, upload } from '../controllers/profile.controller.js';
 import { authenticateToken } from '../middleware/auth.middleware.js';
 import { requireVerification } from '../middleware/verification.middleware.js';
 
@@ -19,6 +19,15 @@ router.put('/complete', profileController.completeProfile);
 
 // Update profile (no verification needed - users can update before completing verification)
 router.put('/update', profileController.updateProfile);
+
+// Upload profile picture
+router.post('/upload-picture', upload.single('image'), profileController.uploadProfilePicture);
+
+// Select preset avatar
+router.post('/select-avatar', profileController.selectPresetAvatar);
+
+// Delete profile picture (reset to default)
+router.delete('/delete-picture', profileController.deleteProfilePicture);
 
 // Everything below requires verification
 router.use(requireVerification);

@@ -1,84 +1,135 @@
 @import "tailwindcss";
 
-/* Light mode variables - Minimal grayscale */
+/* Glassmorphism global theme - cool tones */
 :root {
-  --background: #fafafa;
-  --foreground: #0a0a0a;
+  --glass-bg-1: rgba(255, 255, 255, 0.06);
+  --glass-bg-2: rgba(255, 255, 255, 0.08);
+  --glass-border: rgba(255, 255, 255, 0.12);
+  --glass-glow: rgba(99, 102, 241, 0.15);
+  --accent-1: 120, 150, 255; /* soft blue */
+  --accent-2: 160, 120, 255; /* purple */
+  --accent-3: 80, 200, 200;  /* teal */
+  --text-light: rgba(255,255,255,0.95);
+  --text-dark: rgba(10,10,10,0.95);
 }
 
-/* Dark mode variables - Deep blacks with white accents */
 .dark {
-  --background: #0a0a0a;
-  --foreground: #fafafa;
+  --glass-bg-1: rgba(10, 12, 20, 0.48);
+  --glass-bg-2: rgba(18, 20, 28, 0.36);
+  --glass-border: rgba(255, 255, 255, 0.06);
+  --glass-glow: rgba(80, 120, 255, 0.08);
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+/* App background: full-screen subtle gradient */
+html, body, #__next {
+  height: 100%;
 }
 
 body {
-  font-family: 'Courier New', Courier, monospace, ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Monaco, 'Cascadia Mono', 'Segoe UI Mono', 'Roboto Mono', 'Oxygen Mono', 'Ubuntu Monospace', 'Source Code Pro', 'Fira Mono', 'Droid Sans Mono', 'Courier New', monospace;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;
+  background: radial-gradient(1200px 600px at 10% 10%, rgba(var(--accent-2),0.08), transparent 15%),
+              radial-gradient(900px 400px at 90% 90%, rgba(var(--accent-1),0.06), transparent 18%),
+              linear-gradient(180deg, rgba(10,12,20,1) 0%, rgba(15,18,28,1) 100%);
+  color: var(--text-light);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-/* Custom scrollbar - Blocky */
+/* Main app background container used by layout */
+.app-bg {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 20px;
+  box-sizing: border-box;
+}
+
+/* Centered glass container that holds the page content */
+.glass-container {
+  width: 100%;
+  max-width: 1200px;
+  display: flex;
+  gap: 24px;
+  align-items: stretch;
+}
+
+/* The glass card: backdrop blur, translucent background, soft border + glow */
+.glass-card {
+  width: 100%;
+  background: linear-gradient(135deg, var(--glass-bg-1), var(--glass-bg-2));
+  border: 1px solid var(--glass-border);
+  border-radius: 16px;
+  padding: 28px;
+  box-shadow: 0 8px 30px rgba(2,6,23,0.6), 0 1px 0 rgba(255,255,255,0.02) inset;
+  backdrop-filter: blur(12px) saturate(120%);
+  -webkit-backdrop-filter: blur(12px) saturate(120%);
+  transition: transform 220ms cubic-bezier(.2,.9,.2,1), box-shadow 200ms ease;
+}
+
+.glass-card:hover {
+  transform: translateY(-6px);
+  box-shadow: 0 18px 50px rgba(2,6,23,0.6), 0 6px 20px rgba(var(--accent-1), 0.06);
+}
+
+/* Header / page title inside glass card */
+.glass-card h1, .glass-card h2, .glass-card h3 {
+  color: var(--text-light);
+  margin: 0 0 12px 0;
+}
+
+/* Accent buttons */
+.btn-accent {
+  background: linear-gradient(90deg, rgba(var(--accent-1),0.14), rgba(var(--accent-3),0.12));
+  color: var(--text-light);
+  border: 1px solid rgba(255,255,255,0.06);
+  padding: 8px 14px;
+  border-radius: 10px;
+}
+
+/* Inputs and cards get rounded corners and softer UI */
+input, textarea, select, button {
+  border-radius: 10px;
+}
+
+/* Scrollbar matching theme */
 ::-webkit-scrollbar {
-  width: 12px;
-  height: 12px;
+  width: 10px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #f5f5f5;
-}
-
-.dark ::-webkit-scrollbar-track {
-  background: #171717;
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #0a0a0a;
-  border: 2px solid #f5f5f5;
+  background: linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.04));
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
 }
 
-::-webkit-scrollbar-thumb:hover {
-  background: #262626;
-}
-
-.dark ::-webkit-scrollbar-thumb {
-  background: #fafafa;
-  border: 2px solid #171717;
-}
-
-.dark ::-webkit-scrollbar-thumb:hover {
-  background: #d4d4d4;
-}
-
-/* Disable smooth transitions for blocky theme */
-* {
-  transition-property: none;
-}
-
-/* Allow specific transitions for interactive elements */
-button, a, input, select, textarea {
-  transition-property: background-color, border-color, box-shadow, transform;
-  transition-duration: 150ms;
-  transition-timing-function: ease-in-out;
-}
-
-/* Blocky selection */
 ::selection {
-  background: #0a0a0a;
-  color: #fafafa;
+  background: rgba(var(--accent-1),0.18);
+  color: var(--text-light);
 }
 
-.dark ::selection {
-  background: #fafafa;
-  color: #0a0a0a;
+/* Responsive adjustments */
+@media (max-width: 640px) {
+  .glass-container { padding: 0 8px; }
+  .glass-card { padding: 18px; border-radius: 12px; }
 }
 
-/* Remove rounded corners globally for blocky feel */
-button, input, select, textarea {
-  border-radius: 0 !important;
+/* Custom animations */
+@keyframes gradient {
+  0%, 100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+
+.animate-gradient {
+  background-size: 200% 200%;
+  animation: gradient 3s ease-in-out infinite;
 }
