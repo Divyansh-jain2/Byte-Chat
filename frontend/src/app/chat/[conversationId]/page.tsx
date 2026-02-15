@@ -71,7 +71,7 @@ export default function ChatWindowPage() {
 
     const handleTyping = ({ userId, isTyping }: { userId: string; isTyping: boolean }) => {
       // Handle typing indicator (optional)
-      console.log(`User ${userId} is ${isTyping ? 'typing' : 'not typing'}`);
+      // console.log(`User ${userId} is ${isTyping ? 'typing' : 'not typing'}`);
     };
 
     const handleIdentityRevealed = () => {
@@ -85,16 +85,33 @@ export default function ChatWindowPage() {
       alert('This conversation has been blocked');
     };
 
+    const handleConversationUnblocked = ({ canMessageNow }: { conversationId: string; canMessageNow: boolean; unblockedBy: string }) => {
+      setIsBlocked(false);
+      console.log('🔓 Conversation unblocked - you can now send messages');
+      // Refresh conversation to get latest state
+      fetchMessages();
+    };
+
+    const handleConversationStillBlocked = ({ blockedBy }: { conversationId: string; blockedBy: string }) => {
+      console.log('⚠️ Conversation still blocked by other user');
+      // Refresh conversation to get latest state
+      fetchMessages();
+    };
+
     socket.on('new-message', handleNewMessage);
     socket.on('user-typing', handleTyping);
     socket.on('identity-revealed', handleIdentityRevealed);
     socket.on('user-blocked', handleUserBlocked);
+    socket.on('conversation-unblocked', handleConversationUnblocked);
+    socket.on('conversation-still-blocked', handleConversationStillBlocked);
 
     return () => {
       socket.off('new-message', handleNewMessage);
       socket.off('user-typing', handleTyping);
       socket.off('identity-revealed', handleIdentityRevealed);
       socket.off('user-blocked', handleUserBlocked);
+      socket.off('conversation-unblocked', handleConversationUnblocked);
+      socket.off('conversation-still-blocked', handleConversationStillBlocked);
     };
   }, [socket]);
 
@@ -154,11 +171,12 @@ export default function ChatWindowPage() {
         setIsBlocked(response.conversation.is_blocked || false);
       }
       
-      console.log(`📱 Loaded ${conversationType} conversation:`, conversationId);
-    } catch (error: any) {
+      // console.log(`📱 Loaded ${conversationType} conversation:`, conversationId);
+    } 
+    catch (error: any) {
       // Only log errors that aren't rate limiting (429)
       if (error?.response?.status !== 429) {
-        console.error('Failed to fetch messages:', error);
+        console.error('[ERROR] Failed to fetch messages:', error);
         
         // Handle specific errors
         if (error?.response?.status === 403) {
@@ -178,7 +196,7 @@ export default function ChatWindowPage() {
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!newMessage.trim() || sending) return;
+    if (!newMessage.trim() || sending || isBlocked) return;
 
     try {
       setSending(true);
@@ -200,9 +218,18 @@ export default function ChatWindowPage() {
 
       setNewMessage('');
       fetchMessages(); // Refresh messages
-    } catch (error: any) {
-      console.error('Failed to send message:', error);
-      alert(error.response?.data?.message || 'Failed to send message');
+    } 
+    catch (error: any) {
+      console.error('[ERROR] Failed to send message:', error);
+      const errorMessage = error.response?.data?.message || 'Failed to send message';
+      
+      // Check if it's a blocking error
+      if (errorMessage.includes('blocked') || error.response?.status === 403) {
+        alert('Cannot send message - this user is blocked or has blocked you.');
+        setIsBlocked(true);
+      } else {
+        alert(errorMessage);
+      }
     } finally {
       setSending(false);
     }
@@ -260,24 +287,61 @@ export default function ChatWindowPage() {
     }
 
     try {
-      const userStr = localStorage.getItem('user');
-      const currentUser = userStr ? JSON.parse(userStr) : null;
+      // For anonymous users, we need to get the actual user_id from conversations
+      let actualReportedUserId = otherUser?.user_id;
       
-      // Get the other user's ID
-      const otherUserId = messages.length > 0 
-        ? messages.find(m => m.sender_id !== currentUser?.user_id)?.sender_id
-        : null;
+      // If other user is anonymous (user_id is null), we need to report via conversation
+      if (isAnonymous && !actualReportedUserId) {
+        // console.log('🎭 Reporting anonymous user - using conversation ID to identify');
+        // For anonymous users, backend will extract the actual user_id from the conversation
+        actualReportedUserId = 'ANONYMOUS'; // Special marker - backend will resolve
+      }
 
-      if (!otherUserId) {
+      if (!actualReportedUserId && actualReportedUserId !== 'ANONYMOUS') {
         alert('Unable to identify user to report');
         return;
       }
 
+      // Get last message from reported user for context
+      const lastMessageFromReported = messages
+        .filter(m => !m.is_my_message)
+        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
+
+      // Build comprehensive description with context
+      const contextualDescription = `
+=== REPORT DETAILS ===
+Report Type: ${reportReason}
+User Description: ${reportDescription || 'No additional details provided'}
+
+=== REPORTED USER INFO ===
+Name: ${otherUser?.name || 'Anonymous User'}
+Roll No: ${otherUser?.roll_no || 'N/A (Anonymous)'}
+Gender: ${otherUser?.gender || otherUser?.display_gender || 'N/A'}
+Is Anonymous: ${isAnonymous ? 'Yes' : 'No'}
+
+=== CONVERSATION CONTEXT ===
+Conversation ID: ${conversationId}
+Total Messages: ${messages.length}
+Messages from Reported User: ${messages.filter(m => !m.is_my_message).length}
+Conversation Type: ${isAnonymous ? 'Anonymous' : 'Regular'}
+
+=== LAST MESSAGE FROM REPORTED USER ===
+${lastMessageFromReported ? `Message ID: ${lastMessageFromReported.message_id}
+Timestamp: ${new Date(lastMessageFromReported.created_at).toLocaleString()}
+Message Type: ${lastMessageFromReported.message_type || 'text'}` : 'No messages from this user'}
+
+=== TIMESTAMP ===
+Reported At: ${new Date().toISOString()}
+`.trim();
+
       await chatService.reportUser({
-        reportedUserId: otherUserId,
-        conversationId,
-        reason: reportReason,
-        description: reportDescription || undefined,
+        reportedUserId: actualReportedUserId,
+        conversationId,  // IMPORTANT: Backend uses this to resolve anonymous user_id
+        reportType: reportReason,
+        reason: reportReason,  // Backward compatibility
+        description: contextualDescription,
+        messageId: lastMessageFromReported?.message_id,
+        evidenceUrls: [],
       });
 
       setShowReportDialog(false);
@@ -539,32 +603,40 @@ export default function ChatWindowPage() {
       {/* Message Input */}
       <div className="fixed bottom-0 left-0 right-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700">
         <div className="max-w-4xl mx-auto px-4 py-4">
-          <form onSubmit={handleSendMessage} className="flex gap-3">
-            <input
-              type="text"
-              value={newMessage}
-              onChange={(e) => setNewMessage(e.target.value)}
-              placeholder="Type a message..."
-              className="flex-1 px-4 py-3 bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              disabled={sending}
-            />
-            <button
-              type="submit"
-              disabled={!newMessage.trim() || sending}
-              className="px-6 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              {sending ? (
-                <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                </svg>
-              ) : (
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-                </svg>
-              )}
-            </button>
-          </form>
+          {isBlocked ? (
+            <div className="text-center py-3">
+              <p className="text-red-600 dark:text-red-400 font-medium">
+                🚫 This conversation is blocked. You cannot send messages.
+              </p>
+            </div>
+          ) : (
+            <form onSubmit={handleSendMessage} className="flex gap-3">
+              <input
+                type="text"
+                value={newMessage}
+                onChange={(e) => setNewMessage(e.target.value)}
+                placeholder="Type a message..."
+                className="flex-1 px-4 py-3 bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                disabled={sending}
+              />
+              <button
+                type="submit"
+                disabled={!newMessage.trim() || sending}
+                className="px-6 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                {sending ? (
+                  <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                  </svg>
+                ) : (
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                  </svg>
+                )}
+              </button>
+            </form>
+          )}
         </div>
       </div>
     </div>

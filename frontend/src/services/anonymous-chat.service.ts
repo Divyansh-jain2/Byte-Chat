@@ -65,12 +65,38 @@ export const revealAnonymousIdentity = async (conversationId: string) => {
   return response.data.data;
 };
 
+// Report anonymous user (uses main chat endpoint)
+export const reportAnonymousUser = async (data: {
+  reportedUserId: string;
+  conversationId?: string;
+  messageId?: string;
+  reportType: 'spam' | 'harassment' | 'inappropriate_content' | 'impersonating' | 'fake_profile' | 'other';
+  description: string;
+  evidenceUrls?: string[];
+}) => {
+  // Use the main chat report endpoint (works for both regular and anonymous)
+  const chatApi = axios.create({
+    baseURL: `${API_URL}/api/chat`,
+    withCredentials: true,
+  });
+  
+  // Add auth token
+  const token = localStorage.getItem('accessToken');
+  if (token) {
+    chatApi.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+  }
+  
+  const response = await chatApi.post('/report', data);
+  return response.data;
+};
+
 const anonymousChatService = {
   createAnonymousConversation,
   getAnonymousConversations,
   getAnonymousMessages,
   sendAnonymousMessage,
-  revealAnonymousIdentity
+  revealAnonymousIdentity,
+  reportAnonymousUser
 };
 
 export default anonymousChatService;

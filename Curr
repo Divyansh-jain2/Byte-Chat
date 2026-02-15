@@ -1,0 +1,302 @@
+# 1️⃣ AUTHENTICATION MODULE
+
+## Signup
+
+* Validate inputs
+* Roll number format check
+* Username uniqueness check
+* Hash password
+* Generate OTP
+* Send OTP email
+* Verify OTP
+* Create user
+* Issue access token
+* Issue refresh token
+* Create session
+
+## Login
+
+* Validate credentials
+* Check account active
+* Compare password hash
+* Update last_seen
+* Issue access token
+* Issue refresh token
+* Create session entry
+* Log auth event
+
+## Logout
+
+* Revoke refresh token
+* Delete session
+
+## Password Reset
+
+* Request reset OTP
+* Verify OTP
+* Set new password
+* Revoke all sessions
+
+## Token Management
+
+* Access token validation
+* Refresh token validation
+* Token rotation
+* Token revocation
+
+---
+
+# 2️⃣ USER MANAGEMENT MODULE
+
+## Profile
+
+* Get self profile
+* Get public profile
+* Update username
+* Update display picture
+* Update settings
+
+## Account Control
+
+* Soft delete account
+* Reactivate account (optional)
+* Update last_seen
+
+## User Search
+
+* Search by username
+* Search by roll number
+* Search by branch
+
+---
+
+# 3️⃣ USER SETTINGS MODULE
+
+* Theme mode
+* Email notifications toggle
+* Push notifications toggle
+* Profile visibility
+* Show online status toggle
+* Show last_seen toggle
+* Update bio
+
+---
+
+# 4️⃣ BLOCK SYSTEM MODULE
+
+* Block user
+* Unblock user
+* Check block relation
+* Prevent 1v1 messaging
+* Prevent chat creation if blocked
+
+---
+
+# 5️⃣ CHAT CORE MODULE
+
+## Conversation Creation
+
+* Create 1v1 conversation
+* Create group conversation
+* Validate participants
+
+## Membership Management
+
+* Add member
+* Remove member
+* Leave conversation
+* Check membership
+* Auto admin reassignment
+
+---
+
+# 6️⃣ 1v1 CHAT MODULE
+
+## Messaging
+
+* Send encrypted message
+* Validate sender authorization
+* Store ciphertext
+* Emit real-time message
+* Create message receipt
+
+## Message States
+
+* Sent status
+* Delivered status
+* Read status
+
+## History
+
+* Fetch conversation history
+* Pagination support
+
+## Message Actions
+
+* Delete for me
+* Delete for all (soft delete)
+* Retry send (client-triggered)
+
+---
+
+# 7️⃣ GROUP CHAT MODULE
+
+## Group Creation
+
+* Public group
+* Private group
+* Assign creator admin
+
+## Admin Controls
+
+* Promote admin
+* Demote admin
+* Remove member (private only)
+
+## Public Group Governance
+
+* Create removal poll
+* Vote on poll
+* Enforce poll result
+* Poll cooldown (24h)
+
+## Group Messaging
+
+* Broadcast message
+* Receipt creation for members
+
+---
+
+# 8️⃣ INVITATION MODULE (PRIVATE GROUP)
+
+* Generate invite token
+* Validate token
+* Join via token
+* Expire invite
+* Invalidate invite after use
+
+---
+
+# 9️⃣ MESSAGE MODULE
+
+## Message Types
+
+* Text
+* Emoji
+* Image URL
+
+## Message Storage
+
+* Encrypted payload
+* Encryption metadata
+* Sender reference
+* Conversation reference
+
+## Message Lifecycle
+
+* Create
+* Deliver
+* Read
+* Soft delete
+
+---
+
+# 🔟 REAL-TIME SOCKET MODULE
+
+## Connection
+
+* JWT verification
+* Bind socket → user
+
+## Events
+
+* Join conversation
+* Leave conversation
+* Send message
+* Receive message
+* Message delivered
+* Message read
+* Typing start
+* Typing stop
+* Disconnect handling
+
+---
+
+# 1️⃣1️⃣ REPORT & MODERATION MODULE
+
+* Report user
+* Store report metadata
+* Count unique reporters
+* Auto-block after threshold (5+)
+* Notify admin via email
+
+---
+
+# 1️⃣2️⃣ MEDIA MODULE
+
+* Upload image
+* Validate file type
+* Generate URL
+* Attach to message
+* Delete unused media (optional)
+
+---
+
+# 1️⃣3️⃣ AUDIT & LOGGING MODULE
+
+* Auth logs
+* Profile changes
+* Block/unblock logs
+* Report events
+* Security anomalies
+
+---
+
+# 1️⃣4️⃣ SECURITY MODULE
+
+* Rate limiting
+* OTP attempt limiting
+* IP tracking
+* Session validation
+* Account lock handling
+* Input validation
+
+---
+
+# 1️⃣5️⃣ SYSTEM RULES MODULE (INVARIANTS)
+
+* Only members send messages
+* Only admins manage private group members
+* Public group removal via poll only
+* Deleted users cannot login
+* Blocked users cannot 1v1 chat
+* Server cannot decrypt messages
+
+---
+
+# 1️⃣6️⃣ OPTIONAL BUT SMART (Small Future Modules)
+
+* Presence (Redis online state)
+* Typing indicators
+* Unread message counters
+* Conversation pinning
+* Muted conversations
+
+---
+
+# FINAL BUILD ORDER (Best Implementation Sequence)
+
+1. Auth
+2. User Management
+3. Conversations + Membership
+4. 1v1 Messaging
+5. Socket events
+6. Group system
+7. Reports & block
+8. Media handling
+9. Governance (polls)
+
+---
+
+This is the **complete modular decomposition** of your app.
+If you implement module-by-module exactly like this, the system will stay clean and scalable.

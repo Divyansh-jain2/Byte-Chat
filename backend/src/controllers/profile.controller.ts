@@ -42,6 +42,7 @@ export const profileController = {
   async getUserProfile(req: Request, res: Response, next: NextFunction) {
     try {
       const { rollNo } = req.params;
+      const currentUserId = req.user?.userId;
 
       const result = await pool.query(
         `SELECT 
@@ -54,6 +55,42 @@ export const profileController = {
 
       if (result.rows.length === 0) {
         throw new ApiError(404, 'User not found');
+      }
+
+      const profileUserId = result.rows[0].user_id;
+
+      // Check if users are blocked (only if viewer is authenticated)
+      if (currentUserId && currentUserId !== profileUserId) {
+        const blockCheck = await pool.query(
+          `SELECT 
+            CASE 
+              WHEN blocker_id = $1 THEN 'you_blocked'
+              WHEN blocker_id = $2 THEN 'blocked_you'
+              ELSE NULL
+            END as block_type
+           FROM user_blocks 
+           WHERE (blocker_id = $1 AND blocked_id = $2) 
+              OR (blocker_id = $2 AND blocked_id = $1)
+           LIMIT 1`,
+          [currentUserId, profileUserId]
+        );
+
+        if (blockCheck.rows.length > 0) {
+          const blockType = blockCheck.rows[0].block_type;
+          
+          if (blockType === 'blocked_you') {
+            // Current user is blocked by the profile owner
+            throw new ApiError(403, 'This user has blocked you');
+          } else if (blockType === 'you_blocked') {
+            // Current user blocked this profile
+            return res.json({
+              success: true,
+              data: result.rows[0],
+              blocked: true,
+              blockMessage: 'You have blocked this user'
+            });
+          }
+        }
       }
 
       res.json({

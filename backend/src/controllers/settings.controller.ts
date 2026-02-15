@@ -92,14 +92,42 @@ export const settingsController = {
       const userId = req.user?.userId;
 
       const result = await pool.query(
-        `SELECT 
-          ub.blocker_id, ub.blocked_id, ub.reason, ub.created_at, ub.expires_at,
-          u.roll_no, u.name, u.dp_url
+        `SELECT DISTINCT ON (ub.block_id)
+          ub.block_id, ub.blocker_id, ub.blocked_id, ub.reason, ub.created_at, ub.expires_at,
+          cc.is_anonymous,
+          CASE 
+            WHEN cc.is_anonymous = true THEN COALESCE(ai.random_string, 'Anonymous User')
+            ELSE u.name
+          END as name,
+          CASE 
+            WHEN cc.is_anonymous = true THEN NULL
+            ELSE u.roll_no
+          END as roll_no,
+          CASE 
+            WHEN cc.is_anonymous = true THEN COALESCE(ai.display_gender, u.gender)
+            ELSE u.gender
+          END as gender,
+          CASE 
+            WHEN cc.is_anonymous = true THEN NULL
+            ELSE u.dp_url
+          END as dp_url,
+          COALESCE(cc.is_anonymous, false) as is_anonymous_block
          FROM user_blocks ub
          JOIN users u ON ub.blocked_id = u.user_id
+         LEFT JOIN chat_conversations cc ON 
+           ((cc.user1_id = LEAST(ub.blocker_id, ub.blocked_id) AND cc.user2_id = GREATEST(ub.blocker_id, ub.blocked_id)))
+           AND cc.is_anonymous = true
+         LEFT JOIN LATERAL (
+           SELECT random_string, display_gender
+           FROM anonymous_identities
+           WHERE (anonymous_identities.identity_id = cc.anonymous_initiator_id) OR
+                 (anonymous_identities.user_id = ub.blocked_id AND anonymous_identities.target_user_id = ub.blocker_id AND anonymous_identities.is_active = true)
+           ORDER BY anonymous_identities.last_used_at DESC NULLS LAST
+           LIMIT 1
+         ) ai ON cc.is_anonymous = true
          WHERE ub.blocker_id = $1
          AND (ub.expires_at IS NULL OR ub.expires_at > NOW())
-         ORDER BY ub.created_at DESC`,
+         ORDER BY ub.block_id, ub.created_at DESC`,
         [userId]
       );
 

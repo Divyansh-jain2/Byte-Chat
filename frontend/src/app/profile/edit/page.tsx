@@ -29,11 +29,13 @@ interface UserSettings {
 
 interface BlockedUser {
   blocked_id: string;
-  roll_no: string;
+  roll_no: string | null;
   name: string;
+  gender: string;
   dp_url: string | null;
   block_reason: string | null;
   created_at: string;
+  is_anonymous_block: boolean;
 }
 
 export default function ProfileEditPage() {
@@ -605,14 +607,34 @@ export default function ProfileEditPage() {
                       className="flex items-center justify-between p-4 border border-gray-200 dark:border-gray-700 rounded-lg"
                     >
                       <div className="flex items-center space-x-3">
-                        <img
-                          src={user.dp_url || 'https://via.placeholder.com/40'}
-                          alt={user.name}
-                          className="w-10 h-10 rounded-full object-cover"
-                        />
+                        {user.is_anonymous_block ? (
+                          // Anonymous user display
+                          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-400 to-pink-500 flex items-center justify-center text-white font-bold">
+                            ?
+                          </div>
+                        ) : (
+                          // Regular user display
+                          <img
+                            src={user.dp_url || 'https://via.placeholder.com/40'}
+                            alt={user.name}
+                            className="w-10 h-10 rounded-full object-cover"
+                          />
+                        )}
                         <div>
-                          <p className="font-medium text-gray-900 dark:text-white">{user.name}</p>
-                          <p className="text-sm text-gray-600 dark:text-gray-400">{user.roll_no}</p>
+                          <p className="font-medium text-gray-900 dark:text-white">
+                            {user.name}
+                            {user.is_anonymous_block && (
+                              <span className="ml-2 px-2 py-0.5 text-xs bg-purple-100 dark:bg-purple-900 text-purple-800 dark:text-purple-200 rounded-full">
+                                Anonymous
+                              </span>
+                            )}
+                          </p>
+                          {!user.is_anonymous_block && user.roll_no && (
+                            <p className="text-sm text-gray-600 dark:text-gray-400">{user.roll_no}</p>
+                          )}
+                          {user.is_anonymous_block && (
+                            <p className="text-sm text-gray-600 dark:text-gray-400">{user.gender}</p>
+                          )}
                           {user.block_reason && (
                             <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
                               Reason: {user.block_reason}

@@ -96,14 +96,24 @@ export const chatService = {
     return response.data;
   },
 
-  // Report user
+  // Report user (works for both regular and anonymous users)
   async reportUser(data: {
     reportedUserId: string;
     conversationId?: string;
-    reason: string;
+    messageId?: string;
+    reason?: string;          // Backwards compatibility
+    reportType?: string;      // New format
     description?: string;
+    evidenceUrls?: string[];
   }) {
-    const response = await api.post('/report', data);
+    // Normalize data - ensure we send reportType
+    const reportData = {
+      ...data,
+      reportType: data.reportType || data.reason,  // Use reportType if available, fallback to reason
+      description: data.description || data.reason || 'No description provided'
+    };
+    
+    const response = await api.post('/report', reportData);
     return response.data;
   },
 };

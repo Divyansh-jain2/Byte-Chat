@@ -5,6 +5,7 @@ import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
 import { groupService } from '@/services/group.service';
 import GroupImageManager from '@/components/GroupImageManager';
+import { ReportGroupButton } from '@/components/ModerationComponents';
 
 
 
@@ -72,7 +73,7 @@ export default function GroupDetailsPage() {
       }
     }
     catch (error: any) {
-      console.error('Failed to fetch group data:', error);
+      console.error('[ERROR] Failed to fetch group data:', error);
       setError(error.message || 'Failed to load group');
     }
     finally {
@@ -231,7 +232,7 @@ export default function GroupDetailsPage() {
           </div>
 
           {/* Action Buttons */}
-          <div className="mt-6 flex gap-2">
+          <div className="mt-6 flex gap-2 flex-wrap">
             {!group.is_member && group.is_public && (
               <>
                 <button
@@ -263,6 +264,13 @@ export default function GroupDetailsPage() {
                   LEAVE GROUP
                 </button>
               </>
+            )}
+            {/* Report Button - Available to everyone viewing the group */}
+            {group && (
+              <ReportGroupButton 
+                groupId={group.group_id}
+                groupName={group.group_name}
+              />
             )}
           </div>
         </div>

@@ -149,8 +149,9 @@ export async function createAnonymousConversation(req: Request, res: Response) {
         anonymousIdentityId
       }
     });
-  } catch (error: any) {
-    console.error('❌ Create anonymous conversation error:', {
+  } 
+  catch (error: any) {
+    console.error('[ERROR] Create anonymous conversation error:', {
       message: error.message,
       code: error.code,
       detail: error.detail,
@@ -172,12 +173,20 @@ export async function getAnonymousConversations(req: Request, res: Response) {
       throw new ApiError(401, 'Unauthorized');
     }
 
+    // Optimized query with proper indexing
     const result = await pool.query(
       `SELECT 
-        cc.*,
+        cc.conversation_id,
+        cc.user1_id,
+        cc.user2_id,
+        cc.is_anonymous,
+        cc.is_accepted,
+        cc.is_blocked,
+        cc.last_message_at,
+        cc.created_at,
         CASE 
-          WHEN cc.user1_id = $1 THEN u2.user_id
-          ELSE u1.user_id
+          WHEN cc.user1_id = $1 THEN cc.user2_id
+          ELSE cc.user1_id
         END as other_user_id,
         -- Check if current user is the initiator
         CASE 
@@ -204,47 +213,47 @@ export async function getAnonymousConversations(req: Request, res: Response) {
             -- Receiver sees display_gender
             ai.display_gender
         END as other_user_gender,
-        cc.is_anonymous,
         -- Flag to indicate if current user is seeing an anonymous sender
-        CASE 
-          WHEN ai.user_id != $1 THEN true
-          ELSE false
-        END as is_viewing_anonymous,
+        (ai.user_id != $1) as is_viewing_anonymous,
         lm.encrypted_content as last_message_preview,
         lm.message_type as last_message_type,
         lm.created_at as last_message_time,
-        (SELECT COUNT(*) FROM message_status ms
-         JOIN chat_messages cm ON ms.message_id = cm.message_id
-         WHERE cm.conversation_id = cc.conversation_id
-         AND ms.user_id = $1
-         AND ms.status != 'read'
-         AND cm.sender_id != $1) as unread_count
+        COALESCE(unread.count, 0) as unread_count
       FROM chat_conversations cc
+      INNER JOIN anonymous_identities ai ON cc.anonymous_initiator_id = ai.identity_id
       LEFT JOIN users u1 ON cc.user1_id = u1.user_id
       LEFT JOIN users u2 ON cc.user2_id = u2.user_id
-      LEFT JOIN anonymous_identities ai ON cc.anonymous_initiator_id = ai.identity_id
       LEFT JOIN LATERAL (
-        SELECT * FROM chat_messages
+        SELECT encrypted_content, message_type, created_at
+        FROM chat_messages
         WHERE conversation_id = cc.conversation_id
         ORDER BY created_at DESC
         LIMIT 1
       ) lm ON true
+      LEFT JOIN LATERAL (
+        SELECT COUNT(*)::int as count
+        FROM chat_messages cm
+        JOIN message_status ms ON ms.message_id = cm.message_id
+        WHERE cm.conversation_id = cc.conversation_id
+        AND ms.user_id = $1
+        AND ms.status != 'read'
+        AND cm.sender_id != $1
+      ) unread ON true
       WHERE (cc.user1_id = $1 OR cc.user2_id = $1)
       AND cc.is_blocked = false
       AND cc.is_anonymous = true
       AND cc.anonymous_initiator_id IS NOT NULL
-      ORDER BY cc.last_message_at DESC`,
+      ORDER BY cc.last_message_at DESC NULLS LAST`,
       [userId]
     );
-
-    // console.log(`🎭 Fetched ${result.rows.length} anonymous conversations for user ${userId}`);
 
     res.json({
       success: true,
       data: result.rows
     });
-  } catch (error) {
-    console.error('❌ Get anonymous conversations error:', error);
+  } 
+  catch (error) {
+    console.error('[ERROR] Get anonymous conversations error:', error);
     if (error instanceof ApiError) throw error;
     throw new ApiError(500, 'Failed to fetch anonymous conversations');
   }
@@ -261,12 +270,12 @@ export async function getAnonymousMessages(req: Request, res: Response) {
       throw new ApiError(401, 'Unauthorized');
     }
 
-    // Check if user is part of anonymous conversation
+    // Check if user is part of the conversation (allow fetching messages
+    // even after a conversation was converted from anonymous to normal)
     const convCheck = await pool.query(
       `SELECT * FROM chat_conversations 
        WHERE conversation_id = $1 
-       AND (user1_id = $2 OR user2_id = $2)
-       AND is_anonymous = true`,
+       AND (user1_id = $2 OR user2_id = $2)`,
       [conversationId, userId]
     );
 
@@ -371,8 +380,9 @@ export async function getAnonymousMessages(req: Request, res: Response) {
         otherUser: otherUserData
       }
     });
-  } catch (error) {
-    console.error('🎭 Get anonymous messages error:', error);
+  } 
+  catch (error) {
+    console.error('[ERROR] Get anonymous messages error:', error);
     if (error instanceof ApiError) throw error;
     throw new ApiError(500, 'Failed to fetch anonymous messages');
   }
@@ -403,45 +413,56 @@ export async function sendAnonymousMessage(req: Request, res: Response) {
       throw new ApiError(400, 'Missing required fields');
     }
 
-    // Check if user is part of anonymous conversation
+    // Optimized: Check conversation and get identity in one query
     const convCheck = await pool.query(
-      `SELECT * FROM chat_conversations 
-       WHERE conversation_id = $1 
-       AND (user1_id = $2 OR user2_id = $2)
-       AND is_blocked = false
-       AND is_anonymous = true`,
+      `SELECT 
+        cc.*,
+        ai.identity_id as existing_identity_id,
+        u.gender
+      FROM chat_conversations cc
+      LEFT JOIN anonymous_identities ai ON ai.conversation_id = cc.conversation_id AND ai.user_id = $2
+      LEFT JOIN users u ON u.user_id = $2
+      WHERE cc.conversation_id = $1 
+      AND (cc.user1_id = $2 OR cc.user2_id = $2)
+      AND cc.is_blocked = false
+      AND cc.is_anonymous = true`,
       [conversationId, userId]
     );
 
     if (convCheck.rows.length === 0) {
+      // Debug: Check what's wrong
+      const debugCheck = await pool.query(
+        `SELECT conversation_id, user1_id, user2_id, is_blocked, is_anonymous
+         FROM chat_conversations WHERE conversation_id = $1`,
+        [conversationId]
+      );
+      
+      console.error('🎭 Anonymous message failed:', {
+        conversationId,
+        userId,
+        conversationExists: debugCheck.rows.length > 0,
+        conversationData: debugCheck.rows[0] || null
+      });
+      
       throw new ApiError(403, 'Access denied or conversation blocked/not anonymous');
     }
 
     const conversation = convCheck.rows[0];
-
-    // Get or create the anonymous identity for this user in this conversation
-    let anonResult = await pool.query(
-      `SELECT identity_id FROM anonymous_identities 
-       WHERE conversation_id = $1 AND user_id = $2 AND is_active = true`,
-      [conversationId, userId]
-    );
-
     let anonymousIdentityId: string;
 
-    if (anonResult.rows.length === 0) {
-      // Receiver doesn't have an identity yet - create one
-      // console.log(`🎭 Creating anonymous identity for receiver in conversation ${conversationId}`);
+    if (conversation.existing_identity_id) {
+      // Identity already exists
+      anonymousIdentityId = conversation.existing_identity_id;
       
-      // Get user's gender
-      const userInfo = await pool.query(
-        'SELECT gender FROM users WHERE user_id = $1',
-        [userId]
+      // Update last_used_at timestamp
+      await pool.query(
+        'UPDATE anonymous_identities SET last_used_at = NOW() WHERE identity_id = $1',
+        [anonymousIdentityId]
       );
-
-      // Determine the target user (the other person in conversation)
+    } else {
+      // Create new identity for receiver
       const otherUserId = conversation.user1_id === userId ? conversation.user2_id : conversation.user1_id;
 
-      // Create anonymous identity for receiver
       const newIdentity = await pool.query(
         `INSERT INTO anonymous_identities (
           user_id, target_user_id, random_string, display_gender, conversation_id
@@ -450,24 +471,13 @@ export async function sendAnonymousMessage(req: Request, res: Response) {
           userId,
           otherUserId,
           `anon_${Math.random().toString(36).substring(2, 15)}`,
-          userInfo.rows[0].gender,
+          conversation.gender,
           conversationId
         ]
       );
       
       anonymousIdentityId = newIdentity.rows[0].identity_id;
-      // console.log(`✓ Created anonymous identity for receiver: ${anonymousIdentityId}`);
-    } else {
-      anonymousIdentityId = anonResult.rows[0].identity_id;
     }
-
-    // Update last_used_at timestamp
-    await pool.query(
-      `UPDATE anonymous_identities 
-       SET last_used_at = NOW() 
-       WHERE identity_id = $1`,
-      [anonymousIdentityId]
-    );
 
     // Insert message
     const result = await pool.query(
@@ -505,13 +515,7 @@ export async function sendAnonymousMessage(req: Request, res: Response) {
 
     const message = result.rows[0];
 
-    // Update conversation last_message_at
-    await pool.query(
-      'UPDATE chat_conversations SET last_message_at = NOW() WHERE conversation_id = $1',
-      [conversationId]
-    );
-
-    // Emit socket event with anonymous sender info
+    // Emit socket event with anonymous sender info (fetch from DB for consistency)
     if (io) {
       const anonInfo = await pool.query(
         'SELECT random_string, display_gender FROM anonymous_identities WHERE identity_id = $1',
@@ -531,21 +535,20 @@ export async function sendAnonymousMessage(req: Request, res: Response) {
       });
     }
 
-    // console.log(`🎭 Anonymous message sent in conversation ${conversationId}`);
-
     res.status(201).json({
       success: true,
       message: 'Anonymous message sent successfully',
       data: message
     });
-  } catch (error) {
-    console.error('🎭 Send anonymous message error:', error);
+  } 
+  catch (error) {
+    console.error('[ERROR] Send anonymous message error:', error);
     if (error instanceof ApiError) throw error;
     throw new ApiError(500, 'Failed to send anonymous message');
   }
 }
 
-// Reveal anonymous identity
+// Reveal anonymous identity (sender/initiator only)
 export async function revealAnonymousIdentity(req: Request, res: Response) {
   try {
     const userId = req.user?.userId;
@@ -561,10 +564,12 @@ export async function revealAnonymousIdentity(req: Request, res: Response) {
 
     // Check if user is part of conversation and it's anonymous
     const convCheck = await pool.query(
-      `SELECT * FROM chat_conversations 
-       WHERE conversation_id = $1 
-       AND (user1_id = $2 OR user2_id = $2)
-       AND is_anonymous = true`,
+      `SELECT cc.*, ai.user_id as initiator_user_id
+       FROM chat_conversations cc
+       LEFT JOIN anonymous_identities ai ON cc.anonymous_initiator_id = ai.identity_id
+       WHERE cc.conversation_id = $1 
+       AND (cc.user1_id = $2 OR cc.user2_id = $2)
+       AND cc.is_anonymous = true`,
       [conversationId, userId]
     );
 
@@ -572,11 +577,19 @@ export async function revealAnonymousIdentity(req: Request, res: Response) {
       throw new ApiError(403, 'Cannot reveal identity in this conversation');
     }
 
+    const conversation = convCheck.rows[0];
+    const initiatorUserId = conversation.initiator_user_id;
+
+    // Only the sender (initiator) can reveal their identity
+    if (initiatorUserId !== userId) {
+      throw new ApiError(403, 'Only the anonymous sender can reveal their identity');
+    }
+
     // Get user's anonymous identity in this conversation
     const anonResult = await pool.query(
       `SELECT * FROM anonymous_identities 
-       WHERE conversation_id = $1 AND user_id = $2`,
-      [conversationId, userId]
+       WHERE identity_id = $1`,
+      [conversation.anonymous_initiator_id]
     );
 
     if (anonResult.rows.length === 0) {
@@ -589,7 +602,66 @@ export async function revealAnonymousIdentity(req: Request, res: Response) {
       throw new ApiError(400, 'Identity already revealed');
     }
 
-    // Mark as revealed
+    // Get conversation participants (ordered)
+    const u1 = conversation.user1_id;
+    const u2 = conversation.user2_id;
+
+    // Check if regular conversation already exists between these users
+    const existingConvCheck = await pool.query(
+      `SELECT * FROM chat_conversations 
+       WHERE user1_id = $1 AND user2_id = $2 AND is_anonymous = false AND anonymous_initiator_id IS NULL`,
+      [u1, u2]
+    );
+
+    let targetConversationId: string;
+    let shouldMerge = false;
+
+    if (existingConvCheck.rows.length > 0) {
+      // Regular conversation exists - merge into it
+      targetConversationId = existingConvCheck.rows[0].conversation_id;
+      shouldMerge = true;
+
+      console.log(`[CAUTION] Merging anonymous conversation ${conversationId} into existing normal conversation ${targetConversationId}`);
+
+      // Mark all anonymous messages with the merge flag and move them
+      await pool.query(
+        `UPDATE chat_messages 
+         SET conversation_id = $1, was_anonymous_message = true
+         WHERE conversation_id = $2`,
+        [targetConversationId, conversationId]
+      );
+
+      // Soft-block the anonymous conversation to avoid duplicates
+      await pool.query(
+        `UPDATE chat_conversations SET is_blocked = true WHERE conversation_id = $1`,
+        [conversationId]
+      );
+    } 
+    else {
+      // No regular conversation exists - convert this one
+      targetConversationId = conversationId;
+      shouldMerge = false;
+
+      console.log(`[CAUTION] Converting anonymous conversation ${conversationId} to normal conversation`);
+
+      // Mark all messages as previously anonymous
+      await pool.query(
+        `UPDATE chat_messages 
+         SET was_anonymous_message = true
+         WHERE conversation_id = $1`,
+        [conversationId]
+      );
+
+      // Mark conversation as non-anonymous
+      await pool.query(
+        `UPDATE chat_conversations 
+         SET is_anonymous = false, anonymous_initiator_id = NULL
+         WHERE conversation_id = $1`,
+        [conversationId]
+      );
+    }
+
+    // Mark the identity as revealed
     await pool.query(
       `UPDATE anonymous_identities 
        SET is_revealed = true, revealed_at = NOW()
@@ -597,28 +669,27 @@ export async function revealAnonymousIdentity(req: Request, res: Response) {
       [anonIdentity.identity_id]
     );
 
-    // Update conversation to no longer be anonymous
-    await pool.query(
-      `UPDATE chat_conversations 
-       SET is_anonymous = false
-       WHERE conversation_id = $1`,
-      [conversationId]
-    );
-
-    // Emit socket event to notify other user
-    emitToConversation(io, conversationId, 'identity-revealed', {
+    // Emit reveal event to both users
+    emitToConversation(io, targetConversationId, 'identity-revealed', {
       userId,
-      conversationId
+      conversationId: targetConversationId,
+      wasMerged: shouldMerge,
+      mergedFrom: shouldMerge ? conversationId : null
     });
-
-    // console.log(`🎭 Identity revealed in conversation ${conversationId} by user ${userId}`);
 
     res.json({
       success: true,
-      message: 'Identity revealed successfully'
+      message: shouldMerge 
+        ? 'Identity revealed and messages merged into existing conversation'
+        : 'Identity revealed and conversation converted to normal chat',
+      data: { 
+        conversationId: targetConversationId,
+        wasMerged: shouldMerge
+      }
     });
-  } catch (error) {
-    console.error('🎭 Reveal identity error:', error);
+  } 
+  catch (error) {
+    console.error('[ERROR] Reveal identity error:', error);
     if (error instanceof ApiError) throw error;
     throw new ApiError(500, 'Failed to reveal identity');
   }

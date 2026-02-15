@@ -4,6 +4,8 @@ import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useTheme } from '@/contexts/ThemeContext';
+import { BlockUserButton } from '@/components/ModerationComponents';
+import { checkIfBlocked } from '@/services/moderation.service';
 
 export default function ViewProfile() {
   const params = useParams();
@@ -15,6 +17,9 @@ export default function ViewProfile() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
   const [isOwnProfile, setIsOwnProfile] = useState(false);
+  const [isBlocked, setIsBlocked] = useState(false);
+  const [blockMessage, setBlockMessage] = useState('');
+  const [blockedByOther, setBlockedByOther] = useState(false);
 
   useEffect(() => {
     if (rollNo) {
@@ -46,8 +51,31 @@ export default function ViewProfile() {
 
       const data = await response.json();
 
+      if (response.status === 403) {
+        // User is blocked by the profile owner
+        setBlockedByOther(true);
+        setError(data.message || 'This user has blocked you');
+        setIsLoading(false);
+        return;
+      }
+
       if (data.success) {
         setProfile(data.data);
+        
+        // Check if current user blocked this profile
+        if (data.blocked) {
+          setBlockMessage(data.blockMessage || 'You have blocked this user');
+        }
+
+        // Check block status if not own profile
+        if (!isOwnProfile && data.data.user_id) {
+          try {
+            const blockStatus = await checkIfBlocked(data.data.user_id);
+            setIsBlocked(blockStatus.data.isBlocked);
+          } catch (err) {
+            console.error('Failed to check block status:', err);
+          }
+        }
       } else {
         setError(data.message || 'Failed to fetch profile');
       }
@@ -56,6 +84,10 @@ export default function ViewProfile() {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleBlockStatusChange = () => {
+    fetchProfile(); // Refresh profile after blocking/unblocking
   };
 
   if (isLoading) {
@@ -179,7 +211,7 @@ export default function ViewProfile() {
               </div>
 
               {/* Action Buttons */}
-              <div className="flex gap-2 mt-16 md:mt-10">
+              <div className="flex flex-col gap-2 mt-16 md:mt-10">
                 {isOwnProfile ? (
                   <Link href="/profile/edit">
                     <button className="px-6 py-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-lg hover:from-purple-600 hover:to-pink-600 transition-all">
@@ -188,16 +220,47 @@ export default function ViewProfile() {
                   </Link>
                 ) : (
                   <>
-                    <button className="px-6 py-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-lg hover:from-purple-600 hover:to-pink-600 transition-all">
-                      💬 Message
-                    </button>
-                    <button className={`px-6 py-2 rounded-lg backdrop-blur-md transition-all ${
-                      theme === 'dark'
-                        ? 'bg-white/10 hover:bg-white/20 text-white'
-                        : 'bg-white/50 hover:bg-white/70 text-gray-800'
-                    }`}>
-                      🎭 Send Anonymous
-                    </button>
+                    {blockMessage && (
+                      <div className={`px-4 py-2 rounded-lg text-center ${
+                        theme === 'dark' 
+                          ? 'bg-yellow-500/20 text-yellow-300 border border-yellow-500/30' 
+                          : 'bg-yellow-100 text-yellow-800 border border-yellow-300'
+                      }`}>
+                        🚫 {blockMessage}
+                      </div>
+                    )}
+                    <div className="flex gap-2">
+                      <button 
+                        disabled={isBlocked}
+                        className={`px-6 py-2 rounded-lg transition-all ${
+                          isBlocked 
+                            ? 'bg-gray-400 cursor-not-allowed opacity-50' 
+                            : 'bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600'
+                        } text-white`}
+                      >
+                        💬 Message
+                      </button>
+                      <button 
+                        disabled={isBlocked}
+                        className={`px-6 py-2 rounded-lg backdrop-blur-md transition-all ${
+                          isBlocked 
+                            ? 'bg-gray-400 cursor-not-allowed opacity-50 text-gray-300' 
+                            : theme === 'dark'
+                              ? 'bg-white/10 hover:bg-white/20 text-white'
+                              : 'bg-white/50 hover:bg-white/70 text-gray-800'
+                        }`}
+                      >
+                        🎭 Send Anonymous
+                      </button>
+                    </div>
+                    <div className="mt-2">
+                      <BlockUserButton 
+                        userId={profile.user_id}
+                        userName={profile.name}
+                        isBlocked={isBlocked}
+                        onBlockStatusChange={handleBlockStatusChange}
+                      />
+                    </div>
                   </>
                 )}
               </div>

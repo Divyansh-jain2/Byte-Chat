@@ -70,7 +70,8 @@ export async function getOrCreateConversation(req: Request, res: Response) {
         );
 
         // console.log(`✅ NEW regular conversation created: ${conversation.rows[0].conversation_id}`);
-      } catch (insertError: any) {
+      } 
+      catch (insertError: any) {
         // Handle race condition - another request created it first
         if (insertError.code === '23505') {
           // console.log(`⚠️ Race condition detected - fetching existing regular conversation`);
@@ -83,12 +84,14 @@ export async function getOrCreateConversation(req: Request, res: Response) {
           );
           
           // console.log(`✓ Fetched conversation after race condition: ${conversation.rows[0]?.conversation_id}`);
-        } else {
+        } 
+        else {
           // Re-throw if it's not a duplicate key error
           throw insertError;
         }
       }
-    } else {
+    } 
+    else {
       // console.log(`✓ Found existing regular conversation: ${conversation.rows[0].conversation_id}`);
     }
 
@@ -106,7 +109,7 @@ export async function getOrCreateConversation(req: Request, res: Response) {
     });
   }
   catch (error: any) {
-    console.error('❌ Get or create regular conversation error:', {
+    console.error('[ERROR] Get or create regular conversation error:', {
       message: error.message,
       code: error.code,
       detail: error.detail,
@@ -164,8 +167,9 @@ export async function getChatRequests(req: Request, res: Response) {
       success: true,
       data: result.rows
     });
-  } catch (error) {
-    console.error('Get chat requests error:', error);
+  } 
+  catch (error) {
+    console.error('[ERROR] Get chat requests error:', error);
     if (error instanceof ApiError) throw error;
     throw new ApiError(500, 'Failed to fetch chat requests');
   }
@@ -259,8 +263,9 @@ export async function respondToChatRequest(req: Request, res: Response) {
         conversation: conversation
       }
     });
-  } catch (error) {
-    console.error('Respond to chat request error:', error);
+  } 
+  catch (error) {
+    console.error('[ERROR] Respond to chat request error:', error);
     if (error instanceof ApiError) throw error;
     throw new ApiError(500, 'Failed to respond to chat request');
   }
@@ -320,14 +325,15 @@ export async function getConversations(req: Request, res: Response) {
       [userId]
     );
 
-    // console.log(`💬 Fetched ${result.rows.length} regular conversations for user ${userId}`);
+    // console.log(`[MSGES] Fetched ${result.rows.length} regular conversations for user ${userId}`);
 
     res.json({
       success: true,
       data: result.rows
     });
-  } catch (error) {
-    console.error('❌ Get regular conversations error:', error);
+  } 
+  catch (error) {
+    console.error('[ERROR] Get regular conversations error:', error);
     if (error instanceof ApiError) throw error;
     throw new ApiError(500, 'Failed to fetch regular conversations');
   }
@@ -417,7 +423,7 @@ export async function getMessages(req: Request, res: Response) {
     if (error instanceof ApiError && error.statusCode === 403) {
       // Silent - this is expected when frontend checks regular vs anonymous
     } else {
-      console.error('💬 Get regular messages error:', error);
+      console.error('[ERROR] Get regular messages error:', error);
     }
     if (error instanceof ApiError) throw error;
     throw new ApiError(500, 'Failed to fetch regular messages');
@@ -462,6 +468,23 @@ export async function sendMessage(req: Request, res: Response) {
 
     if (convCheck.rows.length === 0) {
       throw new ApiError(403, 'Access denied or conversation blocked/not regular');
+    }
+
+    // Get other user ID and check blocking status
+    const conv = convCheck.rows[0];
+    const otherUserId = conv.user1_id === userId ? conv.user2_id : conv.user1_id;
+    
+    const blockCheck = await pool.query(
+      `SELECT EXISTS(
+        SELECT 1 FROM user_blocks 
+        WHERE (blocker_id = $1 AND blocked_id = $2) 
+           OR (blocker_id = $2 AND blocked_id = $1)
+      ) as is_blocked`,
+      [userId, otherUserId]
+    );
+
+    if (blockCheck.rows[0].is_blocked) {
+      throw new ApiError(403, 'Cannot send message - user is blocked');
     }
 
     // Insert message
@@ -534,8 +557,9 @@ export async function sendMessage(req: Request, res: Response) {
       message: 'Message sent successfully',
       data: message
     });
-  } catch (error) {
-    console.error('💬 Send regular message error:', error);
+  } 
+  catch (error) {
+    console.error('[MSGES] Send regular message error:', error);
     if (error instanceof ApiError) throw error;
     throw new ApiError(500, 'Failed to send regular message');
   }
@@ -575,8 +599,9 @@ export async function updateMessageStatus(req: Request, res: Response) {
       message: 'Message status updated',
       data: result.rows[0]
     });
-  } catch (error) {
-    console.error('Update message status error:', error);
+  } 
+  catch (error) {
+    console.error('[ERROR] Update message status error:', error);
     if (error instanceof ApiError) throw error;
     throw new ApiError(500, 'Failed to update message status');
   }
@@ -629,8 +654,9 @@ export async function deleteMessage(req: Request, res: Response) {
       success: true,
       message: 'Message deleted successfully'
     });
-  } catch (error) {
-    console.error('Delete message error:', error);
+  } 
+  catch (error) {
+    console.error('[ERROR] Delete message error:', error);
     if (error instanceof ApiError) throw error;
     throw new ApiError(500, 'Failed to delete message');
   }
@@ -701,8 +727,9 @@ export async function blockUser(req: Request, res: Response) {
       success: true,
       message: 'User blocked successfully'
     });
-  } catch (error) {
-    console.error('Block user error:', error);
+  } 
+  catch (error) {
+    console.error('[ERROR] Block user error:', error);
     if (error instanceof ApiError) throw error;
     throw new ApiError(500, 'Failed to block user');
   }
@@ -752,64 +779,243 @@ export async function unblockUser(req: Request, res: Response) {
       success: true,
       message: 'User unblocked successfully'
     });
-  } catch (error) {
-    console.error('Unblock user error:', error);
+  } 
+  catch (error) {
+    console.error('[ERROR] Unblock user error:', error);
     if (error instanceof ApiError) throw error;
     throw new ApiError(500, 'Failed to unblock user');
   }
 }
 
-// Report user
+// Report user (works for both regular and anonymous users)
 export async function reportUser(req: Request, res: Response) {
   try {
     const userId = req.user?.userId;
-    const { reportedUserId, conversationId, reason, description } = req.body;
+    
+    // Support both new format (reportType, description) and old format (reason, description optional)
+    const { 
+      reportedUserId, 
+      messageId, 
+      conversationId,
+      reportType, 
+      reason,
+      description, 
+      evidenceUrls 
+    } = req.body;
 
     if (!userId) {
       throw new ApiError(401, 'Unauthorized');
     }
 
-    if (!reportedUserId || !reason) {
-      throw new ApiError(400, 'Reported user ID and reason are required');
+    // Use reportType if provided, otherwise use reason (backwards compatibility)
+    const finalReportType = reportType || reason;
+    // Use description if provided, otherwise use reason (backwards compatibility)
+    const finalDescription = description || reason || 'No description provided';
+
+    // // Debug log to help troubleshoot
+    // console.log('📝 Report request received:', { 
+    //   reportedUserId, 
+    //   finalReportType, 
+    //   hasDescription: !!finalDescription,
+    //   messageId,
+    //   conversationId 
+    // });
+
+    if (!reportedUserId) {
+      throw new ApiError(400, 'Reported user ID is required');
     }
 
-    // Check if conversation exists if provided
-    if (conversationId) {
-      const convCheck = await pool.query(
-        `SELECT * FROM chat_conversations 
-         WHERE conversation_id = $1 
-         AND (user1_id = $2 OR user2_id = $2)`,
+    // Handle anonymous user reports - extract actual user_id from conversation
+    let actualReportedUserId = reportedUserId;
+    if (reportedUserId === 'ANONYMOUS' && conversationId) {
+      // console.log('🎭 Resolving anonymous user ID from conversation:', conversationId);
+      
+      const convResult = await pool.query(
+        `SELECT 
+          cc.user1_id, cc.user2_id, cc.anonymous_initiator_id,
+          ai.user_id as initiator_actual_user_id
+         FROM chat_conversations cc
+         LEFT JOIN anonymous_identities ai ON cc.anonymous_initiator_id = ai.identity_id
+         WHERE cc.conversation_id = $1 AND (cc.user1_id = $2 OR cc.user2_id = $2)`,
         [conversationId, userId]
       );
-
-      if (convCheck.rows.length === 0) {
-        throw new ApiError(403, 'Not part of this conversation');
+      
+      if (convResult.rows.length === 0) {
+        throw new ApiError(404, 'Conversation not found');
+      }
+      
+      const conv = convResult.rows[0];
+      
+      // The reported user is the anonymous initiator (the one who started anonymously)
+      if (conv.initiator_actual_user_id) {
+        actualReportedUserId = conv.initiator_actual_user_id;
+        // console.log('Resolved anonymous user ID:', actualReportedUserId);
+      } 
+      else {
+        // If no anonymous initiator, report the other user in conversation
+        actualReportedUserId = conv.user1_id === userId ? conv.user2_id : conv.user1_id;
+        // console.log('Resolved regular user ID from conversation:', actualReportedUserId);
       }
     }
 
-    // Create report
-    await pool.query(
+    if (!actualReportedUserId) {
+      throw new ApiError(400, 'Could not identify reported user');
+    }
+
+    if (!finalReportType) {
+      throw new ApiError(400, 'Report type or reason is required');
+    }
+
+    // // Debug: Extract and compare IDs
+    // console.log('🔍 Checking self-report:', {
+    //   reporterUserId: userId,
+    //   reporterType: typeof userId,
+      // reportedUserId: actualReportedUserId,
+    //   reportedType: typeof actualReportedUserId,
+    //   areEqual: userId === actualReportedUserId,
+    //   strictEqual: userId === actualReportedUserId,
+    //   looseEqual: userId == actualReportedUserId
+    // });
+
+    // Prevent self-reporting (ensure both are strings for comparison)
+    const reporterIdStr = String(userId);
+    const reportedIdStr = String(actualReportedUserId);
+    
+    if (reporterIdStr === reportedIdStr) {
+      console.log('[ERROR] Self-report detected!');
+      throw new ApiError(400, 'Cannot report yourself');
+    }
+    
+    // console.log('✅ Different users - report allowed');
+
+    // Validate and normalize report type
+    const validTypes = ['spam', 'harassment', 'inappropriate_content', 'impersonating', 'fake_profile', 'other'];
+    const normalizedType = finalReportType.toLowerCase().replace(/\s+/g, '_');
+    
+    if (!validTypes.includes(normalizedType)) {
+      // Try to map common variations
+      const typeMap: Record<string, string> = {
+        'abuse': 'harassment',
+        'bullying': 'harassment',
+        'fake': 'fake_profile',
+        'impersonate': 'impersonating',
+        'inappropriate': 'inappropriate_content',
+        'offensive': 'inappropriate_content'
+      };
+      
+      const mappedType = typeMap[normalizedType];
+      if (!mappedType) {
+        throw new ApiError(400, `Invalid report type. Must be one of: ${validTypes.join(', ')}`);
+      }
+    }
+
+    // If conversationId provided, get the actual message_id from the conversation
+    let finalMessageId = messageId;
+    if (conversationId && !messageId) {
+      const lastMessage = await pool.query(
+        `SELECT message_id FROM chat_messages 
+         WHERE conversation_id = $1 
+         AND sender_id = $2
+         ORDER BY created_at DESC 
+         LIMIT 1`,
+        [conversationId, actualReportedUserId]
+      );
+      if (lastMessage.rows.length > 0) {
+        finalMessageId = lastMessage.rows[0].message_id;
+      }
+    }
+
+    // Get reporter and reported user info for detailed logging
+    const reporterInfo = await pool.query(
+      'SELECT user_id, name, roll_no, branch, dp_url FROM users WHERE user_id = $1',
+      [userId]
+    );
+    
+    const reportedInfo = await pool.query(
+      'SELECT user_id, name, roll_no, gender, branch, dp_url, bio FROM users WHERE user_id = $1',
+      [actualReportedUserId]
+    );
+
+    // Get message details if messageId provided
+    let messageDetails = null;
+    if (finalMessageId) {
+      const msgResult = await pool.query(
+        `SELECT message_id, conversation_id, sender_id, message_type, created_at 
+         FROM chat_messages WHERE message_id = $1`,
+        [finalMessageId]
+      );
+      if (msgResult.rows.length > 0) {
+        messageDetails = msgResult.rows[0];
+      }
+    }
+
+    // Create report (matching your database schema)
+    const result = await pool.query(
       `INSERT INTO reports (
-        reporter_id, reported_user_id, entity_type, entity_id, 
-        reason, description, status, created_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())`,
+        reporter_user_id, reported_user_id, reported_message_id,
+        report_type, description, evidence_urls
+      ) VALUES ($1, $2, $3, $4, $5, $6)
+      RETURNING *`,
       [
         userId,
-        reportedUserId,
-        conversationId ? 'conversation' : 'user',
-        conversationId || reportedUserId,
-        reason,
-        description || null,
-        'pending'
+        actualReportedUserId,
+        finalMessageId || null,
+        normalizedType,
+        finalDescription,
+        evidenceUrls || []
       ]
     );
 
+    // // Comprehensive logging for admin review
+    // console.log('✅ ====== REPORT CREATED ====== ');
+    // console.log('Report ID:', result.rows[0].report_id);
+    // console.log('\n📋 REPORTER INFO:');
+    // console.log('  - User ID:', reporterInfo.rows[0].user_id);
+    // console.log('  - Name:', reporterInfo.rows[0].name);
+    // console.log('  - Roll No:', reporterInfo.rows[0].roll_no);
+    // console.log('  - Branch:', reporterInfo.rows[0].branch);
+    // console.log('  - DP URL:', reporterInfo.rows[0].dp_url || 'None');
+    // console.log('\n🚨 REPORTED USER INFO:');
+    // console.log('  - User ID:', reportedInfo.rows[0].user_id);
+    // console.log('  - Name:', reportedInfo.rows[0].name);
+    // console.log('  - Roll No:', reportedInfo.rows[0].roll_no);
+    // console.log('  - Gender:', reportedInfo.rows[0].gender);
+    // console.log('  - Branch:', reportedInfo.rows[0].branch);
+    // console.log('  - DP URL:', reportedInfo.rows[0].dp_url || 'None');
+    // console.log('  - Bio:', reportedInfo.rows[0].bio || 'None');
+    // console.log('\n📝 REPORT DETAILS:');
+    // console.log('  - Type:', normalizedType);
+    // console.log('  - Description:', finalDescription);
+    // console.log('  - Evidence URLs:', evidenceUrls?.length || 0, 'items');
+    // console.log('  - Status:', result.rows[0].status);
+    // console.log('  - Created At:', result.rows[0].created_at);
+
+    // if (messageDetails) {
+    //   console.log('\n💬 MESSAGE CONTEXT:');
+    //   console.log('  - Message ID:', messageDetails.message_id);
+    //   console.log('  - Conversation ID:', messageDetails.conversation_id);
+    //   console.log('  - Message Type:', messageDetails.message_type);
+    //   console.log('  - Sent At:', messageDetails.created_at);
+    // }
+
+    // if (conversationId) {
+    //   console.log('\n🔗 CONVERSATION ID:', conversationId);
+    // }
+
+    // console.log('================================\n');
+
     res.json({
       success: true,
-      message: 'Report submitted successfully. Our team will review it.'
+      message: 'Report submitted successfully. Our team will review it.',
+      data: {
+        reportId: result.rows[0].report_id
+      }
     });
-  } catch (error) {
-    console.error('Report user error:', error);
+
+  } 
+
+  catch (error) {
+    console.error('[ERROR] Report user error:', error);
     if (error instanceof ApiError) throw error;
     throw new ApiError(500, 'Failed to submit report');
   }
