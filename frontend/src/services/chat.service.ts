@@ -116,4 +116,17 @@ export const chatService = {
     const response = await api.post('/report', reportData);
     return response.data;
   },
+
+  // Upload chat image
+  async uploadImage(file: File) {
+    const formData = new FormData();
+    formData.append('image', file);
+
+    const response = await api.post('/upload-image', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    return response.data;
+  },
 };

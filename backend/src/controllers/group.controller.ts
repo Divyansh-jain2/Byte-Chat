@@ -1543,3 +1543,60 @@ export const selectGroupPresetAvatar = async (req: Request, res: Response) => {
     client.release();
   }
 };
+
+// Upload group chat image to Cloudinary
+export const uploadGroupChatImage = async (req: Request, res: Response) => {
+  try {
+    const userId = req.user?.userId;
+    const { groupId } = req.params;
+
+    if (!userId) {
+      throw new ApiError(401, 'Unauthorized');
+    }
+
+    // Ensure user is a member of the group
+    const memberCheck = await pool.query(
+      `SELECT 1 FROM group_members WHERE group_id = $1 AND user_id = $2`,
+      [groupId, userId]
+    );
+
+    if (memberCheck.rows.length === 0) {
+      throw new ApiError(403, 'Access denied to this group');
+    }
+
+    if (!req.file) {
+      throw new ApiError(400, 'No image file provided');
+    }
+
+    // Validate file size (5MB)
+    if (req.file.size > 5 * 1024 * 1024) {
+      throw new ApiError(400, 'Image size must be less than 5MB');
+    }
+
+    // Upload to Cloudinary in chat_images folder with unique ID
+    const randomStr = Math.random().toString(36).substring(2, 10);
+    const uniqueId = `group_${groupId}_${userId}_${Date.now()}_${randomStr}`;
+    const result = await uploadToCloudinary(
+      req.file.buffer,
+      'chat_images',
+      uniqueId,
+      true // Skip transformation for chat images
+    );
+
+    res.json({
+      success: true,
+      message: 'Image uploaded successfully',
+      data: {
+        url: result.secure_url,
+        publicId: result.public_id,
+        size: req.file.size,
+        mimeType: req.file.mimetype,
+      }
+    });
+
+  } catch (error) {
+    console.error('[ERROR] Upload group chat image error:', error);
+    if (error instanceof ApiError) throw error;
+    throw new ApiError(500, 'Failed to upload image');
+  }
+};

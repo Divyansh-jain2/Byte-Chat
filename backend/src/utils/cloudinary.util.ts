@@ -20,14 +20,16 @@ cloudinary.config({
 /**
  * Upload image to Cloudinary
  * @param fileBuffer - Buffer of the image file
- * @param folder - Folder name in Cloudinary (e.g., 'profile_pictures', 'group_pictures')
+ * @param folder - Folder name in Cloudinary (e.g., 'profile_pictures', 'group_pictures', 'chat_images')
  * @param publicId - Optional custom public ID for the image
+ * @param skipTransformation - Skip image transformation (for chat images)
  * @returns Cloudinary upload result with secure_url
  */
 export const uploadToCloudinary = async (
   fileBuffer: Buffer,
   folder: string,
-  publicId?: string
+  publicId?: string,
+  skipTransformation?: boolean
 ): Promise<{ secure_url: string; public_id: string }> => {
   try {
     return new Promise((resolve, reject) => {
@@ -36,12 +38,14 @@ export const uploadToCloudinary = async (
           folder: folder,
           ...(publicId && { public_id: publicId }),
           resource_type: 'image',
-          allowed_formats: ['jpg', 'jpeg', 'png', 'webp'],
-          transformation: [
-            { width: 500, height: 500, crop: 'limit' }, // Max dimensions
-            { quality: 'auto:good' }, // Auto quality optimization
-            { fetch_format: 'auto' }, // Auto format conversion
-          ],
+          allowed_formats: ['jpg', 'jpeg', 'png', 'webp', 'gif'],
+          ...(!skipTransformation && {
+            transformation: [
+              { width: 500, height: 500, crop: 'limit' }, // Max dimensions
+              { quality: 'auto:good' }, // Auto quality optimization
+              { fetch_format: 'auto' }, // Auto format conversion
+            ],
+          }),
         },
         (error, result) => {
           if (error) {

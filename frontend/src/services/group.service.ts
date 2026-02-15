@@ -344,4 +344,27 @@ export const groupService = {
 
     return response.json();
   },
+
+  // Upload group chat image
+  uploadImage: async (groupId: string, file: File) => {
+    const token = localStorage.getItem('accessToken');
+    const formData = new FormData();
+    formData.append('image', file);
+
+    const response = await fetch(`${API_URL}/${groupId}/upload-image`, {
+      method: 'POST',
+      headers: {
+        'Authorization': token ? `Bearer ${token}` : '',
+      },
+      credentials: 'include',
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message || 'Failed to upload image');
+    }
+
+    return response.json();
+  },
 };

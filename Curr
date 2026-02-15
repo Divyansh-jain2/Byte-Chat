@@ -295,8 +295,3 @@
 7. Reports & block
 8. Media handling
 9. Governance (polls)
-
----
-
-This is the **complete modular decomposition** of your app.
-If you implement module-by-module exactly like this, the system will stay clean and scalable.

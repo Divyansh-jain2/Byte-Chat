@@ -2,10 +2,15 @@
 
 import { useEffect, useState, useRef } from 'react';
 import { useRouter, useParams } from 'next/navigation';
+import dynamic from 'next/dynamic';
 import { chatService } from '@/services/chat.service';
 import anonymousChatService from '@/services/anonymous-chat.service';
 import { useSocket } from '@/contexts/SocketContext';
 import type { Message } from '@/types/chat.types';
+import { Theme } from 'emoji-picker-react';
+
+// Dynamic import for emoji picker (client-side only)
+const EmojiPicker = dynamic(() => import('emoji-picker-react'), { ssr: false });
 
 export default function ChatWindowPage() {
   const router = useRouter();
@@ -25,7 +30,18 @@ export default function ChatWindowPage() {
   const [showReportDialog, setShowReportDialog] = useState(false);
   const [reportReason, setReportReason] = useState('');
   const [reportDescription, setReportDescription] = useState('');
+  const [selectedImage, setSelectedImage] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [showEditNameDialog, setShowEditNameDialog] = useState(false);
+  const [customName, setCustomName] = useState('');
+  const [isViewingAnonymous, setIsViewingAnonymous] = useState(false);
+  const [anonymousIdentityId, setAnonymousIdentityId] = useState<string | null>(null);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const messageInputRef = useRef<HTMLInputElement>(null);
+  const emojiPickerRef = useRef<HTMLDivElement>(null);
   const fetchingRef = useRef(false); // Prevent duplicate fetches
   const lastFetchRef = useRef(0); // Track last fetch time
 
@@ -119,6 +135,23 @@ export default function ChatWindowPage() {
     scrollToBottom();
   }, [messages]);
 
+  // Close emoji picker when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (emojiPickerRef.current && !emojiPickerRef.current.contains(event.target as Node)) {
+        setShowEmojiPicker(false);
+      }
+    };
+
+    if (showEmojiPicker) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showEmojiPicker]);
+
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
@@ -160,6 +193,17 @@ export default function ChatWindowPage() {
       // Use otherUser from API response
       if (response.otherUser) {
         setOtherUser(response.otherUser);
+        
+        // If anonymous conversation and viewing as receiver
+        if (conversationType === 'anonymous' && response.otherUser.is_anonymous) {
+          setIsViewingAnonymous(true);
+          setAnonymousIdentityId(response.otherUser.identity_id || null);
+          setCustomName(response.otherUser.name || '');
+        } else {
+          setIsViewingAnonymous(false);
+          setAnonymousIdentityId(null);
+          setCustomName('');
+        }
       }
       
       // Set isAnonymous based on conversation type (not otherUser.is_anonymous)
@@ -196,17 +240,48 @@ export default function ChatWindowPage() {
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!newMessage.trim() || sending || isBlocked) return;
+    if ((!newMessage.trim() && !selectedImage) || sending || isBlocked) return;
 
     try {
       setSending(true);
       
+      let mediaUrl = '';
+      let mediaSize = 0;
+      let mediaMimeType = '';
+
+      // Upload image if selected
+      if (selectedImage) {
+        setUploadingImage(true);
+        try {
+          const uploadResult = isAnonymous
+            ? await anonymousChatService.uploadAnonymousImage(selectedImage)
+            : await chatService.uploadImage(selectedImage);
+          
+          mediaUrl = uploadResult.data.url;
+          mediaSize = uploadResult.data.size;
+          mediaMimeType = uploadResult.data.mimeType;
+        } catch (uploadError: any) {
+          console.error('[ERROR] Failed to upload image:', uploadError);
+          alert(uploadError.response?.data?.message || 'Failed to upload image');
+          setUploadingImage(false);
+          setSending(false);
+          return;
+        } finally {
+          setUploadingImage(false);
+        }
+      }
+      
       const messageData = {
         conversationId: conversationId,
-        encryptedContent: newMessage,
+        encryptedContent: newMessage.trim() || 'Image',
         contentIv: 'dummy_iv',
         contentAuthTag: 'dummy_tag',
-        messageType: 'text',
+        messageType: selectedImage ? 'image' : 'text',
+        ...(mediaUrl && {
+          mediaUrl,
+          mediaSize,
+          mediaMimeType,
+        }),
       };
       
       // Use the correct service based on conversation type
@@ -216,7 +291,13 @@ export default function ChatWindowPage() {
         await chatService.sendMessage(messageData);
       }
 
+      // Clear states AFTER successful send
       setNewMessage('');
+      setSelectedImage(null);
+      setImagePreview(null);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
       fetchMessages(); // Refresh messages
     } 
     catch (error: any) {
@@ -233,6 +314,66 @@ export default function ChatWindowPage() {
     } finally {
       setSending(false);
     }
+  };
+
+  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      alert('Please select an image file');
+      return;
+    }
+
+    // Validate file size (5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      alert('Image size must be less than 5MB');
+      return;
+    }
+
+    setSelectedImage(file);
+    
+    // Create preview
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setImagePreview(reader.result as string);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleRemoveImage = () => {
+    setSelectedImage(null);
+    setImagePreview(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  const handleEmojiSelect = (emojiData: any) => {
+    const emoji = emojiData.emoji;
+    const input = messageInputRef.current;
+    
+    if (input) {
+      const start = input.selectionStart || 0;
+      const end = input.selectionEnd || 0;
+      const currentMessage = newMessage;
+      
+      // Insert emoji at cursor position
+      const newText = currentMessage.substring(0, start) + emoji + currentMessage.substring(end);
+      setNewMessage(newText);
+      
+      // Set cursor position after emoji
+      setTimeout(() => {
+        input.focus();
+        input.setSelectionRange(start + emoji.length, start + emoji.length);
+      }, 0);
+    } else {
+      // If no cursor position, append to end
+      setNewMessage(prev => prev + emoji);
+    }
+    
+    setShowEmojiPicker(false);
   };
 
   const formatTime = (dateString: string) => {
@@ -262,6 +403,41 @@ export default function ChatWindowPage() {
       fetchMessages();
     } catch (error: any) {
       alert(error.response?.data?.message || 'Failed to reveal identity');
+    }
+  };
+
+  const handleUpdateCustomName = async () => {
+    if (!anonymousIdentityId) {
+      alert('Cannot update name - identity ID not found');
+      return;
+    }
+
+    const trimmedName = customName.trim();
+    
+    // Validate name
+    if (trimmedName.length === 0) {
+      alert('Custom name cannot be empty');
+      return;
+    }
+    if (trimmedName.length > 44) {
+      alert('Custom name must be less than 44 characters (5 chars reserved for uniqueness)');
+      return;
+    }
+
+    try {
+      await anonymousChatService.updateAnonymousName(
+        anonymousIdentityId,
+        trimmedName
+      );
+      
+      // Reload messages to get the updated name with random suffix
+      await fetchMessages();
+      
+      setShowEditNameDialog(false);
+      setShowMenu(false);
+      alert('Custom name updated successfully');
+    } catch (error: any) {
+      alert(error.response?.data?.message || 'Failed to update custom name');
     }
   };
 
@@ -460,6 +636,20 @@ Reported At: ${new Date().toISOString()}
                     Reveal Identity
                   </button>
                 )}
+                {isViewingAnonymous && anonymousIdentityId && (
+                  <button
+                    onClick={() => {
+                      setShowEditNameDialog(true);
+                      setShowMenu(false);
+                    }}
+                    className="w-full px-4 py-2 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                    </svg>
+                    Edit Name
+                  </button>
+                )}
                 <button
                   onClick={handleBlockUser}
                   disabled={isBlocked}
@@ -586,6 +776,19 @@ Reported At: ${new Date().toISOString()}
                             : message.sender.name}
                         </p>
                       )}
+                      
+                      {/* Display Image if message type is image */}
+                      {message.message_type === 'image' && message.media_url && (
+                        <div className="mb-2">
+                          <img
+                            src={message.media_url}
+                            alt="Shared image"
+                            className="max-w-full rounded-lg cursor-pointer hover:opacity-90"
+                            onClick={() => window.open(message.media_url, '_blank')}
+                          />
+                        </div>
+                      )}
+                      
                       <p className="whitespace-pre-wrap break-words">{message.encrypted_content}</p>
                       <p className={`text-xs mt-1 ${isMyMessage ? 'text-blue-100' : 'text-gray-500'}`}>
                         {formatTime(message.created_at.toString())}
@@ -610,35 +813,145 @@ Reported At: ${new Date().toISOString()}
               </p>
             </div>
           ) : (
-            <form onSubmit={handleSendMessage} className="flex gap-3">
-              <input
-                type="text"
-                value={newMessage}
-                onChange={(e) => setNewMessage(e.target.value)}
-                placeholder="Type a message..."
-                className="flex-1 px-4 py-3 bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                disabled={sending}
-              />
-              <button
-                type="submit"
-                disabled={!newMessage.trim() || sending}
-                className="px-6 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                {sending ? (
-                  <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+            <>
+              {/* Image Preview */}
+              {imagePreview && (
+                <div className="mb-3 relative inline-block">
+                  <img
+                    src={imagePreview}
+                    alt="Preview"
+                    className="max-h-32 rounded-lg border border-gray-300 dark:border-gray-600"
+                  />
+                  <button
+                    onClick={handleRemoveImage}
+                    className="absolute -top-2 -right-2 bg-red-600 text-white rounded-full p-1 hover:bg-red-700"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+              )}
+
+              {/* Emoji Picker */}
+              {showEmojiPicker && (
+                <div ref={emojiPickerRef} className="absolute bottom-20 left-4 z-50">
+                  <EmojiPicker
+                    onEmojiClick={handleEmojiSelect}
+                    autoFocusSearch={false}
+                    theme={typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches ? Theme.DARK : Theme.LIGHT}
+                  />
+                </div>
+              )}
+              
+              <form onSubmit={handleSendMessage} className="flex gap-3 items-end relative">
+                {/* Hidden file input */}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleImageSelect}
+                  className="hidden"
+                />
+                
+                {/* Image upload button */}
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={sending || uploadingImage}
+                  className="p-3 text-gray-600 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="Attach image (max 5MB)"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                   </svg>
-                ) : (
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                </button>
+
+                {/* Emoji button */}
+                <button
+                  type="button"
+                  onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+                  disabled={sending || uploadingImage}
+                  className="p-3 text-gray-600 dark:text-gray-400 hover:text-yellow-500 dark:hover:text-yellow-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="Add emoji"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
-                )}
-              </button>
-            </form>
+                </button>
+                
+                <input
+                  ref={messageInputRef}
+                  type="text"
+                  value={newMessage}
+                  onChange={(e) => setNewMessage(e.target.value)}
+                  placeholder="Type a message..."
+                  className="flex-1 px-4 py-3 bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  disabled={sending || uploadingImage}
+                />
+                <button
+                  type="submit"
+                  disabled={(!newMessage.trim() && !selectedImage) || sending || uploadingImage}
+                  className="px-6 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  {sending || uploadingImage ? (
+                    <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                  ) : (
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                    </svg>
+                  )}
+                </button>
+              </form>
+            </>
           )}
         </div>
       </div>
+
+      {/* Edit Name Dialog */}
+      {showEditNameDialog && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full p-6">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+              Edit Custom Name
+            </h3>
+            <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+              Set a custom name to help you identify this anonymous sender.
+            </p>
+            <input
+              type="text"
+              value={customName}
+              onChange={(e) => setCustomName(e.target.value)}
+              placeholder={otherUser?.name || "Enter custom name"}
+              maxLength={50}
+              className="w-full px-4 py-3 bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 mb-4"
+            />
+            <div className="text-xs text-gray-500 dark:text-gray-400 mb-4">
+              {customName.length}/50 characters
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  setShowEditNameDialog(false);
+                  setCustomName(otherUser?.name || '');
+                }}
+                className="flex-1 px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleUpdateCustomName}
+                className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -90,13 +90,34 @@ export const reportAnonymousUser = async (data: {
   return response.data;
 };
 
+// Upload chat image for anonymous chat
+export const uploadAnonymousImage = async (file: File) => {
+  const formData = new FormData();
+  formData.append('image', file);
+
+  const response = await api.post('/upload-image', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data',
+    },
+  });
+  return response.data;
+};
+
+// Update anonymous identity name (receiver can customize)
+export const updateAnonymousName = async (identityId: string, customName: string) => {
+  const response = await api.put(`/identity/${identityId}/custom-name`, { customName });
+  return response.data;
+};
+
 const anonymousChatService = {
   createAnonymousConversation,
   getAnonymousConversations,
   getAnonymousMessages,
   sendAnonymousMessage,
   revealAnonymousIdentity,
-  reportAnonymousUser
+  reportAnonymousUser,
+  uploadAnonymousImage,
+  updateAnonymousName
 };
 
 export default anonymousChatService;

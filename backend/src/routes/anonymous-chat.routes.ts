@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { authenticateToken } from '../middleware/auth.middleware.js';
+import { uploadImage, handleMulterError } from '../middleware/upload.middleware.js';
 import * as anonymousChatController from '../controllers/anonymous-chat.controller.js';
 
 /**
@@ -21,7 +22,13 @@ router.get('/conversation/:conversationId/messages', anonymousChatController.get
 // Anonymous Messages
 router.post('/send', anonymousChatController.sendAnonymousMessage);
 
+// Image Upload
+router.post('/upload-image', uploadImage.single('image'), anonymousChatController.uploadAnonymousChatImage, handleMulterError);
+
 // Identity Reveal
 router.post('/reveal/:conversationId', anonymousChatController.revealAnonymousIdentity);
+
+// Custom Name (only receiver can set)
+router.put('/identity/:identityId/custom-name', anonymousChatController.updateAnonymousName);
 
 export default router;

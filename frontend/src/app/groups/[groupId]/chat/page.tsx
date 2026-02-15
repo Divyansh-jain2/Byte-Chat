@@ -3,9 +3,14 @@
 import { useEffect, useState, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
+import dynamic from 'next/dynamic';
 import { groupService } from '@/services/group.service';
 import { useSocket } from '@/contexts/SocketContext';
 import type { Message, Poll } from '@/types/chat.types';
+import { Theme } from 'emoji-picker-react';
+
+// Dynamic import for emoji picker (client-side only)
+const EmojiPicker = dynamic(() => import('emoji-picker-react'), { ssr: false });
 
 interface GroupMessage extends Message {
   sender?: {
@@ -29,7 +34,14 @@ export default function GroupChatPage() {
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [showCreatePoll, setShowCreatePoll] = useState(false);
+  const [selectedImage, setSelectedImage] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const messageInputRef = useRef<HTMLInputElement>(null);
+  const emojiPickerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
       fetchPolls();
@@ -62,7 +74,7 @@ export default function GroupChatPage() {
     };
 
     socket.on('new-group-message', handleNewGroupMessage);
-const handleNewPoll = (poll: Poll) => {
+    const handleNewPoll = (poll: Poll) => {
       setPolls((prev) => [poll, ...prev]);
     };
 
@@ -83,6 +95,23 @@ const handleNewPoll = (poll: Poll) => {
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  // Close emoji picker when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (emojiPickerRef.current && !emojiPickerRef.current.contains(event.target as Node)) {
+        setShowEmojiPicker(false);
+      }
+    };
+
+    if (showEmojiPicker) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showEmojiPicker]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -125,23 +154,119 @@ const handleNewPoll = (poll: Poll) => {
 
 const handleSendMessage = async (e: React.FormEvent) => {
   e.preventDefault();
-  if (!newMessage.trim() || sending) return;
+  if ((!newMessage.trim() && !selectedImage) || sending) return;
 
   try {
     setSending(true);
+    
+    let mediaUrl = '';
+    let mediaSize = 0;
+    let mediaMimeType = '';
+
+    // Upload image if selected
+    if (selectedImage) {
+      setUploadingImage(true);
+      try {
+        const uploadResult = await groupService.uploadImage(groupId, selectedImage);
+        mediaUrl = uploadResult.data.url;
+        mediaSize = uploadResult.data.size;
+        mediaMimeType = uploadResult.data.mimeType;
+      } catch (uploadError: any) {
+        console.error('[ERROR] Failed to upload image:', uploadError);
+        alert(uploadError.message || 'Failed to upload image');
+        setUploadingImage(false);
+        setSending(false);
+        return;
+      } finally {
+        setUploadingImage(false);
+      }
+    }
+
     await groupService.sendGroupMessage(groupId, {
-      encryptedContent: newMessage,
+      encryptedContent: newMessage.trim() || 'Image',
       contentIv: 'dummy_iv',
       contentAuthTag: 'dummy_tag',
-      messageType: 'text'
+      messageType: selectedImage ? 'image' : 'text',
+      ...(mediaUrl && {
+        mediaUrl,
+        mediaSize,
+        mediaMimeType,
+      }),
     });
+    
+    // Clear states AFTER successful send
     setNewMessage('');
+    setSelectedImage(null);
+    setImagePreview(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
   } catch (error: any) {
     alert(error.message || 'Failed to send message');
   } finally {
     setSending(false);
   }
 };
+
+  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      alert('Please select an image file');
+      return;
+    }
+
+    // Validate file size (5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      alert('Image size must be less than 5MB');
+      return;
+    }
+
+    setSelectedImage(file);
+    
+    // Create preview
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setImagePreview(reader.result as string);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleRemoveImage = () => {
+    setSelectedImage(null);
+    setImagePreview(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  const handleEmojiSelect = (emojiData: any) => {
+    const emoji = emojiData.emoji;
+    const input = messageInputRef.current;
+    
+    if (input) {
+      const start = input.selectionStart || 0;
+      const end = input.selectionEnd || 0;
+      const currentMessage = newMessage;
+      
+      // Insert emoji at cursor position
+      const newText = currentMessage.substring(0, start) + emoji + currentMessage.substring(end);
+      setNewMessage(newText);
+      
+      // Set cursor position after emoji
+      setTimeout(() => {
+        input.focus();
+        input.setSelectionRange(start + emoji.length, start + emoji.length);
+      }, 0);
+    } else {
+      // If no cursor position, append to end
+      setNewMessage(prev => prev + emoji);
+    }
+    
+    setShowEmojiPicker(false);
+  };
 
 if (loading) {
   return (
@@ -292,6 +417,17 @@ return (
                     </div>
                   )}
                   <div className={`px-4 py-2 border-2 border-neutral-900 dark:border-neutral-100 font-mono text-sm ${msg.is_my_message ? 'bg-neutral-900 text-neutral-100 dark:bg-neutral-100 dark:text-neutral-900' : 'bg-neutral-100 dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100'}`}>
+                    {/* Display Image if message type is image */}
+                    {msg.message_type === 'image' && msg.media_url && (
+                      <div className="mb-2">
+                        <img
+                          src={msg.media_url}
+                          alt="Shared image"
+                          className="max-w-full rounded cursor-pointer hover:opacity-90"
+                          onClick={() => window.open(msg.media_url, '_blank')}
+                        />
+                      </div>
+                    )}
                     {msg.encrypted_content}
                   </div>
                 </div>
@@ -301,8 +437,61 @@ return (
           <div ref={messagesEndRef} />
         </div>
 
-        <form onSubmit={handleSendMessage} className="mt-4 flex gap-2">
+        <form onSubmit={handleSendMessage} className="mt-4 flex gap-2 relative">
           <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            onChange={handleImageSelect}
+            className="hidden"
+          />
+          
+          {imagePreview && (
+            <div className="absolute bottom-20 left-4 bg-white dark:bg-black border-2 border-neutral-900 dark:border-neutral-100 p-2">
+              <img src={imagePreview} alt="Preview" className="max-w-xs max-h-32" />
+              <button
+                type="button"
+                onClick={handleRemoveImage}
+                className="mt-1 px-2 py-1 bg-red-600 text-white font-mono text-xs hover:bg-red-700"
+              >
+                REMOVE
+              </button>
+            </div>
+          )}
+
+          {/* Emoji Picker */}
+          {showEmojiPicker && (
+            <div ref={emojiPickerRef} className="absolute bottom-20 left-20 z-50">
+              <EmojiPicker
+                onEmojiClick={handleEmojiSelect}
+                autoFocusSearch={false}
+                theme={typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches ? Theme.DARK : Theme.LIGHT}
+              />
+            </div>
+          )}
+          
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={sending || uploadingImage}
+            className="px-4 py-3 border-2 border-neutral-900 dark:border-neutral-100 bg-white dark:bg-black text-neutral-900 dark:text-neutral-100 font-mono hover:bg-neutral-100 dark:hover:bg-neutral-900 disabled:opacity-50"
+            title="Upload image"
+          >
+            📎
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+            disabled={sending || uploadingImage}
+            className="px-4 py-3 border-2 border-neutral-900 dark:border-neutral-100 bg-white dark:bg-black text-neutral-900 dark:text-neutral-100 font-mono hover:bg-neutral-100 dark:hover:bg-neutral-900 disabled:opacity-50"
+            title="Add emoji"
+          >
+            😊
+          </button>
+          
+          <input
+            ref={messageInputRef}
             type="text"
             value={newMessage}
             onChange={(e) => setNewMessage(e.target.value)}
@@ -311,10 +500,10 @@ return (
           />
           <button
             type="submit"
-            disabled={sending}
+            disabled={sending || uploadingImage}
             className="px-6 py-3 bg-neutral-900 dark:bg-neutral-100 text-neutral-100 dark:text-neutral-900 font-mono font-bold border-2 border-neutral-900 dark:border-neutral-100 hover:bg-neutral-700 dark:hover:bg-neutral-300 transition-colors disabled:opacity-50"
           >
-            {sending ? 'SENDING...' : 'SEND'}
+            {uploadingImage ? 'UPLOADING...' : sending ? 'SENDING...' : 'SEND'}
           </button>
         </form>
       </main>

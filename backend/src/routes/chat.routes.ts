@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { authenticateToken } from '../middleware/auth.middleware.js';
+import { uploadImage, handleMulterError } from '../middleware/upload.middleware.js';
 import * as chatController from '../controllers/chat.controller.js';
 
 /**
@@ -27,6 +28,9 @@ router.get('/conversation/:conversationId/messages', chatController.getMessages)
 router.post('/send', chatController.sendMessage);
 router.put('/message/:messageId/status', chatController.updateMessageStatus);
 router.delete('/message/:messageId', chatController.deleteMessage);
+
+// Image Upload
+router.post('/upload-image', uploadImage.single('image'), chatController.uploadChatImage, handleMulterError);
 
 // Block/Unblock
 router.post('/block/:conversationId', chatController.blockUser);

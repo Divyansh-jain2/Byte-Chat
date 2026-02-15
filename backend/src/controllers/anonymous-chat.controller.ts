@@ -3,6 +3,7 @@ import { pool } from '../lib/db.js';
 import { ApiError } from '../utils/error.util.js';
 import { io } from '../index.js';
 import { emitToConversation } from '../socket/index.js';
+import { uploadToCloudinary } from '../utils/cloudinary.util.js';
 
 /**
  * ANONYMOUS CHAT CONTROLLER
@@ -194,7 +195,7 @@ export async function getAnonymousConversations(req: Request, res: Response) {
             -- Sender sees receiver's real name
             CASE WHEN cc.user1_id = $1 THEN u2.name ELSE u1.name END
           ELSE 
-            -- Receiver sees anonymous string
+            -- Receiver sees random_string (which can be customized)
             ai.random_string
         END as other_user_name,
         CASE 
@@ -215,6 +216,8 @@ export async function getAnonymousConversations(req: Request, res: Response) {
         END as other_user_gender,
         -- Flag to indicate if current user is seeing an anonymous sender
         (ai.user_id != $1) as is_viewing_anonymous,
+        -- Include identity_id for receiver to update name
+        ai.identity_id,
         lm.encrypted_content as last_message_preview,
         lm.message_type as last_message_type,
         lm.created_at as last_message_time,
@@ -290,7 +293,7 @@ export async function getAnonymousMessages(req: Request, res: Response) {
     
     // Get the anonymous identity to check who initiated
     const anonIdentity = await pool.query(
-      `SELECT user_id, random_string, display_gender FROM anonymous_identities 
+      `SELECT user_id, random_string, display_gender, identity_id FROM anonymous_identities 
        WHERE identity_id = $1`,
       [conversation.anonymous_initiator_id]
     );
@@ -300,14 +303,15 @@ export async function getAnonymousMessages(req: Request, res: Response) {
       
       // If current user is NOT the initiator, they are the receiver
       if (initiatorId !== userId) {
-        // Receiver sees anonymous info
+        // Receiver sees anonymous info (random_string which can be customized)
         otherUserData = {
           user_id: null,
           name: anonIdentity.rows[0].random_string,
           roll_no: null,
           gender: anonIdentity.rows[0].display_gender,
           dp_url: null,
-          is_anonymous: true
+          is_anonymous: true,
+          identity_id: anonIdentity.rows[0].identity_id
         };
         // console.log(`🎭 Receiver viewing anonymous sender:`, {
         //   anonString: anonIdentity.rows[0].random_string,
@@ -346,7 +350,8 @@ export async function getAnonymousMessages(req: Request, res: Response) {
                 'roll_no', null,
                 'display_gender', ai.display_gender,
                 'dp_url', null,
-                'is_anonymous', true
+                'is_anonymous', true,
+                'identity_id', ai.identity_id
               )
               -- Sender sees real receiver info
               ELSE jsonb_build_object(
@@ -692,5 +697,131 @@ export async function revealAnonymousIdentity(req: Request, res: Response) {
     console.error('[ERROR] Reveal identity error:', error);
     if (error instanceof ApiError) throw error;
     throw new ApiError(500, 'Failed to reveal identity');
+  }
+}
+
+// Update anonymous identity name (receiver can customize the random_string)
+export async function updateAnonymousName(req: Request, res: Response) {
+  try {
+    const userId = req.user?.userId;
+    const { identityId } = req.params;
+    const { customName } = req.body;
+
+    if (!userId) {
+      throw new ApiError(401, 'Unauthorized');
+    }
+
+    if (!identityId) {
+      throw new ApiError(400, 'Identity ID is required');
+    }
+
+    // Validate custom name
+    if (!customName || typeof customName !== 'string') {
+      throw new ApiError(400, 'Custom name is required and must be a string');
+    }
+    
+    const trimmedName = customName.trim();
+    if (trimmedName.length === 0) {
+      throw new ApiError(400, 'Custom name cannot be empty');
+    }
+    if (trimmedName.length > 44) {
+      throw new ApiError(400, 'Custom name must be less than 44 characters');
+    }
+
+    // Get the anonymous identity
+    const identityCheck = await pool.query(
+      `SELECT ai.*, cc.user1_id, cc.user2_id, cc.conversation_id
+       FROM anonymous_identities ai
+       LEFT JOIN chat_conversations cc ON ai.identity_id = cc.anonymous_initiator_id
+       WHERE ai.identity_id = $1`,
+      [identityId]
+    );
+
+    if (identityCheck.rows.length === 0) {
+      throw new ApiError(404, 'Anonymous identity not found');
+    }
+
+    const identity = identityCheck.rows[0];
+
+    // Only the receiver (target_user_id) can update the name
+    // The receiver is the person who is NOT the initiator
+    if (identity.user_id === userId) {
+      throw new ApiError(403, 'Only the receiver can set custom names. You are the sender.');
+    }
+
+    // Verify current user is the receiver (the other person in the conversation)
+    if (identity.user1_id !== userId && identity.user2_id !== userId) {
+      throw new ApiError(403, 'You are not part of this conversation');
+    }
+
+    // Generate random 5-character suffix for uniqueness
+    const randomSuffix = Math.random().toString(36).substring(2, 7);
+    const uniqueName = `${trimmedName}-${randomSuffix}`;
+
+    // Update random_string with custom name + random suffix
+    const result = await pool.query(
+      `UPDATE anonymous_identities 
+       SET random_string = $1, last_used_at = NOW()
+       WHERE identity_id = $2
+       RETURNING identity_id, user_id, random_string, display_gender`,
+      [uniqueName, identityId]
+    );
+
+    res.json({
+      success: true,
+      message: 'Custom name updated successfully',
+      data: result.rows[0]
+    });
+
+  } catch (error) {
+    console.error('[ERROR] Update anonymous name error:', error);
+    if (error instanceof ApiError) throw error;
+    throw new ApiError(500, 'Failed to update custom name');
+  }
+}
+
+// Upload chat image for anonymous chat (same as regular chat)
+export async function uploadAnonymousChatImage(req: Request, res: Response) {
+  try {
+    const userId = req.user?.userId;
+
+    if (!userId) {
+      throw new ApiError(401, 'Unauthorized');
+    }
+
+    if (!req.file) {
+      throw new ApiError(400, 'No image file provided');
+    }
+
+    // Validate file size (5MB)
+    if (req.file.size > 5 * 1024 * 1024) {
+      throw new ApiError(400, 'Image size must be less than 5MB');
+    }
+
+    // Upload to Cloudinary in chat_images folder with unique ID
+    const randomStr = Math.random().toString(36).substring(2, 10);
+    const uniqueId = `chat_${userId}_${Date.now()}_${randomStr}`;
+    const result = await uploadToCloudinary(
+      req.file.buffer,
+      'chat_images',
+      uniqueId,
+      true // Skip transformation for chat images
+    );
+
+    res.json({
+      success: true,
+      message: 'Image uploaded successfully',
+      data: {
+        url: result.secure_url,
+        publicId: result.public_id,
+        size: req.file.size,
+        mimeType: req.file.mimetype,
+      }
+    });
+
+  } catch (error) {
+    console.error('[ERROR] Upload anonymous chat image error:', error);
+    if (error instanceof ApiError) throw error;
+    throw new ApiError(500, 'Failed to upload image');
   }
 }

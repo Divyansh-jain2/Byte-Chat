@@ -3,6 +3,7 @@ import { pool } from '../lib/db.js';
 import { ApiError } from '../utils/error.util.js';
 import { io } from '../index.js';
 import { emitToConversation } from '../socket/index.js';
+import { uploadToCloudinary } from '../utils/cloudinary.util.js';
 
 /**
  * REGULAR CHAT CONTROLLER
@@ -1018,5 +1019,51 @@ export async function reportUser(req: Request, res: Response) {
     console.error('[ERROR] Report user error:', error);
     if (error instanceof ApiError) throw error;
     throw new ApiError(500, 'Failed to submit report');
+  }
+}
+
+// Upload chat image to Cloudinary
+export async function uploadChatImage(req: Request, res: Response) {
+  try {
+    const userId = req.user?.userId;
+
+    if (!userId) {
+      throw new ApiError(401, 'Unauthorized');
+    }
+
+    if (!req.file) {
+      throw new ApiError(400, 'No image file provided');
+    }
+
+    // Validate file size (5MB)
+    if (req.file.size > 5 * 1024 * 1024) {
+      throw new ApiError(400, 'Image size must be less than 5MB');
+    }
+
+    // Upload to Cloudinary in chat_images folder with unique ID
+    const randomStr = Math.random().toString(36).substring(2, 10);
+    const uniqueId = `chat_${userId}_${Date.now()}_${randomStr}`;
+    const result = await uploadToCloudinary(
+      req.file.buffer,
+      'chat_images',
+      uniqueId,
+      true // Skip transformation for chat images
+    );
+
+    res.json({
+      success: true,
+      message: 'Image uploaded successfully',
+      data: {
+        url: result.secure_url,
+        publicId: result.public_id,
+        size: req.file.size,
+        mimeType: req.file.mimetype,
+      }
+    });
+
+  } catch (error) {
+    console.error('[ERROR] Upload chat image error:', error);
+    if (error instanceof ApiError) throw error;
+    throw new ApiError(500, 'Failed to upload image');
   }
 }

@@ -19,9 +19,11 @@ import {
   uploadGroupPicture,
   deleteGroupPicture,
   selectGroupPresetAvatar,
-  uploadGroup
+  uploadGroup,
+  uploadGroupChatImage
 } from '../controllers/group.controller.js';
 import { authenticateToken } from '../middleware/auth.middleware.js';
+import { uploadImage, handleMulterError } from '../middleware/upload.middleware.js';
 import { asyncHandler } from '../utils/error.util.js';
 
 const router = Router();
@@ -58,6 +60,9 @@ router.post('/:groupId/leave', asyncHandler(leaveGroup));
 // Group messages
 router.get('/:groupId/messages', asyncHandler(getGroupMessages));
 router.post('/:groupId/messages', asyncHandler(sendGroupMessage));
+
+// Group chat image upload
+router.post('/:groupId/upload-image', uploadImage.single('image'), asyncHandler(uploadGroupChatImage), handleMulterError);
 
 // Get group members
 router.get('/:groupId/members', asyncHandler(getGroupMembers));
