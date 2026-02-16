@@ -1,10 +1,12 @@
 'use client';
 
 import Link from 'next/link';
+import { useToast } from '@/contexts/ToastContext';
 import { useTheme } from '@/contexts/ThemeContext';
 
 export default function TermsAndConditions() {
   const { theme, toggleTheme } = useTheme();
+  const { info: toastInfo } = useToast();
 
   return (
     <>
@@ -182,7 +184,15 @@ export default function TermsAndConditions() {
               <li>Engage in abusive or harmful behavior</li>
               <li>Share inappropriate or illegal content</li>
               <li>Attempt to hack, spam, or disrupt the platform</li>
-              <li>Are inactive for extended periods (after notification)</li>
+              <li>Are inactive for extended periods (after notification)
+                <button
+                  className="ml-2 text-xs text-blue-300 underline hover:text-blue-200"
+                  onClick={() => toastInfo('You will be notified if your account is inactive for a long period.')}
+                  type="button"
+                >
+                  What does this mean?
+                </button>
+              </li>
             </ul>
           </section>
 

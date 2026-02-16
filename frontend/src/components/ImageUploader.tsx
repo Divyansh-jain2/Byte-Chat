@@ -4,6 +4,7 @@ import React, { useState, useRef, useCallback } from 'react';
 import ReactCrop, { Crop, PixelCrop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
 import { FiUpload, FiRotateCw, FiX, FiCheck } from 'react-icons/fi';
+import { useToast } from '@/contexts/ToastContext';
 
 interface ImageUploaderProps {
   currentImage?: string;
@@ -38,18 +39,19 @@ const ImageUploader: React.FC<ImageUploaderProps> = ({
   const imgRef = useRef<HTMLImageElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const toast = useToast();
 
   // Handle file selection
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       if (!file.type.startsWith('image/')) {
-        alert('Please select an image file');
+        toast.error('Please select an image file');
         return;
       }
 
       if (file.size > 5 * 1024 * 1024) {
-        alert('Image size should be less than 5MB');
+        toast.error('Image size should be less than 5MB');
         return;
       }
 

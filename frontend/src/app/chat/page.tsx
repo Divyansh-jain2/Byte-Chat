@@ -102,12 +102,20 @@ export default function ChatPage() {
         <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex items-center justify-between">
             <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Messages</h1>
-            <Link
-              href="/dashboard"
-              className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition"
-            >
-              Back to Home
-            </Link>
+            <div className="flex gap-2">
+              <Link
+                href="/my-identities"
+                className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition"
+              >
+                🎭 Identities
+              </Link>
+              <Link
+                href="/dashboard"
+                className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition"
+              >
+                Back to Home
+              </Link>
+            </div>
           </div>
         </div>
       </header>

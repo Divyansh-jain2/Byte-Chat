@@ -6,6 +6,7 @@ import dynamic from 'next/dynamic';
 import { chatService } from '@/services/chat.service';
 import anonymousChatService from '@/services/anonymous-chat.service';
 import { useSocket } from '@/contexts/SocketContext';
+import { useToast } from '@/contexts/ToastContext';
 import type { Message } from '@/types/chat.types';
 import { Theme } from 'emoji-picker-react';
 
@@ -17,6 +18,7 @@ export default function ChatWindowPage() {
   const params = useParams();
   const { socket, isConnected, joinConversation, leaveConversation } = useSocket();
   const conversationId = params.conversationId as string;
+  const toast = useToast();
   
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState('');
@@ -98,7 +100,7 @@ export default function ChatWindowPage() {
 
     const handleUserBlocked = () => {
       setIsBlocked(true);
-      alert('This conversation has been blocked');
+      toast.warning('This conversation has been blocked');
     };
 
     const handleConversationUnblocked = ({ canMessageNow }: { conversationId: string; canMessageNow: boolean; unblockedBy: string }) => {
@@ -224,10 +226,10 @@ export default function ChatWindowPage() {
         
         // Handle specific errors
         if (error?.response?.status === 403) {
-          alert('You do not have access to this conversation.');
+          toast.error('You do not have access to this conversation.');
           router.push('/chat');
         } else if (error?.response?.status === 404) {
-          alert('Conversation not found.');
+          toast.error('Conversation not found.');
           router.push('/chat');
         }
       }
@@ -262,7 +264,7 @@ export default function ChatWindowPage() {
           mediaMimeType = uploadResult.data.mimeType;
         } catch (uploadError: any) {
           console.error('[ERROR] Failed to upload image:', uploadError);
-          alert(uploadError.response?.data?.message || 'Failed to upload image');
+          toast.error(uploadError.response?.data?.message || 'Failed to upload image');
           setUploadingImage(false);
           setSending(false);
           return;
@@ -306,10 +308,10 @@ export default function ChatWindowPage() {
       
       // Check if it's a blocking error
       if (errorMessage.includes('blocked') || error.response?.status === 403) {
-        alert('Cannot send message - this user is blocked or has blocked you.');
+        toast.error('Cannot send message - this user is blocked or has blocked you.');
         setIsBlocked(true);
       } else {
-        alert(errorMessage);
+        toast.error(errorMessage);
       }
     } finally {
       setSending(false);
@@ -322,13 +324,13 @@ export default function ChatWindowPage() {
 
     // Validate file type
     if (!file.type.startsWith('image/')) {
-      alert('Please select an image file');
+      toast.error('Please select an image file');
       return;
     }
 
     // Validate file size (5MB)
     if (file.size > 5 * 1024 * 1024) {
-      alert('Image size must be less than 5MB');
+      toast.error('Image size must be less than 5MB');
       return;
     }
 
@@ -399,16 +401,16 @@ export default function ChatWindowPage() {
     try {
       await anonymousChatService.revealAnonymousIdentity(conversationId);
       setIsAnonymous(false);
-      alert('Your identity has been revealed!');
+      toast.success('Your identity has been revealed!');
       fetchMessages();
     } catch (error: any) {
-      alert(error.response?.data?.message || 'Failed to reveal identity');
+      toast.error(error.response?.data?.message || 'Failed to reveal identity');
     }
   };
 
   const handleUpdateCustomName = async () => {
     if (!anonymousIdentityId) {
-      alert('Cannot update name - identity ID not found');
+      toast.error('Cannot update name - identity ID not found');
       return;
     }
 
@@ -416,11 +418,11 @@ export default function ChatWindowPage() {
     
     // Validate name
     if (trimmedName.length === 0) {
-      alert('Custom name cannot be empty');
+      toast.warning('Custom name cannot be empty');
       return;
     }
     if (trimmedName.length > 44) {
-      alert('Custom name must be less than 44 characters (5 chars reserved for uniqueness)');
+      toast.error('Custom name must be less than 44 characters (5 chars reserved for uniqueness)');
       return;
     }
 
@@ -435,9 +437,9 @@ export default function ChatWindowPage() {
       
       setShowEditNameDialog(false);
       setShowMenu(false);
-      alert('Custom name updated successfully');
+      toast.success('Custom name updated successfully');
     } catch (error: any) {
-      alert(error.response?.data?.message || 'Failed to update custom name');
+      toast.error(error.response?.data?.message || 'Failed to update custom name');
     }
   };
 
@@ -450,15 +452,15 @@ export default function ChatWindowPage() {
       await chatService.blockUser(conversationId);
       setIsBlocked(true);
       setShowMenu(false);
-      alert('User blocked successfully');
+      toast.success('User blocked successfully');
     } catch (error: any) {
-      alert(error.response?.data?.message || 'Failed to block user');
+      toast.error(error.response?.data?.message || 'Failed to block user');
     }
   };
 
   const handleReportUser = async () => {
     if (!reportReason.trim()) {
-      alert('Please provide a reason for reporting');
+      toast.warning('Please provide a reason for reporting');
       return;
     }
 
@@ -474,7 +476,7 @@ export default function ChatWindowPage() {
       }
 
       if (!actualReportedUserId && actualReportedUserId !== 'ANONYMOUS') {
-        alert('Unable to identify user to report');
+        toast.error('Unable to identify user to report');
         return;
       }
 
@@ -524,9 +526,9 @@ Reported At: ${new Date().toISOString()}
       setShowMenu(false);
       setReportReason('');
       setReportDescription('');
-      alert('Report submitted successfully. Our team will review it.');
+      toast.success('Report submitted successfully. Our team will review it.');
     } catch (error: any) {
-      alert(error.response?.data?.message || 'Failed to submit report');
+      toast.error(error.response?.data?.message || 'Failed to submit report');
     }
   };
 

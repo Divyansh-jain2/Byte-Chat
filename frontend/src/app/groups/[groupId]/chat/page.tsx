@@ -6,6 +6,7 @@ import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { groupService } from '@/services/group.service';
 import { useSocket } from '@/contexts/SocketContext';
+import { useToast } from '@/contexts/ToastContext';
 import type { Message, Poll } from '@/types/chat.types';
 import { Theme } from 'emoji-picker-react';
 
@@ -27,6 +28,7 @@ export default function GroupChatPage() {
   const router = useRouter();
   const groupId = params.groupId as string;
   const { socket, isConnected, joinGroup, leaveGroup } = useSocket();
+  const toast = useToast();
 
   const [messages, setMessages] = useState<GroupMessage[]>([]);
   const [polls, setPolls] = useState<Poll[]>([]);
@@ -134,7 +136,7 @@ export default function GroupChatPage() {
       await groupService.voteOnPoll(groupId, pollId, voteValue);
       fetchPolls();
     } catch (error: any) {
-      alert(error.message || 'Failed to vote');
+      toast.error(error.message || 'Failed to vote');
     }
   };
   const fetchMessages = async () => {
@@ -144,7 +146,7 @@ export default function GroupChatPage() {
     } catch (error: any) {
       console.error('Failed to fetch group messages:', error);
       if (error.message?.includes('Access denied')) {
-        alert('You are not a member of this group.');
+        toast.error('You are not a member of this group.');
         router.push(`/groups/${groupId}`);
       }
     } finally {
@@ -173,7 +175,7 @@ const handleSendMessage = async (e: React.FormEvent) => {
         mediaMimeType = uploadResult.data.mimeType;
       } catch (uploadError: any) {
         console.error('[ERROR] Failed to upload image:', uploadError);
-        alert(uploadError.message || 'Failed to upload image');
+        toast.error(uploadError.message || 'Failed to upload image');
         setUploadingImage(false);
         setSending(false);
         return;
@@ -202,7 +204,7 @@ const handleSendMessage = async (e: React.FormEvent) => {
       fileInputRef.current.value = '';
     }
   } catch (error: any) {
-    alert(error.message || 'Failed to send message');
+    toast.error(error.message || 'Failed to send message');
   } finally {
     setSending(false);
   }
@@ -214,13 +216,13 @@ const handleSendMessage = async (e: React.FormEvent) => {
 
     // Validate file type
     if (!file.type.startsWith('image/')) {
-      alert('Please select an image file');
+      toast.error('Please select an image file');
       return;
     }
 
     // Validate file size (5MB)
     if (file.size > 5 * 1024 * 1024) {
-      alert('Image size must be less than 5MB');
+      toast.error('Image size must be less than 5MB');
       return;
     }
 
@@ -513,6 +515,7 @@ return (
 
 // Quick Poll Form Component
 function QuickPollForm({ groupId, onSuccess }: { groupId: string; onSuccess: () => void }) {
+  const toast = useToast();
   const [formData, setFormData] = useState({
     poll_type: 'kick_member',
     title: '',
@@ -528,7 +531,7 @@ function QuickPollForm({ groupId, onSuccess }: { groupId: string; onSuccess: () 
       onSuccess();
       setFormData({ poll_type: 'kick_member', title: '', expires_in_hours: 24 });
     } catch (error: any) {
-      alert(error.message || 'Failed to create poll');
+      toast.error(error.message || 'Failed to create poll');
     } finally {
       setLoading(false);
     }

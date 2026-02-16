@@ -62,12 +62,20 @@ export default function MyGroupsPage() {
                 Groups you've joined or created
               </p>
             </div>
-            <Link
-              href="/dashboard"
-              className="px-6 py-3 bg-neutral-200 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 font-mono font-bold border-2 border-neutral-900 dark:border-neutral-100 hover:bg-neutral-300 dark:hover:bg-neutral-700 transition-colors"
-            >
-              ← BACK
-            </Link>
+            <div className="flex gap-2">
+              <Link
+                href="/my-identities"
+                className="px-4 py-3 bg-neutral-200 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 font-mono font-bold border-2 border-neutral-900 dark:border-neutral-100 hover:bg-neutral-300 dark:hover:bg-neutral-700 transition-colors"
+              >
+                🎭 IDENTITIES
+              </Link>
+              <Link
+                href="/dashboard"
+                className="px-6 py-3 bg-neutral-200 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 font-mono font-bold border-2 border-neutral-900 dark:border-neutral-100 hover:bg-neutral-300 dark:hover:bg-neutral-700 transition-colors"
+              >
+                ← BACK
+              </Link>
+            </div>
           </div>
         </div>
       </header>

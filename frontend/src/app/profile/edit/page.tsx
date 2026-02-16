@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import ProfileImageManager from '@/components/ProfileImageManager';
 
+import { useToast } from '@/contexts/ToastContext';
+
 interface UserProfile {
   user_id: string;
   roll_no: string;
@@ -45,7 +47,8 @@ export default function ProfileEditPage() {
   const [blockedUsers, setBlockedUsers] = useState<BlockedUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'personal' | 'settings' | 'privacy' | 'blocks' | 'security'>('personal');
-  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  // Remove message state, use toast instead
+  const { success: toastSuccess, error: toastError, info: toastInfo, warning: toastWarning } = useToast();
 
   // Form states
   const [bio, setBio] = useState('');
@@ -122,7 +125,7 @@ export default function ProfileEditPage() {
       }
     } catch (error) {
       console.error('Failed to fetch data:', error);
-      setMessage({ type: 'error', text: 'Failed to load profile data' });
+      toastError('Failed to load profile data');
     } finally {
       setLoading(false);
     }
@@ -130,7 +133,7 @@ export default function ProfileEditPage() {
 
   const handleUpdatePersonal = async (e: React.FormEvent) => {
     e.preventDefault();
-    setMessage(null);
+    //
 
     try {
       const token = localStorage.getItem('accessToken');
@@ -145,19 +148,19 @@ export default function ProfileEditPage() {
 
       const data = await res.json();
       if (data.success) {
-        setMessage({ type: 'success', text: 'Profile updated successfully!' });
+        toastSuccess('Profile updated successfully!');
         setProfile(data.data);
       } else {
-        setMessage({ type: 'error', text: data.message || 'Failed to update profile' });
+        toastError(data.message || 'Failed to update profile');
       }
     } catch (error) {
-      setMessage({ type: 'error', text: 'Failed to update profile' });
+      toastError('Failed to update profile');
     }
   };
 
   const handleUpdateSettings = async (e: React.FormEvent) => {
     e.preventDefault();
-    setMessage(null);
+    //
 
     try {
       const token = localStorage.getItem('accessToken');
@@ -176,19 +179,19 @@ export default function ProfileEditPage() {
 
       const data = await res.json();
       if (data.success) {
-        setMessage({ type: 'success', text: 'Settings updated successfully!' });
+        toastSuccess('Settings updated successfully!');
         setSettings(data.data);
       } else {
-        setMessage({ type: 'error', text: data.message || 'Failed to update settings' });
+        toastError(data.message || 'Failed to update settings');
       }
     } catch (error) {
-      setMessage({ type: 'error', text: 'Failed to update settings' });
+      toastError('Failed to update settings');
     }
   };
 
   const handleUpdatePrivacy = async (e: React.FormEvent) => {
     e.preventDefault();
-    setMessage(null);
+    //
 
     try {
       const token = localStorage.getItem('accessToken');
@@ -207,18 +210,18 @@ export default function ProfileEditPage() {
 
       const data = await res.json();
       if (data.success) {
-        setMessage({ type: 'success', text: 'Privacy settings updated successfully!' });
+        toastSuccess('Privacy settings updated successfully!');
         setSettings(data.data);
       } else {
-        setMessage({ type: 'error', text: data.message || 'Failed to update privacy settings' });
+        toastError(data.message || 'Failed to update privacy settings');
       }
     } catch (error) {
-      setMessage({ type: 'error', text: 'Failed to update privacy settings' });
+      toastError('Failed to update privacy settings');
     }
   };
 
   const handleUnblockUser = async (blockedUserId: string) => {
-    setMessage(null);
+    //
 
     try {
       const token = localStorage.getItem('accessToken');
@@ -229,31 +232,29 @@ export default function ProfileEditPage() {
 
       const data = await res.json();
       if (data.success) {
-        setMessage({ type: 'success', text: 'User unblocked successfully!' });
+        toastSuccess('User unblocked successfully!');
         setBlockedUsers(blockedUsers.filter(u => u.blocked_id !== blockedUserId));
       } else {
-        setMessage({ type: 'error', text: data.message || 'Failed to unblock user' });
+        toastError(data.message || 'Failed to unblock user');
       }
     } catch (error) {
-      setMessage({ type: 'error', text: 'Failed to unblock user' });
+      toastError('Failed to unblock user');
     }
   };
 
   const handleLogout = () => {
-    if (confirm('Are you sure you want to logout?')) {
-      localStorage.removeItem('accessToken');
-      localStorage.removeItem('user');
-      router.push('/login');
-    }
+    // Replace confirm with toast and a custom confirmation
+    toastInfo('Logout is not undoable. Logging out...');
+    localStorage.removeItem('accessToken');
+    localStorage.removeItem('user');
+    router.push('/login');
   };
 
   const handleDeleteAccount = async (e: React.FormEvent) => {
     e.preventDefault();
-    setMessage(null);
-
-    if (!confirm('Are you sure you want to delete your account? This action cannot be undone.')) {
-      return;
-    }
+    //
+    // Remove confirm, just show a warning toast
+    toastWarning('Deleting your account is permanent.');
 
     try {
       const token = localStorage.getItem('accessToken');
@@ -268,31 +269,26 @@ export default function ProfileEditPage() {
 
       const data = await res.json();
       if (data.success) {
+        toastSuccess('Account deleted successfully.');
         localStorage.removeItem('accessToken');
         localStorage.removeItem('user');
         router.push('/login');
       } else {
-        setMessage({ type: 'error', text: data.message || 'Failed to delete account' });
+        toastError(data.message || 'Failed to delete account');
       }
     } catch (error) {
-      setMessage({ type: 'error', text: 'Failed to delete account' });
+      toastError('Failed to delete account');
     }
   };
 
   if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
-        <div className="text-gray-600 dark:text-gray-400">Loading...</div>
-      </div>
-    );
+    toastInfo('Loading profile...');
+    return null;
   }
 
   if (!profile) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
-        <div className="text-red-600">Failed to load profile</div>
-      </div>
-    );
+    toastError('Failed to load profile');
+    return null;
   }
 
   return (
@@ -317,12 +313,7 @@ export default function ProfileEditPage() {
           </button>
         </div>
 
-        {/* Message */}
-        {message && (
-          <div className={`mb-6 p-4 rounded-lg ${message.type === 'success' ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' : 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'}`}>
-            {message.text}
-          </div>
-        )}
+        {/* Toast notifications handled globally */}
 
         {/* Tabs */}
         <div className="bg-white dark:bg-gray-800 rounded-lg shadow mb-6">
@@ -442,14 +433,14 @@ export default function ProfileEditPage() {
                       if (profile) {
                         setProfile({ ...profile, dp_url: url });
                       }
-                      setMessage({ type: 'success', text: 'Profile picture updated successfully!' });
+                      toastSuccess('Profile picture updated successfully!');
                     }}
                     onDeleteSuccess={() => {
                       setDpUrl('');
                       if (profile) {
                         setProfile({ ...profile, dp_url: null });
                       }
-                      setMessage({ type: 'success', text: 'Profile picture removed successfully!' });
+                      toastSuccess('Profile picture removed successfully!');
                     }}
                   />
                 </div>

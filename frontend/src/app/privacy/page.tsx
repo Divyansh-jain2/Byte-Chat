@@ -2,10 +2,12 @@
 
 import Link from 'next/link';
 import { useTheme } from '@/contexts/ThemeContext';
+import { useToast } from '@/contexts/ToastContext';
 import { FaShieldAlt, FaSun, FaMoon } from 'react-icons/fa';
 
 export default function PrivacyPolicy() {
   const { theme, toggleTheme } = useTheme();
+  const { info: toastInfo } = useToast();
 
   return (
     <div className="min-h-screen relative overflow-hidden">
@@ -73,7 +75,15 @@ export default function PrivacyPolicy() {
                   <li><strong className="text-white">Account Information:</strong> Roll number, name, email, gender, branch, date of birth</li>
                   <li><strong className="text-white">Profile Information:</strong> Bio, profile picture, preferences</li>
                   <li><strong className="text-white">Messages & Content:</strong> Text messages, group chats, anonymous conversations</li>
-                  <li><strong className="text-white">Settings:</strong> Privacy preferences, notification settings, theme preferences</li>
+                  <li><strong className="text-white">Settings:</strong> Privacy preferences, notification settings, theme preferences
+                    <button
+                      className="ml-2 text-xs text-blue-300 underline hover:text-blue-200"
+                      onClick={() => toastInfo('You can adjust your notification and privacy settings in your profile.')}
+                      type="button"
+                    >
+                      Learn more
+                    </button>
+                  </li>
                 </ul>
 
                 <h3 className="text-2xl font-semibold text-white/90 mb-3">1.2 Automatically Collected Information</h3>
@@ -95,7 +105,15 @@ export default function PrivacyPolicy() {
                   <li>Enable communication between students</li>
                   <li>Verify your identity and college affiliation</li>
                   <li>Personalize your experience</li>
-                  <li>Send notifications about messages and activities</li>
+                  <li>Send notifications about messages and activities
+                    <button
+                      className="ml-2 text-xs text-blue-300 underline hover:text-blue-200"
+                      onClick={() => toastInfo('You will receive notifications for important messages and activities.')}
+                      type="button"
+                    >
+                      What notifications?
+                    </button>
+                  </li>
                   <li>Improve platform features and functionality</li>
                   <li>Ensure platform security and prevent abuse</li>
                   <li>Respond to your inquiries and support requests</li>
@@ -201,7 +219,15 @@ export default function PrivacyPolicy() {
                   <li><strong className="text-white">Delete:</strong> Request deletion of your account and data</li>
                   <li><strong className="text-white">Control Visibility:</strong> Adjust privacy settings for profile, online status, last seen</li>
                   <li><strong className="text-white">Block Users:</strong> Block or report users who violate policies</li>
-                  <li><strong className="text-white">Opt-out:</strong> Disable notifications or certain features</li>
+                  <li><strong className="text-white">Opt-out:</strong> Disable notifications or certain features
+                    <button
+                      className="ml-2 text-xs text-blue-300 underline hover:text-blue-200"
+                      onClick={() => toastInfo('You can opt out of notifications in your settings.')}
+                      type="button"
+                    >
+                      How to opt out?
+                    </button>
+                  </li>
                 </ul>
               </section>
 
@@ -232,7 +258,15 @@ export default function PrivacyPolicy() {
                 <ul className="list-disc list-inside text-white/80 space-y-2 ml-4">
                   <li><strong className="text-white">Cloudinary:</strong> For image storage and optimization</li>
                   <li><strong className="text-white">Supabase:</strong> For authentication and database services</li>
-                  <li><strong className="text-white">Email Services:</strong> For verification and notifications</li>
+                  <li><strong className="text-white">Email Services:</strong> For verification and notifications
+                    <button
+                      className="ml-2 text-xs text-blue-300 underline hover:text-blue-200"
+                      onClick={() => toastInfo('Email notifications are sent for verification and important updates.')}
+                      type="button"
+                    >
+                      More info
+                    </button>
+                  </li>
                 </ul>
                 <p className="text-white/80 leading-relaxed mt-4">
                   These services have their own privacy policies. We encourage you to review them.
@@ -270,7 +304,14 @@ export default function PrivacyPolicy() {
               <section>
                 <h2 className="text-3xl font-bold text-white mb-4">12. Changes to This Privacy Policy</h2>
                 <p className="text-white/80 leading-relaxed">
-                  We may update this Privacy Policy from time to time. We will notify you of significant changes by posting 
+                  We may update this Privacy Policy from time to time. We will notify you of significant changes by posting
+                    <button
+                      className="ml-2 text-xs text-blue-300 underline hover:text-blue-200"
+                      onClick={() => toastInfo('Significant changes to the policy will be notified to you.')}
+                      type="button"
+                    >
+                      Notification policy
+                    </button>
                   a notice on the platform or sending you an email. Your continued use of the platform after changes 
                   constitutes acceptance of the updated policy.
                 </p>

@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { groupService } from '@/services/group.service';
 import GroupImageManager from '@/components/GroupImageManager';
 import { ReportGroupButton } from '@/components/ModerationComponents';
+import { useToast } from '@/contexts/ToastContext';
 
 
 
@@ -45,6 +46,7 @@ export default function GroupDetailsPage() {
   const router = useRouter();
   const params = useParams();
   const groupId = params.groupId as string;
+  const toast = useToast();
 
   const [group, setGroup] = useState<GroupDetails | null>(null);
   const [members, setMembers] = useState<GroupMember[]>([]);
@@ -87,7 +89,7 @@ export default function GroupDetailsPage() {
       fetchGroupData();
     } 
     catch (error: any) {
-      alert(error.message || 'Failed to join group');
+      toast.error(error.message || 'Failed to join group');
     }
   };
 
@@ -101,7 +103,7 @@ export default function GroupDetailsPage() {
       router.push('/dashboard');
     } 
     catch (error: any) {
-      alert(error.message || 'Failed to leave group');
+      toast.error(error.message || 'Failed to leave group');
     }
   };
 

@@ -17,7 +17,11 @@ export const anonymousController = {
           ai.identity_id,
           ai.random_string,
           ai.display_gender,
+          ai.is_active,
+          ai.is_revealed,
           ai.created_at,
+          ai.target_user_id,
+          ai.group_id,
           CASE 
             WHEN ai.target_user_id IS NOT NULL THEN (
               SELECT json_build_object(
@@ -46,7 +50,7 @@ export const anonymousController = {
             ELSE NULL
           END as conversation_id
          FROM anonymous_identities ai
-         WHERE ai.user_id = $1 AND ai.is_active = TRUE
+         WHERE ai.user_id = $1
          ORDER BY ai.created_at DESC`,
         [userId]
       );
@@ -169,9 +173,9 @@ export const anonymousController = {
 
       const identity = identityResult.rows[0];
 
-      // Mark identity as revealed (deactivate it)
+      // Mark identity as revealed
       await pool.query(
-        'UPDATE anonymous_identities SET is_active = FALSE WHERE identity_id = $1',
+        'UPDATE anonymous_identities SET is_revealed = TRUE, revealed_at = NOW() WHERE identity_id = $1',
         [identityId]
       );
 

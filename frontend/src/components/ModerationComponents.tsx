@@ -4,6 +4,7 @@
 
 import { useState } from 'react';
 import { blockUser, unblockUser } from '@/services/moderation.service';
+import { useToast } from '@/contexts/ToastContext';
 
 interface BlockUserButtonProps {
   userId: string;
@@ -16,22 +17,23 @@ export function BlockUserButton({ userId, userName, isBlocked, onBlockStatusChan
   const [loading, setLoading] = useState(false);
   const [showReasonDialog, setShowReasonDialog] = useState(false);
   const [reason, setReason] = useState('');
+  const toast = useToast();
 
   const handleBlock = async () => {
     if (!reason.trim()) {
-      alert('Please enter a reason for blocking');
+      toast.warning('Please enter a reason for blocking');
       return;
     }
 
     setLoading(true);
     try {
       await blockUser(userId, reason);
-      alert(`Successfully blocked ${userName}`);
+      toast.success(`Successfully blocked ${userName}`);
       setShowReasonDialog(false);
       setReason('');
       onBlockStatusChange?.();
     } catch (error: any) {
-      alert(error.message || 'Failed to block user');
+      toast.error(error.message || 'Failed to block user');
     } finally {
       setLoading(false);
     }
@@ -46,14 +48,14 @@ export function BlockUserButton({ userId, userName, isBlocked, onBlockStatusChan
       
       // Check if user can message now
       if (response?.data?.canMessageNow) {
-        alert(`Successfully unblocked ${userName}. You can now send messages to them.`);
+        toast.success(`Successfully unblocked ${userName}. You can now send messages to them.`);
       } else {
-        alert(`Successfully unblocked ${userName}. However, they have also blocked you, so you cannot message them yet.`);
+        toast.info(`Successfully unblocked ${userName}. However, they have also blocked you, so you cannot message them yet.`);
       }
       
       onBlockStatusChange?.();
     } catch (error: any) {
-      alert(error.message || 'Failed to unblock user');
+      toast.error(error.message || 'Failed to unblock user');
     } finally {
       setLoading(false);
     }
@@ -137,10 +139,11 @@ export function ReportUserButton({ userId, userName, messageId }: ReportUserButt
   const [showReportDialog, setShowReportDialog] = useState(false);
   const [reportType, setReportType] = useState<string>('spam');
   const [description, setDescription] = useState('');
+  const toast = useToast();
 
   const handleReport = async () => {
     if (!description.trim()) {
-      alert('Please provide a description');
+      toast.warning('Please provide a description');
       return;
     }
 
@@ -170,12 +173,12 @@ Reported At (Local): ${new Date().toLocaleString()}
       };
 
       await reportUser(data);
-      alert('Report submitted successfully. Our team will review it shortly.');
+      toast.success('Report submitted successfully. Our team will review it shortly.');
       setShowReportDialog(false);
       setDescription('');
       setReportType('spam');
     } catch (error: any) {
-      alert(error.message || 'Failed to submit report');
+      toast.error(error.message || 'Failed to submit report');
     } finally {
       setLoading(false);
     }
@@ -256,6 +259,7 @@ interface RevealIdentityButtonProps {
 
 export function RevealIdentityButton({ conversationId, isSender, onReveal }: RevealIdentityButtonProps) {
   const [loading, setLoading] = useState(false);
+  const toast = useToast();
 
   if (!isSender) {
     return null; // Only sender can see the button
@@ -269,10 +273,10 @@ export function RevealIdentityButton({ conversationId, isSender, onReveal }: Rev
     setLoading(true);
     try {
       const result = await revealAnonymousIdentity(conversationId);
-      alert(result.message);
+      toast.success(result.message);
       onReveal?.(result.data);
     } catch (error: any) {
-      alert(error.message || 'Failed to reveal identity');
+      toast.error(error.message || 'Failed to reveal identity');
     } finally {
       setLoading(false);
     }
@@ -301,10 +305,11 @@ export function ReportGroupButton({ groupId, groupName }: ReportGroupButtonProps
   const [showReportDialog, setShowReportDialog] = useState(false);
   const [reportType, setReportType] = useState<string>('spam');
   const [description, setDescription] = useState('');
+  const toast = useToast();
 
   const handleReport = async () => {
     if (!description.trim()) {
-      alert('Please provide a description');
+      toast.warning('Please provide a description');
       return;
     }
 
@@ -332,12 +337,12 @@ Reported At (Local): ${new Date().toLocaleString()}
       };
 
       await reportGroup(data);
-      alert('Report submitted successfully. Our team will review it shortly.');
+      toast.success('Report submitted successfully. Our team will review it shortly.');
       setShowReportDialog(false);
       setDescription('');
       setReportType('spam');
     } catch (error: any) {
-      alert(error.message || 'Failed to submit report');
+      toast.error(error.message || 'Failed to submit report');
     } finally {
       setLoading(false);
     }

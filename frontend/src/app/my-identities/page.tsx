@@ -3,88 +3,110 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTheme } from '@/contexts/ThemeContext';
+import { useToast } from '@/contexts/ToastContext';
+import { getMyAnonymousIdentities, revealAnonymousIdentity, AnonymousIdentity } from '@/services/anonymous.service';
 
 export default function MyAnonymousIdentities() {
   const router = useRouter();
   const { theme, toggleTheme } = useTheme();
-  
-  const [identities, setIdentities] = useState<any[]>([]);
+  const toast = useToast();
+
+  const [identities, setIdentities] = useState<AnonymousIdentity[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState('');
   const [filter, setFilter] = useState<'all' | 'chat' | 'group'>('all');
+  const [revealingId, setRevealingId] = useState<string | null>(null);
+  const [confirmRevealId, setConfirmRevealId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null); // Added error state
 
   useEffect(() => {
     fetchIdentities();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const fetchIdentities = async () => {
     try {
-      const token = localStorage.getItem('accessToken');
-      const response = await fetch('http://localhost:3001/api/anonymous/my-identities', {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
+      setIsLoading(true);
+      setError(null);
+      const response = await getMyAnonymousIdentities();
 
-      const data = await response.json();
-
-      if (data.success) {
-        setIdentities(data.data);
+      if (response.success) {
+        setIdentities(response.data);
       } else {
-        setError(data.message || 'Failed to fetch identities');
+        setError(response.message || 'Failed to fetch identities');
+        toast.error(response.message || 'Failed to fetch identities');
       }
-    } catch (err) {
-      setError('Failed to load anonymous identities');
+    } catch (err: any) {
+      setError(err.message || 'Failed to load anonymous identities');
+      toast.error(err.message || 'Failed to load anonymous identities');
     } finally {
       setIsLoading(false);
     }
   };
 
   const handleRevealIdentity = async (identityId: string) => {
-    if (!confirm('Are you sure you want to reveal your identity? This cannot be undone.')) {
+    // First click: Ask for confirmation
+    if (confirmRevealId !== identityId) {
+      setConfirmRevealId(identityId);
+      toast.warning('Click reveal again to confirm. This cannot be undone!');
+      // Auto-cancel after 5 seconds
+      setTimeout(() => {
+        setConfirmRevealId(null);
+      }, 5000);
       return;
     }
 
+    // Second click: Actually reveal
     try {
-      const token = localStorage.getItem('accessToken');
-      const response = await fetch(`http://localhost:3001/api/anonymous/reveal/${identityId}`, {
-        method: 'PUT',
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
+      setRevealingId(identityId);
+      setConfirmRevealId(null);
+      const response = await revealAnonymousIdentity(identityId);
 
-      const data = await response.json();
-
-      if (data.success) {
-        alert('Identity revealed! Your next message will show your profile.');
+      if (response.success) {
+        toast.success('Identity revealed! Your next message will show your profile.');
         fetchIdentities(); // Refresh list
       } else {
-        alert(data.message || 'Failed to reveal identity');
+        toast.error(response.message || 'Failed to reveal identity');
       }
-    } catch (err) {
-      alert('Failed to reveal identity');
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to reveal identity');
+    } finally {
+      setRevealingId(null);
     }
   };
 
-  const handleNavigateToChat = (identity: any) => {
-    if (identity.target_user !== null) {
+  const handleNavigateToChat = (identity: AnonymousIdentity) => {
+    // Cancel any pending confirmation when navigating
+    if (confirmRevealId) {
+      setConfirmRevealId(null);
+    }
+    
+    if (identity.conversation_id) {
+      // Direct navigation to existing conversation
+      toast.info('Opening 1V1 chat...');
       router.push(`/chat/${identity.conversation_id}`);
+    } else if (identity.group_id) {
+      // Navigate to group chat
+      toast.info('Opening group chat...');
+      router.push(`/groups/${identity.group_id}/chat`);
     } else {
-      router.push(`/groups/${identity.target_group.group_id}`);
+      toast.warning('Unable to navigate to chat');
     }
   };
 
-  const filteredIdentities = filter === 'all' 
-    ? identities 
+  const filteredIdentities = filter === 'all'
+    ? identities
     : filter === 'chat'
-    ? identities.filter(i => i.target_user !== null)
-    : identities.filter(i => i.target_group !== null);
+    ? identities.filter(i => !i.group_id)
+    : identities.filter(i => i.group_id);
+
+  // Badge counts
+  const chatCount = identities.filter(i => !i.group_id).length;
+  const groupCount = identities.filter(i => i.group_id).length;
 
   return (
     <div className={`min-h-screen p-6 ${
-      theme === 'dark' 
-        ? 'bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900' 
+      theme === 'dark'
+        ? 'bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900'
         : 'bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50'
     }`}>
       {/* Header */}
@@ -142,23 +164,18 @@ export default function MyAnonymousIdentities() {
               }`}
             >
               {tab.charAt(0).toUpperCase() + tab.slice(1)}
-              <span className={`ml-2 px-2 py-0.5 rounded-full text-xs ${
-                filter === tab ? 'bg-white/20' : 'bg-black/10'
-              }`}>
-                {tab === 'all' ? identities.length : tab === 'chat' ? identities.filter(i => i.target_user !== null).length : identities.filter(i => i.target_group !== null).length}
+              <span className="ml-2 px-2 py-0.5 rounded-full text-xs bg-gray-300 text-gray-800">
+                {tab === 'all'
+                  ? identities.length
+                  : tab === 'chat'
+                  ? chatCount
+                  : groupCount}
               </span>
             </button>
           ))}
         </div>
 
         {/* Loading State */}
-        {isLoading && (
-          <div className="flex items-center justify-center py-20">
-            <div className="w-12 h-12 border-4 border-purple-500 border-t-transparent rounded-full animate-spin"></div>
-          </div>
-        )}
-
-        {/* Error State */}
         {error && (
           <div className="p-4 bg-red-500/20 border border-red-500/50 rounded-lg text-red-200 backdrop-blur-sm mb-6">
             {error}
@@ -184,33 +201,51 @@ export default function MyAnonymousIdentities() {
           {filteredIdentities.map((identity) => (
             <div
               key={identity.identity_id}
-              className={`backdrop-blur-md rounded-xl p-6 border transition-all hover:scale-105 cursor-pointer ${
+              className={`backdrop-blur-md rounded-xl p-6 border transition-all hover:scale-105 cursor-pointer shadow-lg hover:shadow-2xl ${
+                confirmRevealId === identity.identity_id
+                  ? 'ring-2 ring-red-500 ring-offset-2'
+                  : ''
+              } ${
                 theme === 'dark'
-                  ? 'bg-white/10 border-white/20 hover:bg-white/15'
-                  : 'bg-white/60 border-white/40 hover:bg-white/70'
+                  ? 'bg-white/10 border-white/20 hover:bg-white/15 hover:border-white/30'
+                  : 'bg-white/60 border-white/40 hover:bg-white/70 hover:border-white/50'
               }`}
               onClick={() => handleNavigateToChat(identity)}
+              title="Click to open conversation"
             >
               {/* Identity Header */}
               <div className="flex items-start justify-between mb-4">
                 <div className={`px-3 py-1 rounded-full text-xs font-medium ${
-                  identity.target_user !== null
-                    ? 'bg-blue-500/20 text-blue-300'
-                    : 'bg-green-500/20 text-green-300'
+                  identity.group_id
+                    ? 'bg-green-500/20 text-green-300'
+                    : 'bg-blue-500/20 text-blue-300'
                 }`}>
-                  {identity.target_user !== null ? '💬 1-on-1 Chat' : '👥 Group'}
+                  {identity.group_id ? '👥 Group' : '💬 1V1 Chat'}
                 </div>
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
                     handleRevealIdentity(identity.identity_id);
                   }}
-                  className="text-xs text-orange-400 hover:text-orange-300"
+                  disabled={revealingId === identity.identity_id || identity.is_revealed}
+                  className={`text-xs transition-colors ${identity.is_revealed ? 
+                    'text-gray-500 cursor-not-allowed'
+                  : revealingId === identity.identity_id
+                    ? 'text-gray-400'                      
+                    : confirmRevealId === identity.identity_id                      
+                    ? 'text-red-400 hover:text-red-300 font-bold animate-pulse'                      
+                    : 'text-orange-400 hover:text-orange-300'                  
+                  }`}
                 >
-                  Reveal 🔓
+                  {identity.is_revealed
+                    ? 'Revealed ✓'
+                    : revealingId === identity.identity_id
+                    ? 'Revealing...'
+                    : confirmRevealId === identity.identity_id
+                    ? 'Click to Confirm! ⚠️'
+                    : 'Reveal 🔓'}
                 </button>
               </div>
-
               {/* Anonymous String */}
               <div className="mb-4">
                 <p className={`text-lg font-mono font-bold mb-1 ${
@@ -229,12 +264,12 @@ export default function MyAnonymousIdentities() {
               <div className={`p-3 rounded-lg mb-4 ${
                 theme === 'dark' ? 'bg-white/5' : 'bg-white/50'
               }`}>
-                {identity.target_user !== null && identity.target_user && (
+                {identity.target_user_id && identity.target_user && (
                   <div className="flex items-center gap-3">
                     <img
                       src={identity.target_user.dp_url || '/default-avatar.png'}
                       alt={identity.target_user.name}
-                      className="w-10 h-10 rounded-full"
+                      className="w-10 h-10 rounded-full object-cover"
                     />
                     <div>
                       <p className={`font-medium ${theme === 'dark' ? 'text-white' : 'text-gray-800'}`}>
@@ -246,7 +281,7 @@ export default function MyAnonymousIdentities() {
                     </div>
                   </div>
                 )}
-                {identity.target_group !== null && identity.target_group && (
+                {identity.group_id && identity.target_group && (
                   <div>
                     <p className={`font-medium ${theme === 'dark' ? 'text-white' : 'text-gray-800'}`}>
                       {identity.target_group.group_name}
@@ -262,6 +297,14 @@ export default function MyAnonymousIdentities() {
               <p className={`text-xs ${theme === 'dark' ? 'text-gray-500' : 'text-gray-500'}`}>
                 Created: {new Date(identity.created_at).toLocaleDateString()}
               </p>
+              
+              {/* Click to open indicator */}
+              <div className={`mt-3 pt-3 border-t flex items-center justify-center gap-2 ${
+                theme === 'dark' ? 'border-white/10 text-gray-400' : 'border-gray-300 text-gray-500'
+              }`}>
+                <span className="text-xs">Click to open chat</span>
+                <span className="text-sm">→</span>
+              </div>
             </div>
           ))}
         </div>

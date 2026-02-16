@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { groupService } from '@/services/group.service';
 import type { User } from '@/types/chat.types';
+import { useToast } from '@/contexts/ToastContext';
 
 interface GroupMember {
   member_id: string;
@@ -24,6 +25,7 @@ export default function ManageGroupPage() {
   const router = useRouter();
   const params = useParams();
   const groupId = params.groupId as string;
+  const toast = useToast();
 
   const [members, setMembers] = useState<GroupMember[]>([]);
   const [allUsers, setAllUsers] = useState<User[]>([]);
@@ -83,7 +85,7 @@ export default function ManageGroupPage() {
       setSearchQuery('');
       fetchData();
     } catch (error: any) {
-      alert(error.message || 'Failed to add member');
+      toast.error(error.message || 'Failed to add member');
     }
   };
 
@@ -96,7 +98,7 @@ export default function ManageGroupPage() {
       await groupService.removeMemberFromGroup(groupId, memberId);
       fetchData();
     } catch (error: any) {
-      alert(error.message || 'Failed to remove member');
+      toast.error(error.message || 'Failed to remove member');
     }
   };
 
@@ -109,7 +111,7 @@ export default function ManageGroupPage() {
       await groupService.promoteMemberToAdmin(groupId, memberId);
       fetchData();
     } catch (error: any) {
-      alert(error.message || 'Failed to promote member');
+      toast.error(error.message || 'Failed to promote member');
     }
   };
 

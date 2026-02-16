@@ -5,9 +5,11 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import type { User, Group } from '@/types/chat.types';
 import { groupService } from '@/services/group.service';
+import { useToast } from '@/contexts/ToastContext';
 
 export default function DashboardPage() {
   const router = useRouter();
+  const toast = useToast();
   const [users, setUsers] = useState<User[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
   const [myGroups, setMyGroups] = useState<any[]>([]);
@@ -92,10 +94,10 @@ export default function DashboardPage() {
   const handleJoinGroup = async (groupId: string, isAnonymous: boolean = false) => {
     try {
       await groupService.joinGroup(groupId, isAnonymous);
-      alert('Joined group successfully!');
+      toast.success('Joined group successfully!');
       fetchData();
     } catch (error: any) {
-      alert(error.message || 'Failed to join group');
+      toast.error(error.message || 'Failed to join group');
     }
   };
 
@@ -144,6 +146,12 @@ export default function DashboardPage() {
                 className="px-4 py-2 bg-white dark:bg-black text-neutral-900 dark:text-neutral-100 font-mono font-bold border-2 border-neutral-900 dark:border-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-900 transition-colors"
               >
                 MY GROUPS
+              </Link>
+              <Link
+                href="/my-identities"
+                className="px-4 py-2 bg-white dark:bg-black text-neutral-900 dark:text-neutral-100 font-mono font-bold border-2 border-neutral-900 dark:border-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-900 transition-colors"
+              >
+                🎭 IDENTITIES
               </Link>
               <Link
                 href="/profile/edit"

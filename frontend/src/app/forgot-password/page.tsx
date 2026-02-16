@@ -5,10 +5,12 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { authService } from '@/services/auth.service';
 import { useTheme } from '@/contexts/ThemeContext';
+import { useToast } from '@/contexts/ToastContext';
 
 export default function ForgotPasswordPage() {
   const router = useRouter();
   const { theme, toggleTheme } = useTheme();
+  const toast = useToast();
   const [step, setStep] = useState<'request' | 'reset'>('request');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -73,7 +75,7 @@ export default function ForgotPasswordPage() {
       });
 
       if (response.success) {
-        alert('Password reset successful! Please login with your new password.');
+        toast.success('Password reset successful! Please login with your new password.');
         router.push('/login');
       }
     } catch (err: any) {

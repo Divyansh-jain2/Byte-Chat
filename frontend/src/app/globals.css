@@ -133,3 +133,30 @@ input, textarea, select, button {
   background-size: 200% 200%;
   animation: gradient 3s ease-in-out infinite;
 }
+
+/* Toast notification animations */
+@keyframes slide-in-right {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.animate-slide-in-right {
+  animation: slide-in-right 0.3s ease-out;
+}
+
+.emoji-picker-react {
+  --epr-bg-color: rgba(20, 20, 30, 0.95) !important;
+  --epr-category-label-bg-color: rgba(30, 30, 40, 0.95) !important;
+  --epr-picker-border-color: rgba(255, 255, 255, 0.1) !important;
+  --epr-search-input-bg-color: rgba(40, 40, 50, 0.95) !important;
+  --epr-text-color: #fff !important;
+  --epr-hover-bg-color: rgba(99, 102, 241, 0.2) !important;
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+}
