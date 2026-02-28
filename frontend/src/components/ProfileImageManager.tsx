@@ -1,9 +1,10 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import ImageUploader from '@/components/ImageUploader';
 import AvatarSelector from '@/components/AvatarSelector';
 import { uploadProfilePicture, deleteProfilePicture, getUserAvatar, selectPresetAvatar } from '@/services/image.service';
+import type { ProfileUser } from '@/types/auth.types';
 
 interface UserProfile {
   user_id: string;
@@ -23,23 +24,25 @@ interface ProfileImageManagerProps {
 }
 
 export default function ProfileImageManager({
-  currentImageUrl,
-  onUploadSuccess,
-  onDeleteSuccess
-}: ProfileImageManagerProps = {}) {
+  currentImageUrl, onUploadSuccess, onDeleteSuccess}: ProfileImageManagerProps = {}) {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [showAvatarSelector, setShowAvatarSelector] = useState(false);
 
-  // Only fetch profile if currentImageUrl is not provided (standalone mode)
-  useEffect(() => {
-    if (!currentImageUrl) {
-      fetchProfile();
-    }
-  }, [currentImageUrl]);
+  // Helper to map API profile user to UserProfile
+  const mapUserToUserProfile = (user: ProfileUser): UserProfile => ({
+    user_id: user.userId,
+    roll_no: user.rollNo,
+    name: user.name,
+    gender: user.gender,
+    branch: user.branch,
+    dp_url: user.dp_url ?? null,
+    bio: user.bio ?? null,
+    dob: user.dob ?? null,
+  });
 
-  const fetchProfile = async () => {
+  const fetchProfile = useCallback(async () => {
     try {
       const token = localStorage.getItem('accessToken');
       if (!token) return;
@@ -49,13 +52,21 @@ export default function ProfileImageManager({
       });
 
       const data = await response.json();
-      if (data.success) {
-        setProfile(data.data);
+      if (data.success && data.data) {
+        setProfile(mapUserToUserProfile(data.data));
       }
-    } catch (error) {
+    } 
+    catch (error) {
       console.error('Failed to fetch profile:', error);
     }
-  };
+  }, [setProfile]);
+
+    // Only fetch profile if currentImageUrl is not provided (standalone mode)
+  useEffect(() => {
+    if (!currentImageUrl) {
+      fetchProfile();
+    }
+  }, [currentImageUrl, fetchProfile]);
 
   const handleImageUpload = async (file: File) => {
     setIsLoading(true);
@@ -69,24 +80,41 @@ export default function ProfileImageManager({
       }
 
       const result = await uploadProfilePicture(file, token);
-      
-      if (result.success) {
+      const user = result.data?.user;
+
+      if (result.success && user) {
+        const userProfile = mapUserToUserProfile(user);
         setMessage({ type: 'success', text: 'Profile picture uploaded successfully!' });
-        setProfile(result.data.user);
-        
+        setProfile(userProfile);
         // Call onUploadSuccess callback if provided
-        if (onUploadSuccess && result.data.user.dp_url) {
-          onUploadSuccess(result.data.user.dp_url);
+        if (onUploadSuccess && userProfile.dp_url) {
+          onUploadSuccess(userProfile.dp_url);
         }
-      } else {
+      } 
+      else {
         setMessage({ type: 'error', text: 'Failed to upload image' });
       }
-    } catch (error: any) {
-      setMessage({ 
-        type: 'error', 
-        text: error.response?.data?.message || 'Failed to upload image' 
-      });
-    } finally {
+    } 
+    catch (error: unknown) {
+      if (
+        typeof error === 'object' &&
+        error !== null &&
+        'response' in error &&
+        typeof (error as { response?: { data?: { message?: string } } }).response?.data?.message === 'string'
+      ) {
+        setMessage({
+          type: 'error',
+          text: (error as { response: { data: { message: string } } }).response.data.message,
+        });
+      } 
+      else {
+        setMessage({
+          type: 'error',
+          text: 'Failed to upload image',
+        });
+      }
+    } 
+    finally {
       setIsLoading(false);
     }
   };
@@ -107,11 +135,11 @@ export default function ProfileImageManager({
       }
 
       const result = await deleteProfilePicture(token);
-      
-      if (result.success) {
+      const user = result.data?.user;
+      if (result.success && user) {
+        const userProfile = mapUserToUserProfile(user);
         setMessage({ type: 'success', text: 'Profile picture deleted successfully!' });
-        setProfile(result.data.user);
-        
+        setProfile(userProfile);
         // Call onDeleteSuccess callback if provided
         if (onDeleteSuccess) {
           onDeleteSuccess();
@@ -119,11 +147,25 @@ export default function ProfileImageManager({
       } else {
         setMessage({ type: 'error', text: 'Failed to delete image' });
       }
-    } catch (error: any) {
-      setMessage({ 
-        type: 'error', 
-        text: error.response?.data?.message || 'Failed to delete image' 
-      });
+    } 
+    catch (error: unknown) {
+      if (
+        typeof error === 'object' &&
+        error !== null &&
+        'response' in error &&
+        typeof (error as { response?: { data?: { message?: string } } }).response?.data?.message === 'string'
+      ) {
+        setMessage({
+          type: 'error',
+          text: (error as { response: { data: { message: string } } }).response.data.message,
+        });
+      } 
+      else {
+        setMessage({
+          type: 'error',
+          text: 'Failed to delete image',
+        });
+      }
     } finally {
       setIsLoading(false);
     }
@@ -141,28 +183,46 @@ export default function ProfileImageManager({
       }
 
       const result = await selectPresetAvatar(avatarId, token);
-      
-      if (result.success) {
+      const user = result.data?.user;
+      if (result.success && user) {
+        const userProfile = mapUserToUserProfile(user);
         setMessage({ type: 'success', text: 'Avatar selected successfully!' });
-        setProfile(result.data.user);
+        setProfile(userProfile);
         setShowAvatarSelector(false);
-        
         // Call onUploadSuccess callback if provided
-        if (onUploadSuccess && result.data.user.dp_url) {
-          onUploadSuccess(result.data.user.dp_url);
+        if (onUploadSuccess && userProfile.dp_url) {
+          onUploadSuccess(userProfile.dp_url);
         }
       } else {
         setMessage({ type: 'error', text: 'Failed to select avatar' });
       }
-    } catch (error: any) {
-      setMessage({ 
-        type: 'error', 
-        text: error.response?.data?.message || 'Failed to select avatar' 
-      });
+    } 
+    catch (error: unknown) {
+      if (
+          typeof error === 'object' &&
+          error !== null &&
+          'response' in error &&
+          typeof (error as { response?: { data?: { message?: string } } }).response?.data?.message === 'string'
+        ) {
+        setMessage({
+          type: 'error',
+          text: (error as { response: { data: { message: string } } }).response.data.message,
+        });
+      } else {
+        setMessage({
+          type: 'error',
+          text: 'Failed to select avatar',
+        });
+      }
     } finally {
       setIsLoading(false);
     }
   };
+
+  // Memoize to prevent unnecessary re-renders of ImageUploader
+  const displayImageUrl = useMemo(() => {
+    return currentImageUrl || (profile ? getUserAvatar(profile.dp_url, profile.gender) : undefined);
+  }, [currentImageUrl, profile]);
 
   // In standalone mode, wait for profile data
   if (!currentImageUrl && !profile) {
@@ -172,12 +232,6 @@ export default function ProfileImageManager({
       </div>
     );
   }
-
-  // Determine the image URL to display
-  // Memoize to prevent unnecessary re-renders of ImageUploader
-  const displayImageUrl = useMemo(() => {
-    return currentImageUrl || (profile ? getUserAvatar(profile.dp_url, profile.gender) : undefined);
-  }, [currentImageUrl, profile?.dp_url, profile?.gender]);
 
   // Standalone mode with full layout
   if (!currentImageUrl) {

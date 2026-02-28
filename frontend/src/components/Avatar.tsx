@@ -2,6 +2,8 @@
 
 import React from 'react';
 import { getUserAvatar } from '@/services/image.service';
+import Image from 'next/image';
+import { useState } from 'react';
 
 interface AvatarProps {
   dpUrl?: string | null;
@@ -38,12 +40,13 @@ export default function Avatar({
 
   return (
     <div className={`relative inline-block ${className}`}>
-      <img
+      <Image
         src={avatarUrl}
         alt={`${name}'s avatar`}
+        width={200}
+        height={200}
         className={`${sizeClass} rounded-full object-cover border-2 border-gray-200`}
         onError={(e) => {
-          // Fallback if image fails to load
           const target = e.target as HTMLImageElement;
           target.src = getUserAvatar(null, gender);
         }}
@@ -71,26 +74,21 @@ interface GroupAvatarProps {
   className?: string;
 }
 
-export function GroupAvatar({
-  groupDpUrl,
-  groupName,
-  size = 'md',
-  className = '',
-}: GroupAvatarProps) {
+export function GroupAvatar({ groupDpUrl, groupName,
+  size = 'md', className = '', }: GroupAvatarProps) {
   const sizeClass = sizeClasses[size];
   const defaultGroupImage = `https://ui-avatars.com/api/?name=${encodeURIComponent(groupName)}&background=random&color=fff&size=200`;
+  const [src, setSrc] = useState(groupDpUrl || defaultGroupImage);
 
-  return (
+return (
     <div className={`relative inline-block ${className}`}>
-      <img
-        src={groupDpUrl || defaultGroupImage}
+      <Image
+        src={src}
         alt={`${groupName}'s avatar`}
+        width={200}
+        height={200}
         className={`${sizeClass} rounded-full object-cover border-2 border-gray-200`}
-        onError={(e) => {
-          // Fallback to default group image
-          const target = e.target as HTMLImageElement;
-          target.src = defaultGroupImage;
-        }}
+        onError={() => setSrc(defaultGroupImage)}
       />
     </div>
   );

@@ -1,15 +1,16 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+// import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { chatService } from '@/services/chat.service';
 import anonymousChatService from '@/services/anonymous-chat.service';
 import type { Conversation, ChatRequest } from '@/types/chat.types';
+import Image from 'next/image';
 
 export default function ChatPage() {
-  const router = useRouter();
-  const searchParams = useSearchParams();
+  // const router = useRouter();
+  // const searchParams = useSearchParams();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [chatRequests, setChatRequests] = useState<ChatRequest[]>([]);
   const [loading, setLoading] = useState(true);
@@ -177,15 +178,17 @@ export default function ChatPage() {
                 >
                   <div className="flex items-center gap-4">
                     {/* Avatar */}
-                    <div className="flex-shrink-0">
+                    <div className="shrink-0">
                       {conv.other_user_dp ? (
-                        <img
+                        <Image
                           src={conv.other_user_dp}
                           alt={conv.other_user_name}
-                          className="w-14 h-14 rounded-full object-cover"
+                          width={32}
+                          height={32}
+                          className="rounded-full object-cover"
                         />
                       ) : (
-                        <div className="w-14 h-14 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-white font-bold text-xl">
+                        <div className="w-14 h-14 rounded-full bg-linear-to-br from-blue-400 to-purple-500 flex items-center justify-center text-white font-bold text-xl">
                           {conv.other_user_name.charAt(0).toUpperCase()}
                         </div>
                       )}
@@ -242,15 +245,17 @@ export default function ChatPage() {
                 >
                   <div className="flex items-center gap-4">
                     {/* Avatar */}
-                    <div className="flex-shrink-0">
+                    <div className="shrink-0">
                       {request.sender_dp_url ? (
-                        <img
+                        <Image
                           src={request.sender_dp_url}
                           alt={request.sender_display_name}
-                          className="w-14 h-14 rounded-full object-cover"
+                          width={32}
+                          height={32}
+                          className="rounded-full object-cover"
                         />
                       ) : (
-                        <div className="w-14 h-14 rounded-full bg-gradient-to-br from-green-400 to-blue-500 flex items-center justify-center text-white font-bold text-xl">
+                        <div className="w-14 h-14 rounded-full bg-linear-to-br from-green-400 to-blue-500 flex items-center justify-center text-white font-bold text-xl">
                           {request.sender_display_name.charAt(0).toUpperCase()}
                         </div>
                       )}

@@ -63,7 +63,21 @@ export interface CreateAnonymousIdentityResponse {
   data: AnonymousIdentity;
 }
 
-// Get all anonymous identities for the current user
+// // Get all anonymous identities for the current user
+// export const getMyAnonymousIdentities = async (): Promise<AnonymousIdentitiesResponse> => {
+//   try {
+//     const response = await axios.get(
+//       `${API_URL}/anonymous/my-identities`,
+//       getAuthHeader()
+//     );
+//     return response.data;
+//   } 
+//   catch (error: unknown) {
+//     throw new Error(error.response?.data?.message || 'Failed to fetch anonymous identities');
+//   }
+// };
+
+
 export const getMyAnonymousIdentities = async (): Promise<AnonymousIdentitiesResponse> => {
   try {
     const response = await axios.get(
@@ -72,10 +86,31 @@ export const getMyAnonymousIdentities = async (): Promise<AnonymousIdentitiesRes
     );
     return response.data;
   } 
-  catch (error: any) {
-    throw new Error(error.response?.data?.message || 'Failed to fetch anonymous identities');
+  catch (error: unknown) {
+    const message =
+      axios.isAxiosError(error) && error.response?.data?.message
+        ? String(error.response.data.message)
+        : error instanceof Error
+        ? error.message
+        : 'Failed to fetch anonymous identities';
+    throw new Error(message);
   }
 };
+
+// // Reveal anonymous identity (deactivate it)
+// export const revealAnonymousIdentity = async (identityId: string): Promise<RevealIdentityResponse> => {
+//   try {
+//     const response = await axios.put(
+//       `${API_URL}/anonymous/reveal/${identityId}`,
+//       {},
+//       getAuthHeader()
+//     );
+//     return response.data;
+//   } 
+//   catch (error: any) {
+//     throw new Error(error.response?.data?.message || 'Failed to reveal identity');
+//   }
+// };
 
 // Reveal anonymous identity (deactivate it)
 export const revealAnonymousIdentity = async (identityId: string): Promise<RevealIdentityResponse> => {
@@ -87,8 +122,14 @@ export const revealAnonymousIdentity = async (identityId: string): Promise<Revea
     );
     return response.data;
   } 
-  catch (error: any) {
-    throw new Error(error.response?.data?.message || 'Failed to reveal identity');
+  catch (error: unknown) {
+    const message =
+      axios.isAxiosError(error) && error.response?.data?.message
+        ? String(error.response.data.message)
+        : error instanceof Error
+        ? error.message
+        : 'Failed to reveal identity';
+    throw new Error(message);
   }
 };
 
@@ -104,8 +145,17 @@ export const createAnonymousIdentity = async (
     );
     return response.data;
   } 
-  catch (error: any) {
-    throw new Error(error.response?.data?.message || 'Failed to create anonymous identity');
+  // catch (error: any) {
+  //   throw new Error(error.response?.data?.message || 'Failed to create anonymous identity');
+  // }
+  catch (error: unknown) {
+    const message =
+      axios.isAxiosError(error) && error.response?.data?.message
+        ? String(error.response.data.message)
+        : error instanceof Error
+        ? error.message
+        : 'Failed to create anonymous identity';
+    throw new Error(message);
   }
 };
 
@@ -118,8 +168,17 @@ export const deleteAnonymousIdentity = async (identityId: string): Promise<Revea
     );
     return response.data;
   } 
-  catch (error: any) {
-    throw new Error(error.response?.data?.message || 'Failed to delete identity');
+  // catch (error: any) {
+  //   throw new Error(error.response?.data?.message || 'Failed to delete identity');
+  // }
+  catch (error: unknown) {
+    const message =
+      axios.isAxiosError(error) && error.response?.data?.message
+        ? String(error.response.data.message)
+        : error instanceof Error
+        ? error.message
+        : 'Failed to delete identity';
+    throw new Error(message);
   }
 };
 
@@ -132,7 +191,16 @@ export const getAnonymousIdentityById = async (identityId: string): Promise<Anon
     );
     return response.data.data;
   } 
-  catch (error: any) {
-    throw new Error(error.response?.data?.message || 'Failed to fetch identity');
+  // catch (error: any) {
+  //   throw new Error(error.response?.data?.message || 'Failed to fetch identity');
+  // }
+  catch (error: unknown) {
+    const message =
+      axios.isAxiosError(error) && error.response?.data?.message
+        ? String(error.response.data.message)
+        : error instanceof Error
+        ? error.message
+        : 'Failed to fetch identity';
+    throw new Error(message);
   }
 };

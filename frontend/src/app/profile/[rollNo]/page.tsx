@@ -1,11 +1,12 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useTheme } from '@/contexts/ThemeContext';
 import { BlockUserButton } from '@/components/ModerationComponents';
 import { checkIfBlocked } from '@/services/moderation.service';
+import Image from 'next/image';
 
 export default function ViewProfile() {
   const params = useParams();
@@ -13,21 +14,16 @@ export default function ViewProfile() {
   const { theme, toggleTheme } = useTheme();
   
   const rollNo = params.rollNo as string;
+  // need proper error handling
   const [profile, setProfile] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
   const [isOwnProfile, setIsOwnProfile] = useState(false);
   const [isBlocked, setIsBlocked] = useState(false);
   const [blockMessage, setBlockMessage] = useState('');
-  const [blockedByOther, setBlockedByOther] = useState(false);
+  const [, setBlockedByOther] = useState(false);
 
-  useEffect(() => {
-    if (rollNo) {
-      fetchProfile();
-    }
-  }, [rollNo]);
-
-  const fetchProfile = async () => {
+  const fetchProfile = useCallback ( async () => {
     try {
       const token = localStorage.getItem('accessToken');
       
@@ -79,12 +75,20 @@ export default function ViewProfile() {
       } else {
         setError(data.message || 'Failed to fetch profile');
       }
-    } catch (err) {
+    } 
+    catch (err) {
       setError('Failed to load profile');
-    } finally {
+      console.log(err);
+    } 
+    finally {
       setIsLoading(false);
     }
-  };
+  }, [rollNo, isOwnProfile]);
+
+  useEffect(() => {
+    fetchProfile();
+  }, [fetchProfile]);
+
 
   const handleBlockStatusChange = () => {
     fetchProfile(); // Refresh profile after blocking/unblocking
@@ -94,8 +98,8 @@ export default function ViewProfile() {
     return (
       <div className={`min-h-screen flex items-center justify-center ${
         theme === 'dark' 
-          ? 'bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900' 
-          : 'bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50'
+          ? 'bg-linear-to-br from-gray-900 via-purple-900 to-gray-900' 
+          : 'bg-linear-to-br from-blue-50 via-purple-50 to-pink-50'
       }`}>
         <div className="w-12 h-12 border-4 border-purple-500 border-t-transparent rounded-full animate-spin"></div>
       </div>
@@ -106,8 +110,8 @@ export default function ViewProfile() {
     return (
       <div className={`min-h-screen flex items-center justify-center p-4 ${
         theme === 'dark' 
-          ? 'bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900' 
-          : 'bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50'
+          ? 'bg-linear-to-br from-gray-900 via-purple-900 to-gray-900' 
+          : 'bg-linear-to-br from-blue-50 via-purple-50 to-pink-50'
       }`}>
         <div className={`backdrop-blur-md rounded-2xl p-8 text-center ${
           theme === 'dark' ? 'bg-white/10' : 'bg-white/60'
@@ -117,7 +121,7 @@ export default function ViewProfile() {
           </p>
           <button
             onClick={() => router.back()}
-            className="px-6 py-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-lg hover:from-purple-600 hover:to-pink-600"
+            className="px-6 py-2 bg-linear-to-r from-purple-500 to-pink-500 text-white rounded-lg hover:from-purple-600 hover:to-pink-600"
           >
             Go Back
           </button>
@@ -129,8 +133,8 @@ export default function ViewProfile() {
   return (
     <div className={`min-h-screen p-6 ${
       theme === 'dark' 
-        ? 'bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900' 
-        : 'bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50'
+        ? 'bg-linear-to-br from-gray-900 via-purple-900 to-gray-900' 
+        : 'bg-linear-to-br from-blue-50 via-purple-50 to-pink-50'
     }`}>
       {/* Header */}
       <div className="max-w-4xl mx-auto mb-6">
@@ -166,18 +170,19 @@ export default function ViewProfile() {
             : 'bg-white/60 border border-white/40'
         }`}>
           {/* Cover Header */}
-          <div className="h-32 bg-gradient-to-r from-purple-500 to-pink-500"></div>
+          <div className="h-32 bg-linear-to-r from-purple-500 to-pink-500"></div>
 
           {/* Profile Content */}
           <div className="p-8">
             {/* Profile Picture & Basic Info */}
             <div className="flex flex-col md:flex-row items-center md:items-start gap-6 -mt-20">
-              <img
+              <Image
                 src={profile.dp_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${profile.roll_no}`}
                 alt={profile.name}
-                className="w-32 h-32 rounded-full border-4 border-white shadow-xl object-cover"
+                width={32}
+                height={32}
+                className="rounded-full border-4 border-white shadow-xl object-cover"
               />
-              
               <div className="flex-1 text-center md:text-left mt-16 md:mt-10">
                 <h1 className={`text-3xl font-bold mb-2 ${
                   theme === 'dark' ? 'text-white' : 'text-gray-800'
@@ -214,7 +219,7 @@ export default function ViewProfile() {
               <div className="flex flex-col gap-2 mt-16 md:mt-10">
                 {isOwnProfile ? (
                   <Link href="/profile/edit">
-                    <button className="px-6 py-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-lg hover:from-purple-600 hover:to-pink-600 transition-all">
+                    <button className="px-6 py-2 bg-linear-to-r from-purple-500 to-pink-500 text-white rounded-lg hover:from-purple-600 hover:to-pink-600 transition-all">
                       ✏️ Edit Profile
                     </button>
                   </Link>
@@ -235,7 +240,7 @@ export default function ViewProfile() {
                         className={`px-6 py-2 rounded-lg transition-all ${
                           isBlocked 
                             ? 'bg-gray-400 cursor-not-allowed opacity-50' 
-                            : 'bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600'
+                            : 'bg-linear-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600'
                         } text-white`}
                       >
                         💬 Message

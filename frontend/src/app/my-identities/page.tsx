@@ -1,10 +1,13 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+
+type TabType = 'all' | 'chat' | 'group';
 import { useRouter } from 'next/navigation';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useToast } from '@/contexts/ToastContext';
 import { getMyAnonymousIdentities, revealAnonymousIdentity, AnonymousIdentity } from '@/services/anonymous.service';
+import Image from 'next/image';
 
 export default function MyAnonymousIdentities() {
   const router = useRouter();
@@ -13,7 +16,7 @@ export default function MyAnonymousIdentities() {
 
   const [identities, setIdentities] = useState<AnonymousIdentity[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [filter, setFilter] = useState<'all' | 'chat' | 'group'>('all');
+  const [filter, setFilter] = useState<TabType>('all');
   const [revealingId, setRevealingId] = useState<string | null>(null);
   const [confirmRevealId, setConfirmRevealId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null); // Added error state
@@ -35,10 +38,20 @@ export default function MyAnonymousIdentities() {
         setError(response.message || 'Failed to fetch identities');
         toast.error(response.message || 'Failed to fetch identities');
       }
-    } catch (err: any) {
-      setError(err.message || 'Failed to load anonymous identities');
-      toast.error(err.message || 'Failed to load anonymous identities');
-    } finally {
+    } 
+    // catch (err: any) {
+    //   setError(err.message || 'Failed to load anonymous identities');
+    //   toast.error(err.message || 'Failed to load anonymous identities');
+    // } 
+    catch (err: unknown) {
+      let errorMsg = 'Failed to load anonymous identities';
+      if (typeof err === 'object' && err !== null && 'message' in err && typeof (err as { message?: string }).message === 'string') {
+        errorMsg = (err as { message: string }).message;
+      }
+      setError(errorMsg);
+      toast.error(errorMsg);
+    }
+    finally {
       setIsLoading(false);
     }
   };
@@ -67,9 +80,19 @@ export default function MyAnonymousIdentities() {
       } else {
         toast.error(response.message || 'Failed to reveal identity');
       }
-    } catch (err: any) {
-      toast.error(err.message || 'Failed to reveal identity');
-    } finally {
+    } 
+    // catch (err: any) {
+    //   toast.error(err.message || 'Failed to reveal identity');
+    // } 
+    catch (err: unknown) {
+      let errorMsg = 'Failed to reveal identity';
+      if (typeof err === 'object' && err !== null && 'message' in err && typeof (err as { message?: string }).message === 'string') {
+        errorMsg = (err as { message: string }).message;
+      }
+      setError(errorMsg);
+      toast.error(errorMsg);
+    }
+    finally {
       setRevealingId(null);
     }
   };
@@ -106,8 +129,8 @@ export default function MyAnonymousIdentities() {
   return (
     <div className={`min-h-screen p-6 ${
       theme === 'dark'
-        ? 'bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900'
-        : 'bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50'
+        ? 'bg-linear-to-br from-gray-900 via-purple-900 to-gray-900'
+        : 'bg-linear-to-br from-blue-50 via-purple-50 to-pink-50'
     }`}>
       {/* Header */}
       <div className="max-w-6xl mx-auto">
@@ -151,13 +174,13 @@ export default function MyAnonymousIdentities() {
         <div className={`flex gap-2 mb-6 p-2 rounded-lg backdrop-blur-md ${
           theme === 'dark' ? 'bg-white/10' : 'bg-white/50'
         }`}>
-          {['all', 'chat', 'group'].map((tab) => (
+          {(['all', 'chat', 'group'] as TabType[]).map((tab) => (
             <button
               key={tab}
-              onClick={() => setFilter(tab as any)}
+              onClick={() => setFilter(tab)}
               className={`px-6 py-2 rounded-lg font-medium transition-all ${
                 filter === tab
-                  ? 'bg-gradient-to-r from-purple-500 to-pink-500 text-white shadow-lg'
+                  ? 'bg-linear-to-r from-purple-500 to-pink-500 text-white shadow-lg'
                   : theme === 'dark'
                   ? 'text-gray-300 hover:bg-white/10'
                   : 'text-gray-600 hover:bg-white/50'
@@ -266,10 +289,12 @@ export default function MyAnonymousIdentities() {
               }`}>
                 {identity.target_user_id && identity.target_user && (
                   <div className="flex items-center gap-3">
-                    <img
+                    <Image
                       src={identity.target_user.dp_url || '/default-avatar.png'}
                       alt={identity.target_user.name}
-                      className="w-10 h-10 rounded-full object-cover"
+                      width={32}
+                      height={32}
+                      className="rounded-full object-cover"
                     />
                     <div>
                       <p className={`font-medium ${theme === 'dark' ? 'text-white' : 'text-gray-800'}`}>

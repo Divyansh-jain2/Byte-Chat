@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { AVATAR_OPTIONS, getAvatarUrl, extractAvatarPublicId } from '@/utils/avatar.utils';
+import Image from 'next/image';
 
 interface AvatarSelectorProps {
   currentAvatarUrl?: string;
@@ -57,12 +58,13 @@ export default function AvatarSelector({
                 `}
                 title={avatarId}
               >
-                <img
-                  src={avatarUrl}
-                  alt={`Avatar ${avatarId}`}
-                  className="w-full h-full object-cover"
-                  loading="lazy"
-                />
+              <Image
+                src={avatarUrl}
+                alt={`Avatar ${avatarId}`}
+                width={48}
+                height={48}
+                className="rounded-lg object-cover"
+              />
                 {isSelected && (
                   <div className="absolute inset-0 bg-blue-500 bg-opacity-20 flex items-center justify-center">
                     <svg 

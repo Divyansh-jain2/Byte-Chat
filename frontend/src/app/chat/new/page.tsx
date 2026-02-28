@@ -1,9 +1,15 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { chatService } from '@/services/chat.service';
 import anonymousChatService from '@/services/anonymous-chat.service';
+
+
+type ChatResponse = {
+  conversationId?: string;
+  data?: { conversationId?: string };
+};
 
 export default function NewChatPage() {
   const router = useRouter();
@@ -11,6 +17,75 @@ export default function NewChatPage() {
   const [status, setStatus] = useState<'sending' | 'success' | 'error'>('sending');
   const [error, setError] = useState<string>('');
   const [retrying, setRetrying] = useState(false);
+
+  const sendRequest = useCallback(async (receiverId: string, isAnonymous: boolean) => {
+    try {
+      setStatus('sending');
+      setError('');
+      
+      // Add timeout handler (15 seconds)
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Request timeout. Please try again.')), 15000)
+      );
+      
+      // Use the appropriate service based on chat type
+      let requestPromise: Promise<ChatResponse>;
+      if (isAnonymous) {
+        requestPromise = anonymousChatService.createAnonymousConversation(receiverId);
+      } else {
+        requestPromise = chatService.sendChatRequest(receiverId);
+      }
+      
+      const response = await Promise.race([requestPromise, timeoutPromise]) as ChatResponse;
+      setStatus('success');
+      
+      // Extract conversationId based on response structure
+      // Regular chat: response.data.conversationId
+      // Anonymous chat: response.conversationId (already extracted .data.data)
+      const conversationId = isAnonymous ? response.conversationId : response.data?.conversationId;
+      setTimeout(() => {
+        router.push(`/chat/${conversationId}`);
+      }, 500);
+    } 
+    catch (err: unknown) {
+      setStatus('error');
+      let errorMsg = 'Failed to open chat. Please try again.';
+
+      if (
+        typeof err === 'object' &&
+        err !== null &&
+        'response' in err &&
+        typeof (err as { response?: unknown }).response === 'object'
+        ) {
+            const response = (err as { response: 
+              { status?: number; data?: { 
+                message?: string } } 
+              }).response;
+            if (response.status === 403) {
+              errorMsg = 'You cannot message this user. You may be blocked.';
+            } else if (response.status === 400) {
+              errorMsg = response.data?.message || 'Invalid request';
+            } else {
+              errorMsg = response.data?.message || errorMsg;
+            }
+          } 
+          else if (
+        typeof err === 'object' &&
+        err !== null &&
+        'message' in err &&
+        typeof (err as { message?: string }).message === 'string'
+      ) {
+        if ((err as { message: string }).message.includes('timeout')) {
+          errorMsg = 'Connection timeout. Please check your internet and try again.';
+        }
+      }
+
+      setError(errorMsg);
+    }  
+    finally {
+      setRetrying(false);
+    }
+  }, [router]);
 
   useEffect(() => {
     const userId = searchParams.get('userId');
@@ -34,53 +109,7 @@ export default function NewChatPage() {
     }
 
     sendRequest(userId, isAnonymous);
-  }, [searchParams]);
-
-  const sendRequest = async (receiverId: string, isAnonymous: boolean) => {
-    try {
-      setStatus('sending');
-      setError('');
-      
-      // Add timeout handler (15 seconds)
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Request timeout. Please try again.')), 15000)
-      );
-      
-      // Use the appropriate service based on chat type
-      let requestPromise;
-      if (isAnonymous) {
-        requestPromise = anonymousChatService.createAnonymousConversation(receiverId);
-      } else {
-        requestPromise = chatService.sendChatRequest(receiverId, false);
-      }
-      
-      const response = await Promise.race([requestPromise, timeoutPromise]) as any;
-      setStatus('success');
-      
-      // Extract conversationId based on response structure
-      // Regular chat: response.data.conversationId
-      // Anonymous chat: response.conversationId (already extracted .data.data)
-      const conversationId = isAnonymous ? response.conversationId : response.data.conversationId;
-      setTimeout(() => {
-        router.push(`/chat/${conversationId}`);
-      }, 500);
-    } catch (err: any) {
-      setStatus('error');
-      
-      // Better error messages
-      if (err.response?.status === 403) {
-        setError('You cannot message this user. You may be blocked.');
-      } else if (err.response?.status === 400) {
-        setError(err.response.data?.message || 'Invalid request');
-      } else if (err.message?.includes('timeout')) {
-        setError('Connection timeout. Please check your internet and try again.');
-      } else {
-        setError(err.response?.data?.message || 'Failed to open chat. Please try again.');
-      }
-    } finally {
-      setRetrying(false);
-    }
-  };
+  }, [sendRequest, searchParams]);
 
   const handleRetry = () => {
     const userId = searchParams.get('userId');

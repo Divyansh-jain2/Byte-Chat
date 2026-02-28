@@ -44,9 +44,20 @@ export default function ForgotPasswordPage() {
         setSuccess(response.message);
         setStep('reset');
       }
-    } catch (err: any) {
-      setError(err.message || 'Failed to send OTP');
-    } finally {
+    } 
+    catch (err: unknown) {
+      let errorMsg = 'Failed to send OTP';
+      if (
+        typeof err === 'object' &&
+        err !== null &&
+        'message' in err &&
+        typeof (err as { message?: string }).message === 'string'
+      ) {
+        errorMsg = (err as { message: string }).message;
+      }
+      setError(errorMsg);
+    }
+    finally {
       setLoading(false);
     }
   };
@@ -78,16 +89,27 @@ export default function ForgotPasswordPage() {
         toast.success('Password reset successful! Please login with your new password.');
         router.push('/login');
       }
-    } catch (err: any) {
-      setError(err.message || 'Password reset failed');
-    } finally {
+    } 
+    catch (err: unknown) {
+      let errorMsg = 'Password reset failed';
+      if (
+        typeof err === 'object' &&
+        err !== null &&
+        'message' in err &&
+        typeof (err as { message?: string }).message === 'string'
+      ) {
+        errorMsg = (err as { message: string }).message;
+      }
+      setError(errorMsg);
+    }
+    finally {
       setLoading(false);
     }
   };
 
   if (step === 'reset') {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-100 dark:from-gray-900 dark:via-indigo-950 dark:to-purple-950 p-4 transition-colors duration-300">
+      <div className="min-h-screen flex items-center justify-center bg-linear-to-br from-blue-50 via-indigo-50 to-purple-100 dark:from-gray-900 dark:via-indigo-950 dark:to-purple-950 p-4 transition-colors duration-300">
         {/* Theme Toggle */}
         <button
           onClick={toggleTheme}
@@ -107,12 +129,12 @@ export default function ForgotPasswordPage() {
 
         <div className="bg-white/80 dark:bg-gray-900/80 backdrop-blur-xl rounded-3xl shadow-2xl p-8 w-full max-w-md border border-white/20 dark:border-gray-700/50">
           <div className="text-center mb-8">
-            <div className="mb-4 inline-block p-3 bg-gradient-to-br from-orange-500 to-red-600 rounded-2xl shadow-lg">
+            <div className="mb-4 inline-block p-3 bg-linear-to-br from-orange-500 to-red-600 rounded-2xl shadow-lg">
               <svg className="w-12 h-12 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
               </svg>
             </div>
-            <h1 className="text-4xl font-bold bg-gradient-to-r from-orange-600 to-red-600 dark:from-orange-400 dark:to-red-400 bg-clip-text text-transparent">Reset Password</h1>
+            <h1 className="text-4xl font-bold bg-linear-to-r from-orange-600 to-red-600 dark:from-orange-400 dark:to-red-400 bg-clip-text text-transparent">Reset Password</h1>
             <p className="text-gray-600 dark:text-gray-400 mt-2">
               Enter the OTP sent to your email
             </p>
@@ -230,7 +252,7 @@ export default function ForgotPasswordPage() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full bg-gradient-to-r from-orange-600 to-red-600 hover:from-orange-700 hover:to-red-700 dark:from-orange-500 dark:to-red-500 dark:hover:from-orange-600 dark:hover:to-red-600 text-white py-3 rounded-xl font-bold shadow-lg hover:shadow-xl transform hover:scale-[1.02] transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
+              className="w-full bg-linear-to-r from-orange-600 to-red-600 hover:from-orange-700 hover:to-red-700 dark:from-orange-500 dark:to-red-500 dark:hover:from-orange-600 dark:hover:to-red-600 text-white py-3 rounded-xl font-bold shadow-lg hover:shadow-xl transform hover:scale-[1.02] transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
             >
               {loading ? (
                 <span className="flex items-center justify-center gap-2">
@@ -287,7 +309,7 @@ export default function ForgotPasswordPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-100 dark:from-gray-900 dark:via-indigo-950 dark:to-purple-950 p-4 transition-colors duration-300">
+    <div className="min-h-screen flex items-center justify-center bg-linear-to-br from-blue-50 via-indigo-50 to-purple-100 dark:from-gray-900 dark:via-indigo-950 dark:to-purple-950 p-4 transition-colors duration-300">
       {/* Theme Toggle */}
       <button
         onClick={toggleTheme}
@@ -307,12 +329,12 @@ export default function ForgotPasswordPage() {
 
       <div className="bg-white/80 dark:bg-gray-900/80 backdrop-blur-xl rounded-3xl shadow-2xl p-8 w-full max-w-md border border-white/20 dark:border-gray-700/50">
         <div className="text-center mb-8">
-          <div className="mb-4 inline-block p-3 bg-gradient-to-br from-orange-500 to-red-600 rounded-2xl shadow-lg">
+          <div className="mb-4 inline-block p-3 bg-linear-to-br from-orange-500 to-red-600 rounded-2xl shadow-lg">
             <svg className="w-12 h-12 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
           </div>
-          <h1 className="text-4xl font-bold bg-gradient-to-r from-orange-600 to-red-600 dark:from-orange-400 dark:to-red-400 bg-clip-text text-transparent">Forgot Password</h1>
+          <h1 className="text-4xl font-bold bg-linear-to-r from-orange-600 to-red-600 dark:from-orange-400 dark:to-red-400 bg-clip-text text-transparent">Forgot Password</h1>
           <p className="text-gray-600 dark:text-gray-400 mt-2 font-medium">
             Enter your roll number to receive an OTP
           </p>
@@ -348,7 +370,7 @@ export default function ForgotPasswordPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-gradient-to-r from-orange-600 to-red-600 hover:from-orange-700 hover:to-red-700 dark:from-orange-500 dark:to-red-500 dark:hover:from-orange-600 dark:hover:to-red-600 text-white py-3 rounded-xl font-bold shadow-lg hover:shadow-xl transform hover:scale-[1.02] transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
+            className="w-full bg-linear-to-r from-orange-600 to-red-600 hover:from-orange-700 hover:to-red-700 dark:from-orange-500 dark:to-red-500 dark:hover:from-orange-600 dark:hover:to-red-600 text-white py-3 rounded-xl font-bold shadow-lg hover:shadow-xl transform hover:scale-[1.02] transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
           >
             {loading ? (
               <span className="flex items-center justify-center gap-2">

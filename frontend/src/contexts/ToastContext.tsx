@@ -127,14 +127,14 @@ const ToastItem: React.FC<ToastItemProps> = ({ toast, onRemove }) => {
 
   return (
     <div
-      className={`${getToastStyles()} rounded-lg shadow-lg p-4 flex items-center gap-3 min-w-[300px] animate-slide-in-right`}
+      className={`${getToastStyles()} rounded-lg shadow-lg p-4 flex items-center gap-3 min-w-75 animate-slide-in-right`}
       role="alert"
     >
-      <div className="flex-shrink-0">{getIcon()}</div>
+      <div className="shrink-0">{getIcon()}</div>
       <p className="flex-1 text-sm font-medium">{toast.message}</p>
       <button
         onClick={() => onRemove(toast.id)}
-        className="flex-shrink-0 hover:opacity-80 transition-opacity"
+        className="shrink-0 hover:opacity-80 transition-opacity"
         aria-label="Close"
       >
         <FiX className="w-5 h-5" />

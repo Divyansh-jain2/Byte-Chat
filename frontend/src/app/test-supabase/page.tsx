@@ -28,7 +28,7 @@ export default async function TestSupabasePage() {
         <p className="font-bold">✓ Successfully connected to Supabase!</p>
       </div>
       
-      <h2 className="text-xl font-semibold mb-2">Data from 'users' table:</h2>
+      <h2 className="text-xl font-semibold mb-2">Data from `users`` table:</h2>
       <div className="bg-gray-100 p-4 rounded">
         <pre className="text-sm overflow-auto">
           {JSON.stringify(data, null, 2)}

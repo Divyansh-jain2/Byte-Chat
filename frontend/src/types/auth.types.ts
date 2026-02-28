@@ -1,3 +1,9 @@
+// Profile user type for profile-related API responses
+export interface ProfileUser extends User {
+  dp_url?: string | null;
+  bio?: string | null;
+  dob?: string | null;
+}
 // Degree type prefixes for roll numbers
 export const DEGREE_TYPES = {
   B: 'B Tech',

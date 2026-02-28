@@ -1,31 +1,34 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { chatService } from '@/services/chat.service';
 import anonymousChatService from '@/services/anonymous-chat.service';
 import { useSocket } from '@/contexts/SocketContext';
 import { useToast } from '@/contexts/ToastContext';
-import type { Message } from '@/types/chat.types';
+import type { Message, User } from '@/types/chat.types';
 import { Theme } from 'emoji-picker-react';
+import Image from 'next/image';
 
 // Dynamic import for emoji picker (client-side only)
 const EmojiPicker = dynamic(() => import('emoji-picker-react'), { ssr: false });
+type EmojiData = { emoji: string };
 
 export default function ChatWindowPage() {
   const router = useRouter();
   const params = useParams();
-  const { socket, isConnected, joinConversation, leaveConversation } = useSocket();
+  const { getSocket, isConnected, joinConversation, leaveConversation } = useSocket();
   const conversationId = params.conversationId as string;
   const toast = useToast();
-  
+  const socket = getSocket();
+
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(true);
   const [loadingTimeout, setLoadingTimeout] = useState(false);
   const [sending, setSending] = useState(false);
-  const [otherUser, setOtherUser] = useState<any>(null);
+  const [otherUser, setOtherUser] = useState<User | null>(null);
   const [isAnonymous, setIsAnonymous] = useState(false);
   const [isBlocked, setIsBlocked] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
@@ -46,92 +49,6 @@ export default function ChatWindowPage() {
   const emojiPickerRef = useRef<HTMLDivElement>(null);
   const fetchingRef = useRef(false); // Prevent duplicate fetches
   const lastFetchRef = useRef(0); // Track last fetch time
-
-  useEffect(() => {
-    if (conversationId) {
-      fetchMessages();
-      
-      // Set loading timeout (10 seconds)
-      const timeoutId = setTimeout(() => {
-        if (loading) {
-          setLoadingTimeout(true);
-        }
-      }, 10000);
-      
-      // Join conversation room via socket
-      if (isConnected) {
-        joinConversation(conversationId);
-      }
-      
-      return () => {
-        clearTimeout(timeoutId);
-        if (isConnected) {
-          leaveConversation(conversationId);
-        }
-      };
-    }
-  }, [conversationId, isConnected]);
-
-  // Listen for new messages via socket
-  useEffect(() => {
-    if (!socket) return;
-
-    const handleNewMessage = (message: Message) => {
-      // Add is_my_message flag
-      const userStr = localStorage.getItem('user');
-      const currentUserId = userStr ? JSON.parse(userStr).user_id : null;
-      
-      setMessages((prev) => [...prev, {
-        ...message,
-        is_my_message: message.sender_id === currentUserId,
-      }]);
-    };
-
-    const handleTyping = ({ userId, isTyping }: { userId: string; isTyping: boolean }) => {
-      // Handle typing indicator (optional)
-      // console.log(`User ${userId} is ${isTyping ? 'typing' : 'not typing'}`);
-    };
-
-    const handleIdentityRevealed = () => {
-      // Refresh messages when identity is revealed
-      setIsAnonymous(false);
-      fetchMessages();
-    };
-
-    const handleUserBlocked = () => {
-      setIsBlocked(true);
-      toast.warning('This conversation has been blocked');
-    };
-
-    const handleConversationUnblocked = ({ canMessageNow }: { conversationId: string; canMessageNow: boolean; unblockedBy: string }) => {
-      setIsBlocked(false);
-      console.log('🔓 Conversation unblocked - you can now send messages');
-      // Refresh conversation to get latest state
-      fetchMessages();
-    };
-
-    const handleConversationStillBlocked = ({ blockedBy }: { conversationId: string; blockedBy: string }) => {
-      console.log('⚠️ Conversation still blocked by other user');
-      // Refresh conversation to get latest state
-      fetchMessages();
-    };
-
-    socket.on('new-message', handleNewMessage);
-    socket.on('user-typing', handleTyping);
-    socket.on('identity-revealed', handleIdentityRevealed);
-    socket.on('user-blocked', handleUserBlocked);
-    socket.on('conversation-unblocked', handleConversationUnblocked);
-    socket.on('conversation-still-blocked', handleConversationStillBlocked);
-
-    return () => {
-      socket.off('new-message', handleNewMessage);
-      socket.off('user-typing', handleTyping);
-      socket.off('identity-revealed', handleIdentityRevealed);
-      socket.off('user-blocked', handleUserBlocked);
-      socket.off('conversation-unblocked', handleConversationUnblocked);
-      socket.off('conversation-still-blocked', handleConversationStillBlocked);
-    };
-  }, [socket]);
 
   useEffect(() => {
     scrollToBottom();
@@ -158,7 +75,7 @@ export default function ChatWindowPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  const fetchMessages = async () => {
+  const fetchMessages = useCallback( async () => {
     // Prevent duplicate fetches (debounce 500ms)
     const now = Date.now();
     if (fetchingRef.current || now - lastFetchRef.current < 500) {
@@ -175,13 +92,25 @@ export default function ChatWindowPage() {
       
       try {
         response = await chatService.getMessages(conversationId);
-      } catch (regularError: any) {
+      } 
+      catch (regularError: unknown) {
         // If 403/404, try anonymous chat
-        if (regularError?.response?.status === 403 || regularError?.response?.status === 404) {
+        let status: number | undefined;
+        if (
+          typeof regularError === 'object' &&
+          regularError !== null &&
+          'response' in regularError &&
+          typeof (regularError as { response?: unknown }).response === 'object'
+        ) {
+          const resp = (regularError as { response: { status?: number } }).response;
+          status = resp.status;
+        }
+
+        if (status === 403 || status === 404) {
           try {
             response = await anonymousChatService.getAnonymousMessages(conversationId);
             conversationType = 'anonymous';
-          } catch (anonError: any) {
+          } catch {
             // If both fail, throw the original error
             throw regularError;
           }
@@ -219,25 +148,66 @@ export default function ChatWindowPage() {
       
       // console.log(`📱 Loaded ${conversationType} conversation:`, conversationId);
     } 
-    catch (error: any) {
+    catch (error: unknown) {
       // Only log errors that aren't rate limiting (429)
-      if (error?.response?.status !== 429) {
-        console.error('[ERROR] Failed to fetch messages:', error);
-        
-        // Handle specific errors
-        if (error?.response?.status === 403) {
-          toast.error('You do not have access to this conversation.');
-          router.push('/chat');
-        } else if (error?.response?.status === 404) {
-          toast.error('Conversation not found.');
-          router.push('/chat');
+      let status: number | undefined;
+    
+      if (
+        typeof error === 'object' &&
+        error !== null &&
+        'response' in error &&
+        typeof (error as { response?: unknown }).response === 'object'
+      ) {
+        const response = (error as { response: { status?: number } }).response;
+        status = response.status;
+    
+        if (status !== 429) {
+          console.error('[ERROR] Failed to fetch messages:', error);
+    
+          // Handle specific errors
+          if (status === 403) {
+            toast.error('You do not have access to this conversation.');
+            router.push('/chat');
+          } else if (status === 404) {
+            toast.error('Conversation not found.');
+            router.push('/chat');
+          }
         }
       }
-    } finally {
+    }
+    finally {
       setLoading(false);
       fetchingRef.current = false;
     }
-  };
+  }, [conversationId, router, toast]);
+
+  // Main effect: fetch messages, handle socket join/leave, and loading timeout
+  // Removed 'loading' from dependencies to avoid unnecessary re-renders
+  // Ensure joinConversation/leaveConversation are stable (from context or useCallback)
+  useEffect(() => {
+    if (conversationId) {
+      fetchMessages();
+
+      // Set loading timeout (10 seconds)
+      const timeoutId = setTimeout(() => {
+        if (loading) {
+          setLoadingTimeout(true);
+        }
+      }, 10000);
+
+      // Join conversation room via socket
+      if (isConnected) {
+        joinConversation(conversationId);
+      }
+
+      return () => {
+        clearTimeout(timeoutId);
+        if (isConnected) {
+          leaveConversation(conversationId);
+        }
+      };
+    }
+  }, [conversationId, fetchMessages, joinConversation, isConnected, leaveConversation, loading]);
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -262,13 +232,24 @@ export default function ChatWindowPage() {
           mediaUrl = uploadResult.data.url;
           mediaSize = uploadResult.data.size;
           mediaMimeType = uploadResult.data.mimeType;
-        } catch (uploadError: any) {
+        } 
+        catch (uploadError: unknown) {
+          let errorMsg = 'Failed to upload image';
+          if (
+            typeof uploadError === 'object' &&
+            uploadError !== null &&
+            'response' in uploadError &&
+            typeof (uploadError as { response?: { data?: { message?: string } } }).response === 'object'
+          ) {
+            errorMsg = (uploadError as { response: { data?: { message?: string } } }).response.data?.message || errorMsg;
+          }
           console.error('[ERROR] Failed to upload image:', uploadError);
-          toast.error(uploadError.response?.data?.message || 'Failed to upload image');
+          toast.error(errorMsg);
           setUploadingImage(false);
           setSending(false);
           return;
-        } finally {
+        }
+        finally {
           setUploadingImage(false);
         }
       }
@@ -302,18 +283,31 @@ export default function ChatWindowPage() {
       }
       fetchMessages(); // Refresh messages
     } 
-    catch (error: any) {
+    catch (error: unknown) {
       console.error('[ERROR] Failed to send message:', error);
-      const errorMessage = error.response?.data?.message || 'Failed to send message';
-      
+      let errorMessage = 'Failed to send message';
+      let status: number | undefined;
+    
+      if (
+        typeof error === 'object' &&
+        error !== null &&
+        'response' in error &&
+        typeof (error as { response?: unknown }).response === 'object'
+      ) {
+        const response = (error as { response: { data?: { message?: string }, status?: number } }).response;
+        errorMessage = response.data?.message || errorMessage;
+        status = response.status;
+      }
+    
       // Check if it's a blocking error
-      if (errorMessage.includes('blocked') || error.response?.status === 403) {
+      if (errorMessage.includes('blocked') || status === 403) {
         toast.error('Cannot send message - this user is blocked or has blocked you.');
         setIsBlocked(true);
       } else {
         toast.error(errorMessage);
       }
-    } finally {
+    }
+    finally {
       setSending(false);
     }
   };
@@ -352,7 +346,7 @@ export default function ChatWindowPage() {
     }
   };
 
-  const handleEmojiSelect = (emojiData: any) => {
+  const handleEmojiSelect = (emojiData: EmojiData) => {
     const emoji = emojiData.emoji;
     const input = messageInputRef.current;
     
@@ -403,8 +397,19 @@ export default function ChatWindowPage() {
       setIsAnonymous(false);
       toast.success('Your identity has been revealed!');
       fetchMessages();
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Failed to reveal identity');
+    } 
+    catch (error: unknown) {
+      let errorMsg =  'Failed to reveal Identity';
+      if (
+        typeof error === 'object' &&
+        error !== null &&
+        'response' in error &&
+        typeof (error as { response?: unknown }).response === 'object'
+      ) {
+        const response = (error as { response: { data?: { message?: string } } }).response;
+        errorMsg = response.data?.message || errorMsg;
+      }
+      toast.error(errorMsg);
     }
   };
 
@@ -438,10 +443,83 @@ export default function ChatWindowPage() {
       setShowEditNameDialog(false);
       setShowMenu(false);
       toast.success('Custom name updated successfully');
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Failed to update custom name');
+    } 
+    catch (error: unknown) {
+      let errorMsg =  'Failed to update custom name';
+      if (
+        typeof error === 'object' &&
+        error !== null &&
+        'response' in error &&
+        typeof (error as { response?: unknown }).response === 'object'
+      ) {
+        const response = (error as { response: { data?: { message?: string } } }).response;
+        errorMsg = response.data?.message || errorMsg;
+      }
+      toast.error(errorMsg);
     }
   };
+
+    // Listen for new messages via socket
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleNewMessage = (message: Message) => {
+      // Add is_my_message flag
+      const userStr = localStorage.getItem('user');
+      const currentUserId = userStr ? JSON.parse(userStr).user_id : null;
+      
+      setMessages((prev) => [...prev, {
+        ...message,
+        is_my_message: message.sender_id === currentUserId,
+      }]);
+    };
+
+    const handleTyping = ({ userId, isTyping }: { userId: string; isTyping: boolean }) => {
+      // Handle typing indicator (optional)
+      console.log(`User ${userId} is ${isTyping ? 'typing' : 'not typing'}`);
+    };
+
+    const handleIdentityRevealed = () => {
+      // Refresh messages when identity is revealed
+      setIsAnonymous(false);
+      fetchMessages();
+    };
+
+    const handleUserBlocked = () => {
+      setIsBlocked(true);
+      toast.warning('This conversation has been blocked');
+    };
+
+    const handleConversationUnblocked = ({ canMessageNow }: { conversationId: string; canMessageNow: boolean; unblockedBy: string }) => {
+      setIsBlocked(false);
+      console.log('🔓 Conversation unblocked - you can now send messages', canMessageNow);
+      // Refresh conversation to get latest state
+      fetchMessages();
+    };
+
+    const handleConversationStillBlocked = ({ blockedBy }: { conversationId: string; blockedBy: string }) => {
+      console.log('⚠️ Conversation still blocked by other user', blockedBy);
+      // Refresh conversation to get latest state
+      fetchMessages();
+    };
+
+    socket.on('new-message', handleNewMessage);
+    socket.on('user-typing', handleTyping);
+    socket.on('identity-revealed', handleIdentityRevealed);
+    socket.on('user-blocked', handleUserBlocked);
+    socket.on('conversation-unblocked', handleConversationUnblocked);
+    socket.on('conversation-still-blocked', handleConversationStillBlocked);
+
+    return () => {
+      socket.off('new-message', handleNewMessage);
+      socket.off('user-typing', handleTyping);
+      socket.off('identity-revealed', handleIdentityRevealed);
+      socket.off('user-blocked', handleUserBlocked);
+      socket.off('conversation-unblocked', handleConversationUnblocked);
+      socket.off('conversation-still-blocked', handleConversationStillBlocked);
+    };
+  }, [socket, toast, fetchMessages]);
+
 
   const handleBlockUser = async () => {
     if (!confirm('Are you sure you want to block this user? You will not be able to send or receive messages.')) {
@@ -453,8 +531,19 @@ export default function ChatWindowPage() {
       setIsBlocked(true);
       setShowMenu(false);
       toast.success('User blocked successfully');
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Failed to block user');
+    } 
+    catch (error: unknown) {
+      let errorMsg = 'Failed to block user';
+      if (
+        typeof error === 'object' &&
+        error !== null &&
+        'response' in error &&
+        typeof (error as { response?: unknown }).response === 'object'
+      ) {
+        const response = (error as { response: { data?: { message?: string } } }).response;
+        errorMsg = response.data?.message || errorMsg;
+      }
+      toast.error(errorMsg);
     }
   };
 
@@ -487,30 +576,30 @@ export default function ChatWindowPage() {
 
       // Build comprehensive description with context
       const contextualDescription = `
-=== REPORT DETAILS ===
-Report Type: ${reportReason}
-User Description: ${reportDescription || 'No additional details provided'}
+        === REPORT DETAILS ===
+        Report Type: ${reportReason}
+        User Description: ${reportDescription || 'No additional details provided'}
 
-=== REPORTED USER INFO ===
-Name: ${otherUser?.name || 'Anonymous User'}
-Roll No: ${otherUser?.roll_no || 'N/A (Anonymous)'}
-Gender: ${otherUser?.gender || otherUser?.display_gender || 'N/A'}
-Is Anonymous: ${isAnonymous ? 'Yes' : 'No'}
+        === REPORTED USER INFO ===
+        Name: ${otherUser?.name || 'Anonymous User'}
+        Roll No: ${otherUser?.roll_no || 'N/A (Anonymous)'}
+        Gender: ${otherUser?.gender || otherUser?.gender || 'N/A'}
+        Is Anonymous: ${isAnonymous ? 'Yes' : 'No'}
 
-=== CONVERSATION CONTEXT ===
-Conversation ID: ${conversationId}
-Total Messages: ${messages.length}
-Messages from Reported User: ${messages.filter(m => !m.is_my_message).length}
-Conversation Type: ${isAnonymous ? 'Anonymous' : 'Regular'}
+        === CONVERSATION CONTEXT ===
+        Conversation ID: ${conversationId}
+        Total Messages: ${messages.length}
+        Messages from Reported User: ${messages.filter(m => !m.is_my_message).length}
+        Conversation Type: ${isAnonymous ? 'Anonymous' : 'Regular'}
 
-=== LAST MESSAGE FROM REPORTED USER ===
-${lastMessageFromReported ? `Message ID: ${lastMessageFromReported.message_id}
-Timestamp: ${new Date(lastMessageFromReported.created_at).toLocaleString()}
-Message Type: ${lastMessageFromReported.message_type || 'text'}` : 'No messages from this user'}
+        === LAST MESSAGE FROM REPORTED USER ===
+        ${lastMessageFromReported ? `Message ID: ${lastMessageFromReported.message_id}
+        Timestamp: ${new Date(lastMessageFromReported.created_at).toLocaleString()}
+        Message Type: ${lastMessageFromReported.message_type || 'text'}` : 'No messages from this user'}
 
-=== TIMESTAMP ===
-Reported At: ${new Date().toISOString()}
-`.trim();
+        === TIMESTAMP ===
+        Reported At: ${new Date().toISOString()}
+        `.trim();
 
       await chatService.reportUser({
         reportedUserId: actualReportedUserId,
@@ -527,8 +616,19 @@ Reported At: ${new Date().toISOString()}
       setReportReason('');
       setReportDescription('');
       toast.success('Report submitted successfully. Our team will review it.');
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Failed to submit report');
+    } 
+    catch (error: unknown) {
+      let errorMsg = 'Failed to submit report';
+      if (
+        typeof error === 'object' &&
+        error !== null &&
+        'response' in error &&
+        typeof (error as { response?: unknown }).response === 'object'
+      ) {
+        const response = (error as { response: { data?: { message?: string } } }).response;
+        errorMsg = response.data?.message || errorMsg;
+      }
+      toast.error(errorMsg);
     }
   };
 
@@ -585,14 +685,16 @@ Reported At: ${new Date().toISOString()}
           <div className="flex items-center gap-3 flex-1">
             {/* Profile Picture or Anonymous Icon */}
             {isAnonymous || !otherUser?.dp_url ? (
-              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-400 to-pink-500 flex items-center justify-center text-white font-semibold">
+              <div className="w-10 h-10 rounded-full bg-linear-to-br from-purple-400 to-pink-500 flex items-center justify-center text-white font-semibold">
                 {isAnonymous ? '?' : (otherUser?.name?.[0]?.toUpperCase() || 'U')}
               </div>
             ) : (
-              <img
+              <Image
                 src={otherUser.dp_url}
                 alt={otherUser.name}
-                className="w-10 h-10 rounded-full object-cover"
+                width={32}
+                height={32}
+                className="rounded-full object-cover"
               />
             )}
             <div>
@@ -782,16 +884,20 @@ Reported At: ${new Date().toISOString()}
                       {/* Display Image if message type is image */}
                       {message.message_type === 'image' && message.media_url && (
                         <div className="mb-2">
-                          <img
-                            src={message.media_url}
-                            alt="Shared image"
-                            className="max-w-full rounded-lg cursor-pointer hover:opacity-90"
-                            onClick={() => window.open(message.media_url, '_blank')}
-                          />
+                          <a href={message.media_url} target="_blank" rel="noopener noreferrer">
+                            <Image
+                              src={message.media_url}
+                              alt="Shared image"
+                              width={400} // Adjust as needed
+                              height={300} // Adjust as needed
+                              className="max-w-full rounded-lg cursor-pointer hover:opacity-90"
+                              style={{ objectFit: 'contain' }}
+                            />
+                          </a>
                         </div>
                       )}
                       
-                      <p className="whitespace-pre-wrap break-words">{message.encrypted_content}</p>
+                      <p className="whitespace-pre-wrap wrap-break-word">{message.encrypted_content}</p>
                       <p className={`text-xs mt-1 ${isMyMessage ? 'text-blue-100' : 'text-gray-500'}`}>
                         {formatTime(message.created_at.toString())}
                       </p>
@@ -819,9 +925,11 @@ Reported At: ${new Date().toISOString()}
               {/* Image Preview */}
               {imagePreview && (
                 <div className="mb-3 relative inline-block">
-                  <img
+                  <Image
                     src={imagePreview}
                     alt="Preview"
+                    width={256}
+                    height={128}
                     className="max-h-32 rounded-lg border border-gray-300 dark:border-gray-600"
                   />
                   <button

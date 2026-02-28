@@ -1,4 +1,4 @@
-import { SignupRequest, VerifyOTPRequest, LoginRequest, ForgotPasswordRequest, ResetPasswordRequest, AuthResponse } from '@/types/auth.types';
+import { SignupRequest, VerifyOTPRequest, LoginRequest, ForgotPasswordRequest, ResetPasswordRequest, AuthResponse, User } from '@/types/auth.types';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
@@ -98,10 +98,10 @@ class AuthService {
     return localStorage.getItem('accessToken');
   }
 
-  getCurrentUser(): any | null {
+  getCurrentUser(): User | null {
     if (typeof window === 'undefined') return null;
     const user = localStorage.getItem('user');
-    return user ? JSON.parse(user) : null;
+    return user ? (JSON.parse(user) as User) : null;
   }
 
   isAuthenticated(): boolean {

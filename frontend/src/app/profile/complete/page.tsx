@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTheme } from '@/contexts/ThemeContext';
+import Image from 'next/image';
 
 export default function CompleteProfile() {
   const router = useRouter();
@@ -48,7 +49,6 @@ export default function CompleteProfile() {
       const uploadData = new FormData();
       uploadData.append('file', file);
 
-      // TODO: Replace with actual Supabase upload
       // For now, using placeholder
       const reader = new FileReader();
       reader.onloadend = () => {
@@ -60,9 +60,11 @@ export default function CompleteProfile() {
       };
       reader.readAsDataURL(file);
 
-    } catch (err) {
+    } 
+    catch (err) {
       setError('Failed to upload image');
       setUploadingImage(false);
+      console.log(err);
     }
   };
 
@@ -89,9 +91,12 @@ export default function CompleteProfile() {
       } else {
         setError(data.message || 'Failed to complete profile');
       }
-    } catch (err) {
+    } 
+    catch (err) {
       setError('Something went wrong. Please try again.');
-    } finally {
+      console.log(err);
+    } 
+    finally {
       setIsLoading(false);
     }
   };
@@ -99,8 +104,8 @@ export default function CompleteProfile() {
   return (
     <div className={`min-h-screen flex items-center justify-center p-4 ${
       theme === 'dark' 
-        ? 'bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900' 
-        : 'bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50'
+        ? 'bg-linear-to-br from-gray-900 via-purple-900 to-gray-900' 
+        : 'bg-linear-to-br from-blue-50 via-purple-50 to-pink-50'
     }`}>
       {/* Theme Toggle */}
       <button
@@ -146,10 +151,12 @@ export default function CompleteProfile() {
             </label>
             <div className="flex items-center gap-4">
               {formData.dpUrl && (
-                <img 
-                  src={formData.dpUrl} 
-                  alt="Profile" 
-                  className="w-20 h-20 rounded-full object-cover border-2 border-purple-500"
+                <Image
+                  src={formData.dpUrl}
+                  alt="Profile Preview"
+                  width={128}
+                  height={128}
+                  className="rounded-full object-cover"
                 />
               )}
               <div className="flex-1">
@@ -227,7 +234,7 @@ export default function CompleteProfile() {
           <button
             type="submit"
             disabled={isLoading || uploadingImage}
-            className="w-full p-4 rounded-lg font-semibold text-white bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 disabled:from-gray-400 disabled:to-gray-500 disabled:cursor-not-allowed transition-all shadow-lg hover:shadow-xl"
+            className="w-full p-4 rounded-lg font-semibold text-white bg-linear-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 disabled:from-gray-400 disabled:to-gray-500 disabled:cursor-not-allowed transition-all shadow-lg hover:shadow-xl"
           >
             {isLoading ? (
               <span className="flex items-center justify-center gap-2">

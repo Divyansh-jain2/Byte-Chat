@@ -1,4 +1,5 @@
 import jwt from 'jsonwebtoken';
+import type { SignOptions, Secret } from 'jsonwebtoken';
 import { config } from '../config/index.js';
 import type { TokenPayload } from '../types/auth.types.js';
 
@@ -12,9 +13,11 @@ export function generateAccessToken(userId: string, rollNo: string): string {
     type: 'access'
   };
 
-  return jwt.sign(payload, config.jwt.accessSecret, {
-    expiresIn: config.jwt.accessExpiry
-  });
+  return jwt.sign(
+    payload,
+    config.jwt.accessSecret as Secret,
+    { expiresIn: config.jwt.accessExpiry as SignOptions['expiresIn'] } as SignOptions
+  );
 }
 
 /**
@@ -27,9 +30,11 @@ export function generateRefreshToken(userId: string, rollNo: string): string {
     type: 'refresh'
   };
 
-  return jwt.sign(payload, config.jwt.refreshSecret, {
-    expiresIn: config.jwt.refreshExpiry
-  });
+  return jwt.sign(
+    payload,
+    config.jwt.refreshSecret as Secret,
+    { expiresIn: config.jwt.refreshExpiry as SignOptions['expiresIn'] } as SignOptions
+  );
 }
 
 /**

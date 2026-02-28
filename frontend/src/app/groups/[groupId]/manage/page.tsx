@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { groupService } from '@/services/group.service';
 import type { User } from '@/types/chat.types';
 import { useToast } from '@/contexts/ToastContext';
+import Image from 'next/image';
 
 interface GroupMember {
   member_id: string;
@@ -36,11 +37,7 @@ export default function ManageGroupPage() {
   const [isOwner, setIsOwner] = useState(false);
   const [groupIsPrivate, setGroupIsPrivate] = useState(false);
 
-  useEffect(() => {
-    fetchData();
-  }, [groupId]);
-
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     try {
       // Fetch group details to check if user is owner and if group is private
       const groupDetails = await groupService.getGroupDetails(groupId);
@@ -70,13 +67,23 @@ export default function ManageGroupPage() {
           setAllUsers(usersData.data.users);
         }
       }
-    } catch (error: any) {
-      console.error('Failed to fetch data:', error);
-      setError(error.message || 'Failed to load data');
-    } finally {
+    } 
+    catch (err: unknown) {
+      let errorMsg = 'Failed to fetch data';
+      if (typeof err === 'object' && err !== null && 'message' in err && typeof (err as { message?: string }).message === 'string') {
+        errorMsg = (err as { message: string }).message;
+      }
+      setError(errorMsg);
+      toast.error(errorMsg);
+    }
+    finally {
       setLoading(false);
     }
-  };
+  }, [groupId, toast]);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
 
   const handleAddMember = async (userId: string, isAnonymous: boolean) => {
     try {
@@ -84,8 +91,14 @@ export default function ManageGroupPage() {
       setShowAddMember(false);
       setSearchQuery('');
       fetchData();
-    } catch (error: any) {
-      toast.error(error.message || 'Failed to add member');
+    } 
+    catch (err: unknown) {
+      let errorMsg = 'Failed to add member';
+      if (typeof err === 'object' && err !== null && 'message' in err && typeof (err as { message?: string }).message === 'string') {
+        errorMsg = (err as { message: string }).message;
+      }
+      // setError(errorMsg);
+      toast.error(errorMsg);
     }
   };
 
@@ -97,8 +110,14 @@ export default function ManageGroupPage() {
     try {
       await groupService.removeMemberFromGroup(groupId, memberId);
       fetchData();
-    } catch (error: any) {
-      toast.error(error.message || 'Failed to remove member');
+    } 
+    catch (err: unknown) {
+      let errorMsg = 'Failed to remove member';
+      if (typeof err === 'object' && err !== null && 'message' in err && typeof (err as { message?: string }).message === 'string') {
+        errorMsg = (err as { message: string }).message;
+      }
+      // setError(errorMsg);
+      toast.error(errorMsg);
     }
   };
 
@@ -110,8 +129,14 @@ export default function ManageGroupPage() {
     try {
       await groupService.promoteMemberToAdmin(groupId, memberId);
       fetchData();
-    } catch (error: any) {
-      toast.error(error.message || 'Failed to promote member');
+    } 
+    catch (err: unknown) {
+      let errorMsg = 'Failed to promote member';
+      if (typeof err === 'object' && err !== null && 'message' in err && typeof (err as { message?: string }).message === 'string') {
+        errorMsg = (err as { message: string }).message;
+      }
+      // setError(errorMsg);
+      toast.error(errorMsg);
     }
   };
 
@@ -188,10 +213,12 @@ export default function ManageGroupPage() {
               >
                 <div className="flex items-center gap-4">
                   {member.dp_url ? (
-                    <img
+                    <Image
                       src={member.dp_url}
                       alt={member.name}
-                      className="w-12 h-12 border-2 border-neutral-900 dark:border-neutral-100 object-cover"
+                      width={32}
+                      height={32}
+                      className="border-2 border-neutral-900 dark:border-neutral-100 object-cover"
                     />
                   ) : (
                     <div className="w-12 h-12 border-2 border-neutral-900 dark:border-neutral-100 bg-neutral-300 dark:bg-neutral-700 flex items-center justify-center text-neutral-900 dark:text-neutral-100 font-bold font-mono text-xl">
@@ -287,10 +314,12 @@ export default function ManageGroupPage() {
                   >
                     <div className="flex items-center gap-3">
                       {user.dp_url ? (
-                        <img
+                        <Image
                           src={user.dp_url}
                           alt={user.name}
-                          className="w-10 h-10 border-2 border-neutral-900 dark:border-neutral-100 object-cover"
+                          width={24}
+                          height={24}
+                          className="border-2 border-neutral-900 dark:border-neutral-100 object-cover"
                         />
                       ) : (
                         <div className="w-10 h-10 border-2 border-neutral-900 dark:border-neutral-100 bg-neutral-300 dark:bg-neutral-700 flex items-center justify-center text-neutral-900 dark:text-neutral-100 font-bold font-mono">
@@ -317,7 +346,7 @@ export default function ManageGroupPage() {
                       </button>
                       <button
                         onClick={() => handleAddMember(user.user_id, true)}
-                        className="px-3 py-1 bg-gradient-to-r from-neutral-600 to-neutral-800 dark:from-neutral-400 dark:to-neutral-200 text-neutral-100 dark:text-neutral-900 font-mono font-bold border-2 border-neutral-900 dark:border-neutral-100 hover:from-neutral-700 hover:to-neutral-900 transition-all text-xs"
+                        className="px-3 py-1 bg-linear-to-r from-neutral-600 to-neutral-800 dark:from-neutral-400 dark:to-neutral-200 text-neutral-100 dark:text-neutral-900 font-mono font-bold border-2 border-neutral-900 dark:border-neutral-100 hover:from-neutral-700 hover:to-neutral-900 transition-all text-xs"
                       >
                         ADD ANON
                       </button>

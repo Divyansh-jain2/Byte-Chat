@@ -32,8 +32,12 @@ export function BlockUserButton({ userId, userName, isBlocked, onBlockStatusChan
       setShowReasonDialog(false);
       setReason('');
       onBlockStatusChange?.();
-    } catch (error: any) {
-      toast.error(error.message || 'Failed to block user');
+    } catch (error: unknown) {
+      if (typeof error === 'object' && error !== null && 'message' in error && typeof (error as Record<string, unknown>).message === 'string') {
+        toast.error((error as { message: string }).message);
+      } else {
+        toast.error('Failed to block user');
+      }
     } finally {
       setLoading(false);
     }
@@ -54,8 +58,12 @@ export function BlockUserButton({ userId, userName, isBlocked, onBlockStatusChan
       }
       
       onBlockStatusChange?.();
-    } catch (error: any) {
-      toast.error(error.message || 'Failed to unblock user');
+    } catch (error: unknown) {
+      if (typeof error === 'object' && error !== null && 'message' in error && typeof (error as Record<string, unknown>).message === 'string') {
+        toast.error((error as { message: string }).message);
+      } else {
+        toast.error('Failed to unblock user');
+      }
     } finally {
       setLoading(false);
     }
@@ -151,23 +159,23 @@ export function ReportUserButton({ userId, userName, messageId }: ReportUserButt
     try {
       // Build comprehensive description with context
       const contextualDescription = `
-=== REPORT DETAILS ===
-Report Type: ${reportType}
-User Description: ${description}
+        === REPORT DETAILS ===
+        Report Type: ${reportType}
+        User Description: ${description}
 
-=== REPORTED USER INFO ===
-User ID: ${userId}
-User Name: ${userName}
-${messageId ? `\n=== MESSAGE CONTEXT ===\nMessage ID: ${messageId}` : ''}
+        === REPORTED USER INFO ===
+        User ID: ${userId}
+        User Name: ${userName}
+        ${messageId ? `\n=== MESSAGE CONTEXT ===\nMessage ID: ${messageId}` : ''}
 
-=== TIMESTAMP ===
-Reported At: ${new Date().toISOString()}
-Reported At (Local): ${new Date().toLocaleString()}
-`.trim();
+        === TIMESTAMP ===
+        Reported At: ${new Date().toISOString()}
+        Reported At (Local): ${new Date().toLocaleString()}
+        `.trim();
 
       const data: ReportUserData = {
         reportedUserId: userId,
-        reportType: reportType as any,
+        reportType: reportType as 'spam' | 'harassment' | 'inappropriate_content' | 'impersonating' | 'fake_profile' | 'other',
         description: contextualDescription,
         messageId,
       };
@@ -177,8 +185,12 @@ Reported At (Local): ${new Date().toLocaleString()}
       setShowReportDialog(false);
       setDescription('');
       setReportType('spam');
-    } catch (error: any) {
-      toast.error(error.message || 'Failed to submit report');
+    } catch (error: unknown) {
+      if (typeof error === 'object' && error !== null && 'message' in error && typeof (error as Record<string, unknown>).message === 'string') {
+        toast.error((error as { message: string }).message);
+      } else {
+        toast.error('Failed to submit report');
+      }
     } finally {
       setLoading(false);
     }
@@ -254,7 +266,7 @@ import { revealAnonymousIdentity } from '@/services/moderation.service';
 interface RevealIdentityButtonProps {
   conversationId: string;
   isSender: boolean; // Only sender can reveal
-  onReveal?: (data: any) => void;
+  onReveal?: (data: unknown) => void;
 }
 
 export function RevealIdentityButton({ conversationId, isSender, onReveal }: RevealIdentityButtonProps) {
@@ -275,8 +287,12 @@ export function RevealIdentityButton({ conversationId, isSender, onReveal }: Rev
       const result = await revealAnonymousIdentity(conversationId);
       toast.success(result.message);
       onReveal?.(result.data);
-    } catch (error: any) {
-      toast.error(error.message || 'Failed to reveal identity');
+    } catch (error: unknown) {
+      if (typeof error === 'object' && error !== null && 'message' in error && typeof (error as Record<string, unknown>).message === 'string') {
+        toast.error((error as { message: string }).message);
+      } else {
+        toast.error('Failed to reveal identity');
+      }
     } finally {
       setLoading(false);
     }
@@ -317,22 +333,22 @@ export function ReportGroupButton({ groupId, groupName }: ReportGroupButtonProps
     try {
       // Build comprehensive description with context
       const contextualDescription = `
-=== REPORT DETAILS ===
-Report Type: ${reportType}
-User Description: ${description}
+        === REPORT DETAILS ===
+        Report Type: ${reportType}
+        User Description: ${description}
 
-=== REPORTED GROUP INFO ===
-Group ID: ${groupId}
-Group Name: ${groupName}
+        === REPORTED GROUP INFO ===
+        Group ID: ${groupId}
+        Group Name: ${groupName}
 
-=== TIMESTAMP ===
-Reported At: ${new Date().toISOString()}
-Reported At (Local): ${new Date().toLocaleString()}
-`.trim();
+        === TIMESTAMP ===
+        Reported At: ${new Date().toISOString()}
+        Reported At (Local): ${new Date().toLocaleString()}
+        `.trim();
 
       const data: ReportGroupData = {
         reportedGroupId: groupId,
-        reportType: reportType as any,
+        reportType: reportType as 'spam' | 'harassment' | 'inappropriate_content' | 'impersonating' | 'fake_profile' | 'other',
         description: contextualDescription,
       };
 
@@ -341,8 +357,12 @@ Reported At (Local): ${new Date().toLocaleString()}
       setShowReportDialog(false);
       setDescription('');
       setReportType('spam');
-    } catch (error: any) {
-      toast.error(error.message || 'Failed to submit report');
+    } catch (error: unknown) {
+      if (typeof error === 'object' && error !== null && 'message' in error && typeof (error as Record<string, unknown>).message === 'string') {
+        toast.error((error as { message: string }).message);
+      } else {
+        toast.error('Failed to submit report');
+      }
     } finally {
       setLoading(false);
     }

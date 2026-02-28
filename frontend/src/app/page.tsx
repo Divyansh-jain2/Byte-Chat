@@ -83,7 +83,7 @@ export default function Home() {
 
             {/* Feature 2 */}
             <div className="bg-white dark:bg-black border-4 border-neutral-900 dark:border-neutral-100 p-8 hover:shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] dark:hover:shadow-[8px_8px_0px_0px_rgba(255,255,255,1)] transition-all">
-              <div className="w-16 h-16 bg-gradient-to-br from-neutral-700 to-neutral-900 dark:from-neutral-300 dark:to-neutral-100 border-2 border-neutral-900 dark:border-neutral-100 flex items-center justify-center mb-4 mx-auto">
+              <div className="w-16 h-16 bg-linear-to-br from-neutral-700 to-neutral-900 dark:from-neutral-300 dark:to-neutral-100 border-2 border-neutral-900 dark:border-neutral-100 flex items-center justify-center mb-4 mx-auto">
                 <svg className="w-10 h-10 text-neutral-100 dark:text-neutral-900" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
                 </svg>
@@ -94,7 +94,7 @@ export default function Home() {
 
             {/* Feature 3 */}
             <div className="bg-white dark:bg-black border-4 border-neutral-900 dark:border-neutral-100 p-8 hover:shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] dark:hover:shadow-[8px_8px_0px_0px_rgba(255,255,255,1)] transition-all">
-              <div className="w-16 h-16 bg-gradient-to-br from-neutral-600 to-neutral-800 dark:from-neutral-400 dark:to-neutral-200 border-2 border-neutral-900 dark:border-neutral-100 flex items-center justify-center mb-4 mx-auto">
+              <div className="w-16 h-16 bg-linear-to-br from-neutral-600 to-neutral-800 dark:from-neutral-400 dark:to-neutral-200 border-2 border-neutral-900 dark:border-neutral-100 flex items-center justify-center mb-4 mx-auto">
                 <svg className="w-10 h-10 text-neutral-100 dark:text-neutral-900" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
                 </svg>
@@ -106,7 +106,7 @@ export default function Home() {
 
           {/* Footer */}
           <div className="mt-20 text-neutral-600 dark:text-neutral-400 font-mono text-sm">
-            <p className="font-bold">NO ONE KNOWS WHAT'S GOING ON</p>
+            <p className="font-bold">NO ONE KNOWS WHAT`S GOING ON</p>
             <p className="mt-2">🔒 EVERY BYTE IS ENCRYPTED</p>
           </div>
         </div>

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
@@ -9,9 +9,11 @@ import { useSocket } from '@/contexts/SocketContext';
 import { useToast } from '@/contexts/ToastContext';
 import type { Message, Poll } from '@/types/chat.types';
 import { Theme } from 'emoji-picker-react';
+import Image from 'next/image';
 
 // Dynamic import for emoji picker (client-side only)
 const EmojiPicker = dynamic(() => import('emoji-picker-react'), { ssr: false });
+type EmojiData = { emoji: string };
 
 interface GroupMessage extends Message {
   sender?: {
@@ -27,9 +29,10 @@ export default function GroupChatPage() {
   const params = useParams();
   const router = useRouter();
   const groupId = params.groupId as string;
-  const { socket, isConnected, joinGroup, leaveGroup } = useSocket();
+  const { getSocket, isConnected, joinGroup, leaveGroup } = useSocket();
   const toast = useToast();
-
+  const socket = getSocket();
+  
   const [messages, setMessages] = useState<GroupMessage[]>([]);
   const [polls, setPolls] = useState<Poll[]>([]);
   const [newMessage, setNewMessage] = useState('');
@@ -44,23 +47,6 @@ export default function GroupChatPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messageInputRef = useRef<HTMLInputElement>(null);
   const emojiPickerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-      fetchPolls();
-    if (groupId) {
-      fetchMessages();
-
-      if (isConnected) {
-        joinGroup(groupId);
-      }
-
-      return () => {
-        if (isConnected) {
-          leaveGroup(groupId);
-        }
-      };
-    }
-  }, [groupId, isConnected]);
 
   useEffect(() => {
     if (!socket) return;
@@ -120,39 +106,80 @@ export default function GroupChatPage() {
   };
 
 
-  const fetchPolls = async () => {
+  const fetchPolls = useCallback ( async () => {
     try {
       const response = await groupService.getGroupPolls(groupId, 'active');
       if (response.success && response.data) {
         setPolls(response.data);
       }
-    } catch (error: any) {
-      console.error('Failed to fetch polls:', error);
+    } 
+    catch (err: unknown) {
+      let errorMsg = 'Failed to load anonymous identities';
+      if (typeof err === 'object' && err !== null && 'message' in err && typeof (err as { message?: string }).message === 'string') {
+        errorMsg = (err as { message: string }).message;
+      }
+      console.error('Failed to fetch polls:', errorMsg);
     }
-  };
+  }, [groupId]);
 
   const handleVote = async (pollId: string, voteValue: boolean) => {
     try {
       await groupService.voteOnPoll(groupId, pollId, voteValue);
       fetchPolls();
-    } catch (error: any) {
-      toast.error(error.message || 'Failed to vote');
+    } 
+    catch (err: unknown) {
+      let errorMsg = 'Failed to fetch vote';
+      if (typeof err === 'object' && err !== null && 'message' in err && typeof (err as { message?: string }).message === 'string') {
+        errorMsg = (err as { message: string }).message;
+      }
+      // setError(errorMsg);
+      // toast.error(errorMsg);
+      console.error('Failed to fetch polls:', errorMsg);
     }
   };
-  const fetchMessages = async () => {
+  const fetchMessages = useCallback ( async () => {
     try {
       const response = await groupService.getGroupMessages(groupId);
       setMessages(response.data.messages || []);
-    } catch (error: any) {
+    } 
+    catch (error: unknown) {
       console.error('Failed to fetch group messages:', error);
-      if (error.message?.includes('Access denied')) {
-        toast.error('You are not a member of this group.');
-        router.push(`/groups/${groupId}`);
+      let message = '';
+      if (
+        typeof error === 'object' &&
+        error !== null &&
+        'message' in error &&
+        typeof (error as { message?: string }).message === 'string'
+      ) {
+        message = (error as { message: string }).message;
+        if (message.includes('Access denied')) {
+          toast.error('You are not a member of this group.');
+          router.push(`/groups/${groupId}`);
+        }
       }
-    } finally {
+    } 
+    finally {
       setLoading(false);
     }
-  };
+  }, [groupId, toast, router]);
+
+  useEffect(() => {
+    fetchPolls();
+    if (groupId) {
+      fetchMessages();
+
+      if (isConnected) {
+        joinGroup(groupId);
+      }
+
+      return () => {
+        if (isConnected) {
+          leaveGroup(groupId);
+        }
+      };
+    }
+  }, [groupId, isConnected, fetchMessages, fetchPolls, joinGroup, leaveGroup]);
+
 
 const handleSendMessage = async (e: React.FormEvent) => {
   e.preventDefault();
@@ -173,13 +200,24 @@ const handleSendMessage = async (e: React.FormEvent) => {
         mediaUrl = uploadResult.data.url;
         mediaSize = uploadResult.data.size;
         mediaMimeType = uploadResult.data.mimeType;
-      } catch (uploadError: any) {
+      } 
+      catch (uploadError: unknown) {
+        let errorMsg = 'Failed to upload image';
+        if (
+          typeof uploadError === 'object' &&
+          uploadError !== null &&
+          'message' in uploadError &&
+          typeof (uploadError as { message?: string }).message === 'string'
+        ) {
+          errorMsg = (uploadError as { message: string }).message;
+        }
         console.error('[ERROR] Failed to upload image:', uploadError);
-        toast.error(uploadError.message || 'Failed to upload image');
+        toast.error(errorMsg);
         setUploadingImage(false);
         setSending(false);
         return;
-      } finally {
+      } 
+      finally {
         setUploadingImage(false);
       }
     }
@@ -203,9 +241,17 @@ const handleSendMessage = async (e: React.FormEvent) => {
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
-  } catch (error: any) {
-    toast.error(error.message || 'Failed to send message');
-  } finally {
+  } 
+  catch (err: unknown) {
+      let errorMsg = 'Failed to send message';
+      if (typeof err === 'object' && err !== null && 'message' in err && typeof (err as { message?: string }).message === 'string') {
+        errorMsg = (err as { message: string }).message;
+      }
+      // setError(errorMsg);
+      toast.error(errorMsg);
+      // console.error('Failed to fetch polls:', errorMsg);
+  }
+  finally {
     setSending(false);
   }
 };
@@ -244,7 +290,7 @@ const handleSendMessage = async (e: React.FormEvent) => {
     }
   };
 
-  const handleEmojiSelect = (emojiData: any) => {
+  const handleEmojiSelect = (emojiData: EmojiData) => {
     const emoji = emojiData.emoji;
     const input = messageInputRef.current;
     
@@ -422,11 +468,14 @@ return (
                     {/* Display Image if message type is image */}
                     {msg.message_type === 'image' && msg.media_url && (
                       <div className="mb-2">
-                        <img
+                        <Image
                           src={msg.media_url}
                           alt="Shared image"
+                          width={400} // Adjust as needed or make dynamic
+                          height={300} // Adjust as needed or make dynamic
                           className="max-w-full rounded cursor-pointer hover:opacity-90"
                           onClick={() => window.open(msg.media_url, '_blank')}
+                          style={{ objectFit: 'contain', cursor: 'pointer' }}
                         />
                       </div>
                     )}
@@ -450,7 +499,13 @@ return (
           
           {imagePreview && (
             <div className="absolute bottom-20 left-4 bg-white dark:bg-black border-2 border-neutral-900 dark:border-neutral-100 p-2">
-              <img src={imagePreview} alt="Preview" className="max-w-xs max-h-32" />
+              <Image
+                src={imagePreview}
+                alt="Preview"
+                width={256} 
+                height={128}
+                className="max-w-xs max-h-32"
+              />
               <button
                 type="button"
                 onClick={handleRemoveImage}
@@ -530,9 +585,16 @@ function QuickPollForm({ groupId, onSuccess }: { groupId: string; onSuccess: () 
       await groupService.createPoll(groupId, formData);
       onSuccess();
       setFormData({ poll_type: 'kick_member', title: '', expires_in_hours: 24 });
-    } catch (error: any) {
-      toast.error(error.message || 'Failed to create poll');
-    } finally {
+    } 
+    catch (err: unknown) {
+      let errorMsg = 'Failed to create poll';
+      if (typeof err === 'object' && err !== null && 'message' in err && typeof (err as { message?: string }).message === 'string') {
+        errorMsg = (err as { message: string }).message;
+      }
+      // setError(errorMsg);
+      toast.error(errorMsg);
+    }
+    finally {
       setLoading(false);
     }
   };

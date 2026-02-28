@@ -1,9 +1,10 @@
 'use client';
 
 import Link from 'next/link';
-import { FiGithub, FiLinkedin, FiMail, FiCode } from 'react-icons/fi';
+import { FiGithub, FiMail, FiCode } from 'react-icons/fi';
 import { useTheme } from '@/contexts/ThemeContext';
 import { FaSun, FaMoon } from 'react-icons/fa';
+import Image from 'next/image';
 
 interface Developer {
   id: number;
@@ -111,9 +112,9 @@ export default function ContactPage() {
     <div className="min-h-screen relative overflow-hidden">
       {/* Animated Background Orbs */}
       <div className="fixed inset-0 pointer-events-none">
-        <div className="absolute top-20 left-10 w-96 h-96 bg-gradient-to-r from-blue-500/20 to-purple-500/20 rounded-full blur-3xl animate-pulse"></div>
-        <div className="absolute bottom-20 right-10 w-96 h-96 bg-gradient-to-r from-purple-500/20 to-pink-500/20 rounded-full blur-3xl animate-pulse" style={{ animationDelay: '1s' }}></div>
-        <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-gradient-to-r from-teal-500/20 to-blue-500/20 rounded-full blur-3xl animate-pulse" style={{ animationDelay: '2s' }}></div>
+        <div className="absolute top-20 left-10 w-96 h-96 bg-linear-to-r from-blue-500/20 to-purple-500/20 rounded-full blur-3xl animate-pulse"></div>
+        <div className="absolute bottom-20 right-10 w-96 h-96 bg-linear-to-r from-purple-500/20 to-pink-500/20 rounded-full blur-3xl animate-pulse" style={{ animationDelay: '1s' }}></div>
+        <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-linear-to-r from-teal-500/20 to-blue-500/20 rounded-full blur-3xl animate-pulse" style={{ animationDelay: '2s' }}></div>
       </div>
 
       {/* Theme Toggle */}
@@ -132,11 +133,11 @@ export default function ContactPage() {
       <div className="max-w-7xl mx-auto py-12 px-4 sm:px-6 lg:px-8 relative z-10">
         {/* Header */}
         <div className="text-center mb-16">
-          <h1 className="text-5xl md:text-6xl font-bold bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400 bg-clip-text text-transparent mb-4 animate-gradient">
+          <h1 className="text-5xl md:text-6xl font-bold bg-linear-to-r from-blue-400 via-purple-400 to-pink-400 bg-clip-text text-transparent mb-4 animate-gradient">
             Meet Our Team
           </h1>
           <p className="text-xl text-white/80 max-w-3xl mx-auto">
-            We're a team of passionate college students building Digital Campus Psychology to connect and empower our campus community.
+            We`re a team of passionate college students building Digital Campus Psychology to connect and empower our campus community.
           </p>
           <div className="mt-6 flex items-center justify-center gap-2 text-white/70">
             <FiCode className="text-2xl" />
@@ -151,16 +152,18 @@ export default function ContactPage() {
             return (
               <div key={dev.id} className="relative group">
                 {/* Glow Effect */}
-                <div className={`absolute -inset-1 bg-gradient-to-r ${colors.gradient} rounded-2xl blur-xl opacity-50 group-hover:opacity-100 transition-opacity duration-300`}></div>
+                <div className={`absolute -inset-1 bg-linear-to-r ${colors.gradient} rounded-2xl blur-xl opacity-50 group-hover:opacity-100 transition-opacity duration-300`}></div>
                 
                 {/* Main Card */}
-                <div className="relative bg-gradient-to-br from-white/10 via-white/5 to-white/10 backdrop-blur-2xl rounded-2xl border-2 border-white/20 shadow-2xl shadow-black/20 overflow-hidden transform transition-all duration-300 hover:scale-105">
+                <div className="relative bg-linear-to-br from-white/10 via-white/5 to-white/10 backdrop-blur-2xl rounded-2xl border-2 border-white/20 shadow-2xl shadow-black/20 overflow-hidden transform transition-all duration-300 hover:scale-105">
                   {/* Card Header with Avatar */}
-                  <div className={`bg-gradient-to-br ${colors.gradient} backdrop-blur-sm p-6 text-center border-b border-white/10`}>
-                    <img
+                  <div className={`bg-linear-to-br ${colors.gradient} backdrop-blur-sm p-6 text-center border-b border-white/10`}>
+                    <Image
                       src={dev.avatar}
                       alt={dev.name}
-                      className="w-32 h-32 rounded-full mx-auto mb-4 border-4 border-white/30 shadow-xl"
+                      width={128}
+                      height={128}
+                      className="rounded-full mx-auto mb-4 border-4 border-white/30 shadow-xl"
                     />
                     <h3 className="text-2xl font-bold text-white">{dev.name}</h3>
                     <p className={`${colors.text} font-semibold mt-1`}>{dev.role}</p>
@@ -207,8 +210,8 @@ export default function ContactPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-12">
           {/* About the Project */}
           <div className="relative group">
-            <div className="absolute -inset-1 bg-gradient-to-r from-blue-500/20 to-purple-500/20 rounded-2xl blur-xl opacity-50 group-hover:opacity-100 transition-opacity duration-300"></div>
-            <div className="relative bg-gradient-to-br from-white/10 via-white/5 to-white/10 backdrop-blur-2xl rounded-2xl border-2 border-white/20 shadow-2xl shadow-black/20 p-8">
+            <div className="absolute -inset-1 bg-linear-to-r from-blue-500/20 to-purple-500/20 rounded-2xl blur-xl opacity-50 group-hover:opacity-100 transition-opacity duration-300"></div>
+            <div className="relative bg-linear-to-br from-white/10 via-white/5 to-white/10 backdrop-blur-2xl rounded-2xl border-2 border-white/20 shadow-2xl shadow-black/20 p-8">
               <h2 className="text-3xl font-bold text-white mb-4">About This Project</h2>
               <p className="text-white/80 leading-relaxed mb-4">
                 Digital Campus Psychology is a student-led initiative created as part of our{' '}
@@ -224,16 +227,16 @@ export default function ContactPage() {
 
           {/* Get in Touch */}
           <div className="relative group">
-            <div className="absolute -inset-1 bg-gradient-to-r from-purple-500/20 to-pink-500/20 rounded-2xl blur-xl opacity-50 group-hover:opacity-100 transition-opacity duration-300"></div>
-            <div className="relative bg-gradient-to-br from-white/10 via-white/5 to-white/10 backdrop-blur-2xl rounded-2xl border-2 border-white/20 shadow-2xl shadow-black/20 p-8">
+            <div className="absolute -inset-1 bg-linear-to-r from-purple-500/20 to-pink-500/20 rounded-2xl blur-xl opacity-50 group-hover:opacity-100 transition-opacity duration-300"></div>
+            <div className="relative bg-linear-to-br from-white/10 via-white/5 to-white/10 backdrop-blur-2xl rounded-2xl border-2 border-white/20 shadow-2xl shadow-black/20 p-8">
               <h2 className="text-3xl font-bold text-white mb-4">Get in Touch</h2>
               <p className="text-white/80 leading-relaxed mb-4">
-                We'd love to hear from you! Whether you have questions, feedback, bug reports, 
+                We`d love to hear from you! Whether you have questions, feedback, bug reports, 
                 or feature suggestions, feel free to reach out to any of our team members.
               </p>
               <div className="space-y-3">
                 <div className="flex items-start gap-3">
-                  <FiMail className="text-blue-300 mt-1 flex-shrink-0 text-xl" />
+                  <FiMail className="text-blue-300 mt-1 shrink-0 text-xl" />
                   <div>
                     <p className="font-semibold text-white">General Inquiries</p>
                     <a href="mailto:b23397@students.iitmandi.ac.in" className="text-blue-300 hover:text-blue-200 underline transition-colors">
@@ -242,7 +245,7 @@ export default function ContactPage() {
                   </div>
                 </div>
                 <div className="flex items-start gap-3">
-                  <FiCode className="text-green-300 mt-1 flex-shrink-0 text-xl" />
+                  <FiCode className="text-green-300 mt-1 shrink-0 text-xl" />
                   <div>
                     <p className="font-semibold text-white">Report a Bug</p>
                     <a href="mailto:b23417@students.iitmandi.ac.in" className="text-green-300 hover:text-green-200 underline transition-colors">
@@ -251,7 +254,7 @@ export default function ContactPage() {
                   </div>
                 </div>
                 <div className="flex items-start gap-3">
-                  <FiGithub className="text-purple-300 mt-1 flex-shrink-0 text-xl" />
+                  <FiGithub className="text-purple-300 mt-1 shrink-0 text-xl" />
                   <div>
                     <p className="font-semibold text-white">Contribute on GitHub</p>
                     <a href="https://github.com/dummy" target="_blank" rel="noopener noreferrer" className="text-purple-300 hover:text-purple-200 underline transition-colors">
@@ -266,9 +269,9 @@ export default function ContactPage() {
 
         {/* Tech Stack */}
         <div className="relative group mb-12">
-          <div className="absolute -inset-1 bg-gradient-to-r from-blue-500/30 via-purple-500/30 to-pink-500/30 rounded-2xl blur-2xl"></div>
-          <div className="relative bg-gradient-to-r from-blue-500/20 via-purple-500/20 to-pink-500/20 backdrop-blur-2xl rounded-2xl border-2 border-white/30 shadow-2xl p-8">
-            <h2 className="text-4xl font-bold mb-6 text-center bg-gradient-to-r from-blue-300 via-purple-300 to-pink-300 bg-clip-text text-transparent">Our Tech Stack</h2>
+          <div className="absolute -inset-1 bg-linear-to-r from-blue-500/30 via-purple-500/30 to-pink-500/30 rounded-2xl blur-2xl"></div>
+          <div className="relative bg-linear-to-r from-blue-500/20 via-purple-500/20 to-pink-500/20 backdrop-blur-2xl rounded-2xl border-2 border-white/30 shadow-2xl p-8">
+            <h2 className="text-4xl font-bold mb-6 text-center bg-linear-to-r from-blue-300 via-purple-300 to-pink-300 bg-clip-text text-transparent">Our Tech Stack</h2>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
               <div className="text-center">
                 <div className="bg-white/10 backdrop-blur-sm rounded-xl p-4 mb-2 border border-white/20 hover:bg-white/20 hover:scale-105 transition-all duration-300">

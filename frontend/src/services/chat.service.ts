@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { ChatRequest, Conversation, Message } from '@/types/chat.types';
+import type { ChatRequest, Conversation } from '@/types/chat.types';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
@@ -19,7 +19,7 @@ api.interceptors.request.use((config) => {
 
 export const chatService = {
   // Send chat request (regular chat only)
-  async sendChatRequest(receiverId: string, isAnonymous: boolean = false) {
+  async sendChatRequest(receiverId: string) {
     // Redirect to conversation creation
     const response = await api.post('/conversation', {
       otherUserId: receiverId,

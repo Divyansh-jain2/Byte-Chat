@@ -1,18 +1,19 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import type { User, Group } from '@/types/chat.types';
 import { groupService } from '@/services/group.service';
 import { useToast } from '@/contexts/ToastContext';
+import Image from 'next/image';
 
 export default function DashboardPage() {
   const router = useRouter();
   const toast = useToast();
   const [users, setUsers] = useState<User[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
-  const [myGroups, setMyGroups] = useState<any[]>([]);
+  const [, setMyGroups] = useState<Group[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'users' | 'groups'>('users');
   const [searchQuery, setSearchQuery] = useState('');
@@ -21,11 +22,7 @@ export default function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [showCreateGroup, setShowCreateGroup] = useState(false);
 
-  useEffect(() => {
-    fetchData();
-  }, []);
-
-  const fetchData = async () => {
+  const fetchData = useCallback( async () => {
     try {
       const token = localStorage.getItem('accessToken');
       
@@ -53,23 +50,29 @@ export default function DashboardPage() {
       const myGroupIds = new Set<string>();
       if (myGroupsData.success && myGroupsData.data && Array.isArray(myGroupsData.data.groups)) {
         setMyGroups(myGroupsData.data.groups);
-        myGroupsData.data.groups.forEach((g: any) => myGroupIds.add(g.group_id));
+        myGroupsData.data.groups.forEach((g: Group) => myGroupIds.add(g.group_id));
       }
 
       // Fetch public groups and filter out groups user is already a member of
       const groupsData = await groupService.getPublicGroups();
       if (groupsData.success && groupsData.data && Array.isArray(groupsData.data.groups)) {
         // Only show groups user hasn't joined yet
-        const nonMemberGroups = groupsData.data.groups.filter((g: any) => !myGroupIds.has(g.group_id));
+        const nonMemberGroups = groupsData.data.groups.filter((g: Group) => !myGroupIds.has(g.group_id));
         setGroups(nonMemberGroups);
       }
-    } catch (error) {
+    } 
+    catch (error) {
       console.error('Failed to fetch data:', error);
       setError('Failed to connect to server');
-    } finally {
+    } 
+    finally {
       setLoading(false);
     }
-  };
+  }, [router]);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
 
   const filteredUsers = users.filter((user) => {
     const matchesSearch =
@@ -96,8 +99,14 @@ export default function DashboardPage() {
       await groupService.joinGroup(groupId, isAnonymous);
       toast.success('Joined group successfully!');
       fetchData();
-    } catch (error: any) {
-      toast.error(error.message || 'Failed to join group');
+    } 
+    catch (err: unknown) {
+      let errorMsg = 'Failed to join group';
+      if (typeof err === 'object' && err !== null && 'message' in err && typeof (err as { message?: string }).message === 'string') {
+        errorMsg = (err as { message: string }).message;
+      }
+      // setError(errorMsg);
+      toast.error(errorMsg);
     }
   };
 
@@ -247,7 +256,7 @@ export default function DashboardPage() {
 
         {/* Stats - Blocky Boxes */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-          <div className="bg-gradient-to-br from-neutral-100 to-neutral-200 dark:from-neutral-900 dark:to-neutral-800 border-4 border-neutral-900 dark:border-neutral-100 p-6">
+          <div className="bg-linear-to-br from-neutral-100 to-neutral-200 dark:from-neutral-900 dark:to-neutral-800 border-4 border-neutral-900 dark:border-neutral-100 p-6">
             <h3 className="text-neutral-600 dark:text-neutral-400 text-sm font-mono font-bold">
               {activeTab === 'users' ? 'TOTAL USERS' : 'PUBLIC GROUPS'}
             </h3>
@@ -257,18 +266,18 @@ export default function DashboardPage() {
           </div>
           {activeTab === 'users' && (
             <>
-              <div className="bg-gradient-to-br from-neutral-100 to-neutral-200 dark:from-neutral-900 dark:to-neutral-800 border-4 border-neutral-900 dark:border-neutral-100 p-6">
+              <div className="bg-linear-to-br from-neutral-100 to-neutral-200 dark:from-neutral-900 dark:to-neutral-800 border-4 border-neutral-900 dark:border-neutral-100 p-6">
                 <h3 className="text-neutral-600 dark:text-neutral-400 text-sm font-mono font-bold">BRANCHES</h3>
                 <p className="text-5xl font-bold text-neutral-900 dark:text-neutral-100 mt-2 font-mono">{branches.length}</p>
               </div>
-              <div className="bg-gradient-to-br from-neutral-100 to-neutral-200 dark:from-neutral-900 dark:to-neutral-800 border-4 border-neutral-900 dark:border-neutral-100 p-6">
+              <div className="bg-linear-to-br from-neutral-100 to-neutral-200 dark:from-neutral-900 dark:to-neutral-800 border-4 border-neutral-900 dark:border-neutral-100 p-6">
                 <h3 className="text-neutral-600 dark:text-neutral-400 text-sm font-mono font-bold">SHOWING</h3>
                 <p className="text-5xl font-bold text-neutral-900 dark:text-neutral-100 mt-2 font-mono">{filteredUsers.length}</p>
               </div>
             </>
           )}
           {activeTab === 'groups' && (
-            <div className="bg-gradient-to-br from-neutral-100 to-neutral-200 dark:from-neutral-900 dark:to-neutral-800 border-4 border-neutral-900 dark:border-neutral-100 p-6">
+            <div className="bg-linear-to-br from-neutral-100 to-neutral-200 dark:from-neutral-900 dark:to-neutral-800 border-4 border-neutral-900 dark:border-neutral-100 p-6">
               <h3 className="text-neutral-600 dark:text-neutral-400 text-sm font-mono font-bold">SHOWING</h3>
               <p className="text-5xl font-bold text-neutral-900 dark:text-neutral-100 mt-2 font-mono">{filteredGroups.length}</p>
             </div>
@@ -284,12 +293,14 @@ export default function DashboardPage() {
                 className="bg-white dark:bg-black border-4 border-neutral-900 dark:border-neutral-100 overflow-hidden hover:shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] dark:hover:shadow-[8px_8px_0px_0px_rgba(255,255,255,1)] transition-shadow"
               >
                 {/* Profile Picture - Blocky */}
-                <div className="relative h-48 bg-gradient-to-br from-neutral-300 to-neutral-400 dark:from-neutral-700 dark:to-neutral-800 border-b-4 border-neutral-900 dark:border-neutral-100">
+                <div className="relative h-48 bg-linear-to-br from-neutral-300 to-neutral-400 dark:from-neutral-700 dark:to-neutral-800 border-b-4 border-neutral-900 dark:border-neutral-100">
                   {user.dp_url ? (
-                    <img
+                    <Image
                       src={user.dp_url}
                       alt={user.name}
-                      className="w-full h-full object-cover"
+                      width={128}
+                      height={128}
+                      className="object-cover"
                     />
                   ) : (
                     <div className="w-full h-full flex items-center justify-center text-neutral-900 dark:text-neutral-100 text-7xl font-bold font-mono">
@@ -332,7 +343,7 @@ export default function DashboardPage() {
                   </div>
                   <button
                     onClick={() => handleStartChat(user.user_id, true)}
-                    className="w-full mt-2 px-3 py-2 bg-gradient-to-r from-neutral-600 to-neutral-800 dark:from-neutral-400 dark:to-neutral-200 text-neutral-100 dark:text-neutral-900 border-2 border-neutral-900 dark:border-neutral-100 hover:from-neutral-700 hover:to-neutral-900 dark:hover:from-neutral-500 dark:hover:to-neutral-300 transition-all text-xs font-bold font-mono"
+                    className="w-full mt-2 px-3 py-2 bg-linear-to-r from-neutral-600 to-neutral-800 dark:from-neutral-400 dark:to-neutral-200 text-neutral-100 dark:text-neutral-900 border-2 border-neutral-900 dark:border-neutral-100 hover:from-neutral-700 hover:to-neutral-900 dark:hover:from-neutral-500 dark:hover:to-neutral-300 transition-all text-xs font-bold font-mono"
                   >
                     ANON
                   </button>
@@ -358,10 +369,12 @@ export default function DashboardPage() {
 
                 {group.group_dp_url && (
                   <div className="mb-4">
-                    <img
+                    <Image
                       src={group.group_dp_url}
                       alt={group.group_name}
-                      className="w-full h-32 object-cover border-2 border-neutral-900 dark:border-neutral-100"
+                      width={256}
+                      height={32}
+                      className="object-cover border-2 border-neutral-900 dark:border-neutral-100"
                     />
                   </div>
                 )}
@@ -392,7 +405,7 @@ export default function DashboardPage() {
                     </button>
                     <button
                       onClick={() => handleJoinGroup(group.group_id, true)}
-                      className="flex-1 px-4 py-2 bg-gradient-to-r from-neutral-600 to-neutral-800 dark:from-neutral-400 dark:to-neutral-200 text-neutral-100 dark:text-neutral-900 font-mono font-bold border-2 border-neutral-900 dark:border-neutral-100 hover:from-neutral-700 hover:to-neutral-900 transition-all text-xs"
+                      className="flex-1 px-4 py-2 bg-linear-to-r from-neutral-600 to-neutral-800 dark:from-neutral-400 dark:to-neutral-200 text-neutral-100 dark:text-neutral-900 font-mono font-bold border-2 border-neutral-900 dark:border-neutral-100 hover:from-neutral-700 hover:to-neutral-900 transition-all text-xs"
                     >
                       JOIN ANON
                     </button>
@@ -451,9 +464,24 @@ function CreateGroupModal({ onClose, onSuccess }: { onClose: () => void; onSucce
     try {
       await groupService.createGroup(formData);
       onSuccess();
-    } catch (error: any) {
-      setError(error.message || 'Failed to create group');
-    } finally {
+    } 
+    catch (error: unknown) {
+      console.error('Failed to create group', error);
+      let message = '';
+      if (
+        typeof error === 'object' &&
+        error !== null &&
+        'message' in error &&
+        typeof (error as { message?: string }).message === 'string'
+      ) {
+        message = (error as { message: string }).message;
+        if (message.includes('Access denied')) {
+          console.error('You are not a member of this group.');
+          // router.push(`/groups/${groupId}`);
+        }
+      }
+    }
+    finally {
       setLoading(false);
     }
   };

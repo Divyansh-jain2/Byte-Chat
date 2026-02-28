@@ -1,4 +1,6 @@
 import axios from 'axios';
+import { User as AuthUser } from '@/types/auth.types';
+import { Group as ChatGroup } from '@/types/chat.types';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
 
@@ -7,8 +9,8 @@ export interface ImageUploadResponse {
   message: string;
   data: {
     imageUrl: string;
-    user?: any;
-    group?: any;
+    user?: AuthUser;
+    group?: ChatGroup;
   };
 }
 

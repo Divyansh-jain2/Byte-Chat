@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useCallback } from 'react';
+import Image from 'next/image';
 import ReactCrop, { Crop, PixelCrop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
 import { FiUpload, FiRotateCw, FiX, FiCheck } from 'react-icons/fi';
@@ -170,10 +171,13 @@ const ImageUploader: React.FC<ImageUploaderProps> = ({
       {/* Current Image Display */}
       {!showEditor && currentImage && (
         <div className="mb-4">
-          <img
+          <Image
             src={currentImage}
             alt="Current"
+            width={128}
+            height={128}
             className="w-32 h-32 rounded-full object-cover border-4 border-gray-200 mx-auto"
+            unoptimized={currentImage.startsWith('data:')}
           />
         </div>
       )}
@@ -182,6 +186,11 @@ const ImageUploader: React.FC<ImageUploaderProps> = ({
       {showEditor && selectedImage && (
         <div className="mb-4 p-4 border rounded-lg bg-gray-50">
           <div className="mb-4">
+            {/*
+              Using <img> here is intentional because react-image-crop and cropping logic require direct DOM access via ref.
+              <Image /> from next/image does not support ref forwarding or direct manipulation, so <img> is best for cropping/editor.
+              For static display, <Image /> is used above for optimization.
+            */}
             <ReactCrop
               crop={crop}
               onChange={(c) => setCrop(c)}
@@ -189,17 +198,19 @@ const ImageUploader: React.FC<ImageUploaderProps> = ({
               aspect={aspectRatio}
               className="max-w-full mx-auto"
             >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 ref={imgRef}
                 src={selectedImage}
                 alt="Crop preview"
                 style={{
                   transform: `rotate(${rotation}deg)`,
-                  maxHeight: '400px',
+                  maxHeight: "400px",
                 }}
                 className="max-w-full"
               />
             </ReactCrop>
+
           </div>
 
           {/* Editor Controls */}

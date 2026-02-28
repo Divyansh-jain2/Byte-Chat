@@ -1,13 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
 import { groupService } from '@/services/group.service';
 import GroupImageManager from '@/components/GroupImageManager';
 import { ReportGroupButton } from '@/components/ModerationComponents';
 import { useToast } from '@/contexts/ToastContext';
-
+import Image from 'next/image';
 
 
 interface GroupMember {
@@ -54,11 +54,7 @@ export default function GroupDetailsPage() {
   const [error, setError] = useState<string | null>(null);
   const [showEditModal, setShowEditModal] = useState(false);
 
-  useEffect(() => {
-    fetchGroupData();
-  }, [groupId]);
-
-  const fetchGroupData = async () => {
+  const fetchGroupData = useCallback(async () => {
     try {
       // Fetch group details
       const groupResponse = await groupService.getGroupDetails(groupId);
@@ -74,22 +70,35 @@ export default function GroupDetailsPage() {
         }
       }
     }
-    catch (error: any) {
-      console.error('[ERROR] Failed to fetch group data:', error);
-      setError(error.message || 'Failed to load group');
+    catch (err: unknown) {
+      let errorMsg = '[ERROR] Failed to fetch group data';
+      if (typeof err === 'object' && err !== null && 'message' in err && typeof (err as { message?: string }).message === 'string') {
+        errorMsg = (err as { message: string }).message;
+      }
+      setError(errorMsg);
+      toast.error(errorMsg);
     }
     finally {
       setLoading(false);
     }
-  };
+  }, [groupId, toast]);
+
+  useEffect(() => {
+    fetchGroupData();
+  }, [fetchGroupData]);
 
   const handleJoinGroup = async (isAnonymous: boolean) => {
     try {
       await groupService.joinGroup(groupId, isAnonymous);
       fetchGroupData();
     } 
-    catch (error: any) {
-      toast.error(error.message || 'Failed to join group');
+    catch (err: unknown) {
+      let errorMsg = 'Failed to join group'
+      if (typeof err === 'object' && err !== null && 'message' in err && typeof (err as { message?: string }).message === 'string') {
+        errorMsg = (err as { message: string }).message;
+      }
+      setError(errorMsg);
+      toast.error(errorMsg);
     }
   };
 
@@ -102,8 +111,13 @@ export default function GroupDetailsPage() {
       await groupService.leaveGroup(groupId);
       router.push('/dashboard');
     } 
-    catch (error: any) {
-      toast.error(error.message || 'Failed to leave group');
+    catch (err: unknown) {
+      let errorMsg = 'Failed to leave group'
+      if (typeof err === 'object' && err !== null && 'message' in err && typeof (err as { message?: string }).message === 'string') {
+        errorMsg = (err as { message: string }).message;
+      }
+      setError(errorMsg);
+      toast.error(errorMsg);
     }
   };
 
@@ -145,10 +159,12 @@ export default function GroupDetailsPage() {
             <div>
               <div className="flex items-center gap-3 mb-2">
                 {group.group_dp_url ? (
-                  <img
+                  <Image
                     src={group.group_dp_url}
                     alt={group.group_name}
-                    className="w-16 h-16 object-cover border-2 border-neutral-900 dark:border-neutral-100"
+                    width={32}
+                    height={32}
+                    className="object-cover border-2 border-neutral-900 dark:border-neutral-100"
                   />
                 ) : (
                   <div className="w-16 h-16 bg-neutral-200 dark:bg-neutral-800 border-2 border-neutral-900 dark:border-neutral-100 flex items-center justify-center font-mono font-bold text-neutral-900 dark:text-neutral-100">
@@ -245,7 +261,7 @@ export default function GroupDetailsPage() {
                 </button>
                 <button
                   onClick={() => handleJoinGroup(true)}
-                  className="px-6 py-3 bg-gradient-to-r from-neutral-600 to-neutral-800 dark:from-neutral-400 dark:to-neutral-200 text-neutral-100 dark:text-neutral-900 font-mono font-bold border-2 border-neutral-900 dark:border-neutral-100 hover:from-neutral-700 hover:to-neutral-900 transition-all"
+                  className="px-6 py-3 bg-linear-to-r from-neutral-600 to-neutral-800 dark:from-neutral-400 dark:to-neutral-200 text-neutral-100 dark:text-neutral-900 font-mono font-bold border-2 border-neutral-900 dark:border-neutral-100 hover:from-neutral-700 hover:to-neutral-900 transition-all"
                 >
                   JOIN ANONYMOUSLY
                 </button>
@@ -292,10 +308,12 @@ export default function GroupDetailsPage() {
                 >
                   <div className="flex items-start gap-3">
                     {member.dp_url ? (
-                      <img
+                      <Image
                         src={member.dp_url}
                         alt={member.name}
-                        className="w-12 h-12 border-2 border-neutral-900 dark:border-neutral-100 object-cover"
+                        width={32}
+                        height={32}
+                        className="border-2 border-neutral-900 dark:border-neutral-100 object-cover"
                       />
                     ) : (
                       <div className="w-12 h-12 border-2 border-neutral-900 dark:border-neutral-100 bg-neutral-300 dark:bg-neutral-700 flex items-center justify-center text-neutral-900 dark:text-neutral-100 font-bold font-mono text-xl">
@@ -381,9 +399,15 @@ function EditGroupModal({
     try {
       await groupService.updateGroup(group.group_id, formData);
       onSuccess();
-    } catch (error: any) {
-      setError(error.message || 'Failed to update group');
-    } finally {
+    } 
+    catch (err: unknown) {
+      let errorMsg = 'Failed to update group';
+      if (typeof err === 'object' && err !== null && 'message' in err && typeof (err as { message?: string }).message === 'string') {
+        errorMsg = (err as { message: string }).message;
+      }
+      setError(errorMsg);
+    }
+    finally {
       setLoading(false);
     }
   };

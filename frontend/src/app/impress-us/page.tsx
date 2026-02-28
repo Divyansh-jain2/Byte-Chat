@@ -15,7 +15,7 @@ export default function ImpressUsPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-600 via-pink-500 to-red-500 dark:from-purple-950 dark:via-pink-950 dark:to-red-950 flex items-center justify-center p-4 transition-colors duration-300">
+    <div className="min-h-screen bg-linear-to-br from-purple-600 via-pink-500 to-red-500 dark:from-purple-950 dark:via-pink-950 dark:to-red-950 flex items-center justify-center p-4 transition-colors duration-300">
       {/* Theme Toggle */}
       <button
         onClick={toggleTheme}
@@ -46,10 +46,10 @@ export default function ImpressUsPage() {
 
         {/* Main Card */}
         <div className="bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm rounded-2xl shadow-2xl overflow-hidden border border-white/20 dark:border-gray-700/50">
-          <div className="bg-gradient-to-r from-purple-600 to-pink-600 dark:from-purple-700 dark:to-pink-700 p-8 text-white">
+          <div className="bg-linear-to-r from-purple-600 to-pink-600 dark:from-purple-700 dark:to-pink-700 p-8 text-white">
             <h2 className="text-3xl font-bold mb-2">✨ Impress Us!</h2>
             <p className="text-white/90">
-              Not a current student? We'd love to hear why you should be part of BYTE-CHAT
+              Not a current student? We`d love to hear why you should be part of BYTE-CHAT
             </p>
           </div>
 
@@ -64,12 +64,12 @@ export default function ImpressUsPage() {
                   Send Us Your Details
                 </h3>
                 <p className="text-gray-600 dark:text-gray-400 leading-relaxed">
-                  We'd love to hear from you! Send an email with the following information:
+                  We`d love to hear from you! Send an email with the following information:
                 </p>
               </div>
 
               {/* Email Box */}
-              <div className="bg-gradient-to-r from-purple-50 to-pink-50 dark:from-purple-900/30 dark:to-pink-900/30 border-2 border-purple-300 dark:border-purple-700 rounded-xl p-6">
+              <div className="bg-linear-to-r from-purple-50 to-pink-50 dark:from-purple-900/30 dark:to-pink-900/30 border-2 border-purple-300 dark:border-purple-700 rounded-xl p-6">
                 <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">Email us at:</p>
                 <div className="flex items-center justify-center gap-3">
                   <a
@@ -109,7 +109,7 @@ export default function ImpressUsPage() {
               {/* Response Time */}
               <div className="bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-700 rounded-lg p-4">
                 <p className="text-sm text-green-800 dark:text-green-300">
-                  <strong>✨ We'll review your request</strong> and get back to you within 2-3 business days!
+                  <strong>✨ We`ll review your request</strong> and get back to you within 2-3 business days!
                 </p>
               </div>
 
@@ -159,7 +159,7 @@ export default function ImpressUsPage() {
 
         {/* Footer Note */}
         <div className="text-center mt-6 text-white/90 dark:text-white/80 text-sm">
-          <p>We will review all applications carefully. You'll hear from us, Just Trust.</p>
+          <p>We will review all applications carefully. You`ll hear from us, Just Trust.</p>
         </div>
       </div>
     </div>

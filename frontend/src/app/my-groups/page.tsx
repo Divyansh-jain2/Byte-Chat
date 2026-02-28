@@ -1,10 +1,11 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+// import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import type { Group } from '@/types/chat.types';
 import { groupService } from '@/services/group.service';
+import Image from 'next/image';
 
 interface MyGroup extends Group {
   is_admin: boolean;
@@ -14,7 +15,7 @@ interface MyGroup extends Group {
 }
 
 export default function MyGroupsPage() {
-  const router = useRouter();
+  // const router = useRouter();
   const [groups, setGroups] = useState<MyGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -59,7 +60,7 @@ export default function MyGroupsPage() {
                 [MY GROUPS]
               </h1>
               <p className="mt-2 text-neutral-600 dark:text-neutral-400 font-mono">
-                Groups you've joined or created
+                Groups you`ve joined or created
               </p>
             </div>
             <div className="flex gap-2">
@@ -108,10 +109,12 @@ export default function MyGroupsPage() {
               >
                 {group.group_dp_url && (
                   <div className="mb-4">
-                    <img
+                    <Image
                       src={group.group_dp_url}
                       alt={group.group_name}
-                      className="w-full h-32 object-cover border-2 border-neutral-900 dark:border-neutral-100"
+                      width={128}
+                      height={128}
+                      className="object-cover border-2 border-neutral-900 dark:border-neutral-100"
                     />
                   </div>
                 )}

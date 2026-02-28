@@ -74,9 +74,15 @@ export default function SignupPage() {
         setFullRollNo(response.data.rollNo);
         setStep('verify');
       }
-    } catch (err: any) {
-      setError(err.message || 'Signup failed');
-    } finally {
+    } 
+    catch (err: unknown) {
+      let errorMsg = 'SignUp failed';
+      if (typeof err === 'object' && err !== null && 'message' in err && typeof (err as { message?: string }).message === 'string') {
+        errorMsg = (err as { message: string }).message;
+      }
+      setError(errorMsg);
+    }
+    finally {
       setLoading(false);
     }
   };
@@ -103,16 +109,22 @@ export default function SignupPage() {
         // Redirect to dashboard or home
         router.push('/dashboard');
       }
-    } catch (err: any) {
-      setError(err.message || 'OTP verification failed');
-    } finally {
+    } 
+    catch (err: unknown) {
+      let errorMsg = 'OTP verification failed';
+      if (typeof err === 'object' && err !== null && 'message' in err && typeof (err as { message?: string }).message === 'string') {
+        errorMsg = (err as { message: string }).message;
+      }
+      setError(errorMsg);
+    }
+    finally {
       setLoading(false);
     }
   };
 
   if (step === 'verify') {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-100 dark:from-gray-900 dark:via-indigo-950 dark:to-purple-950 p-4 transition-colors duration-300">
+      <div className="min-h-screen flex items-center justify-center bg-linear-to-br from-blue-50 via-indigo-50 to-purple-100 dark:from-gray-900 dark:via-indigo-950 dark:to-purple-950 p-4 transition-colors duration-300">
         {/* Theme Toggle */}
         <button
           onClick={toggleTheme}
@@ -132,12 +144,12 @@ export default function SignupPage() {
 
         <div className="bg-white/80 dark:bg-gray-900/80 backdrop-blur-xl rounded-3xl shadow-2xl p-8 w-full max-w-md border border-white/20 dark:border-gray-700/50">
           <div className="text-center mb-8">
-            <div className="mb-4 inline-block p-3 bg-gradient-to-br from-green-500 to-emerald-600 rounded-2xl shadow-lg">
+            <div className="mb-4 inline-block p-3 bg-linear-to-br from-green-500 to-emerald-600 rounded-2xl shadow-lg">
               <svg className="w-12 h-12 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 19v-8.93a2 2 0 01.89-1.664l7-4.666a2 2 0 012.22 0l7 4.666A2 2 0 0121 10.07V19M3 19a2 2 0 002 2h14a2 2 0 002-2M3 19l6.75-4.5M21 19l-6.75-4.5M3 10l6.75 4.5M21 10l-6.75 4.5m0 0l-1.14.76a2 2 0 01-2.22 0l-1.14-.76" />
               </svg>
             </div>
-            <h1 className="text-4xl font-bold bg-gradient-to-r from-green-600 to-emerald-600 dark:from-green-400 dark:to-emerald-400 bg-clip-text text-transparent">Verify Email</h1>
+            <h1 className="text-4xl font-bold bg-linear-to-r from-green-600 to-emerald-600 dark:from-green-400 dark:to-emerald-400 bg-clip-text text-transparent">Verify Email</h1>
             <p className="text-gray-600 dark:text-gray-400 mt-2">
               Enter the OTP sent to<br />
               <span className="font-bold text-indigo-600 dark:text-indigo-400">{fullRollNo}@students.iitmandi.ac.in</span>
@@ -178,7 +190,7 @@ export default function SignupPage() {
             <button
               type="submit"
               disabled={loading || otp.length !== 6}
-              className="w-full bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 dark:from-green-500 dark:to-emerald-500 dark:hover:from-green-600 dark:hover:to-emerald-600 text-white py-3 rounded-xl font-bold shadow-lg hover:shadow-xl transform hover:scale-[1.02] transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
+              className="w-full bg-linear-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 dark:from-green-500 dark:to-emerald-500 dark:hover:from-green-600 dark:hover:to-emerald-600 text-white py-3 rounded-xl font-bold shadow-lg hover:shadow-xl transform hover:scale-[1.02] transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
             >
               {loading ? (
                 <span className="flex items-center justify-center gap-2">
@@ -209,7 +221,7 @@ export default function SignupPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-100 dark:from-gray-900 dark:via-indigo-950 dark:to-purple-950 p-4 py-12 transition-colors duration-300">
+    <div className="min-h-screen flex items-center justify-center bg-linear-to-br from-blue-50 via-indigo-50 to-purple-100 dark:from-gray-900 dark:via-indigo-950 dark:to-purple-950 p-4 py-12 transition-colors duration-300">
       {/* Theme Toggle */}
       <button
         onClick={toggleTheme}
@@ -229,12 +241,12 @@ export default function SignupPage() {
 
       <div className="bg-white/80 dark:bg-gray-900/80 backdrop-blur-xl rounded-3xl shadow-2xl p-8 w-full max-w-md border border-white/20 dark:border-gray-700/50 max-h-[90vh] overflow-y-auto">
         <div className="text-center mb-6">
-          <div className="mb-4 inline-block p-3 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-2xl shadow-lg">
+          <div className="mb-4 inline-block p-3 bg-linear-to-br from-indigo-500 to-purple-600 rounded-2xl shadow-lg">
             <svg className="w-12 h-12 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
             </svg>
           </div>
-          <h1 className="text-4xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 dark:from-indigo-400 dark:to-purple-400 bg-clip-text text-transparent">Create Account</h1>
+          <h1 className="text-4xl font-bold bg-linear-to-r from-indigo-600 to-purple-600 dark:from-indigo-400 dark:to-purple-400 bg-clip-text text-transparent">Create Account</h1>
           <p className="text-gray-600 dark:text-gray-400 mt-2 font-medium">BYTE-CHAT · IIT Mandi</p>
         </div>
 
@@ -412,7 +424,7 @@ export default function SignupPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 dark:from-indigo-500 dark:to-purple-500 dark:hover:from-indigo-600 dark:hover:to-purple-600 text-white py-3 rounded-xl font-bold shadow-lg hover:shadow-xl transform hover:scale-[1.02] transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
+            className="w-full bg-linear-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 dark:from-indigo-500 dark:to-purple-500 dark:hover:from-indigo-600 dark:hover:to-purple-600 text-white py-3 rounded-xl font-bold shadow-lg hover:shadow-xl transform hover:scale-[1.02] transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
           >
             {loading ? (
               <span className="flex items-center justify-center gap-2">

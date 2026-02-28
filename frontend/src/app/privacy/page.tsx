@@ -13,9 +13,9 @@ export default function PrivacyPolicy() {
     <div className="min-h-screen relative overflow-hidden">
       {/* Animated Background Orbs */}
       <div className="fixed inset-0 pointer-events-none">
-        <div className="absolute top-20 left-10 w-96 h-96 bg-gradient-to-r from-blue-500/20 to-purple-500/20 rounded-full blur-3xl animate-pulse"></div>
-        <div className="absolute bottom-20 right-10 w-96 h-96 bg-gradient-to-r from-purple-500/20 to-pink-500/20 rounded-full blur-3xl animate-pulse" style={{ animationDelay: '1s' }}></div>
-        <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-gradient-to-r from-teal-500/20 to-blue-500/20 rounded-full blur-3xl animate-pulse" style={{ animationDelay: '2s' }}></div>
+        <div className="absolute top-20 left-10 w-96 h-96 bg-linear-to-r from-blue-500/20 to-purple-500/20 rounded-full blur-3xl animate-pulse"></div>
+        <div className="absolute bottom-20 right-10 w-96 h-96 bg-linear-to-r from-purple-500/20 to-pink-500/20 rounded-full blur-3xl animate-pulse" style={{ animationDelay: '1s' }}></div>
+        <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-linear-to-r from-teal-500/20 to-blue-500/20 rounded-full blur-3xl animate-pulse" style={{ animationDelay: '2s' }}></div>
       </div>
 
       {/* Theme Toggle */}
@@ -34,16 +34,16 @@ export default function PrivacyPolicy() {
       <div className="max-w-4xl mx-auto py-12 px-4 sm:px-6 lg:px-8 relative z-10">
         <div className="relative">
           {/* Glow Effect */}
-          <div className="absolute -inset-1 bg-gradient-to-r from-blue-500/20 via-purple-500/20 to-pink-500/20 rounded-2xl blur-2xl"></div>
+          <div className="absolute -inset-1 bg-linear-to-r from-blue-500/20 via-purple-500/20 to-pink-500/20 rounded-2xl blur-2xl"></div>
           
           {/* Main Card */}
-          <div className="relative bg-gradient-to-br from-white/10 via-white/5 to-white/10 backdrop-blur-2xl rounded-2xl border-2 border-white/20 shadow-2xl shadow-black/20 p-8 sm:p-12">
+          <div className="relative bg-linear-to-br from-white/10 via-white/5 to-white/10 backdrop-blur-2xl rounded-2xl border-2 border-white/20 shadow-2xl shadow-black/20 p-8 sm:p-12">
             {/* Header */}
             <div className="mb-8 text-center">
               <div className="inline-block mb-4">
                 <FaShieldAlt className="text-6xl text-blue-400" />
               </div>
-              <h1 className="text-5xl font-bold bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400 bg-clip-text text-transparent mb-4 animate-gradient">
+              <h1 className="text-5xl font-bold bg-linear-to-r from-blue-400 via-purple-400 to-pink-400 bg-clip-text text-transparent mb-4 animate-gradient">
                 Privacy Policy
               </h1>
               <p className="text-white/70 text-lg">Last Updated: February 10, 2026</p>

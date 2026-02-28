@@ -1,10 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import ProfileImageManager from '@/components/ProfileImageManager';
-
+import Image from 'next/image';
 import { useToast } from '@/contexts/ToastContext';
 
 interface UserProfile {
@@ -43,7 +43,7 @@ interface BlockedUser {
 export default function ProfileEditPage() {
   const router = useRouter();
   const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [settings, setSettings] = useState<UserSettings | null>(null);
+  const [, setSettings] = useState<UserSettings | null>(null);
   const [blockedUsers, setBlockedUsers] = useState<BlockedUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'personal' | 'settings' | 'privacy' | 'blocks' | 'security'>('personal');
@@ -62,11 +62,7 @@ export default function ProfileEditPage() {
   const [privacyAllowAnonymousChats, setPrivacyAllowAnonymousChats] = useState(true);
   const [deletePassword, setDeletePassword] = useState('');
 
-  useEffect(() => {
-    fetchData();
-  }, []);
-
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     try {
       const token = localStorage.getItem('accessToken');
       if (!token) {
@@ -123,17 +119,22 @@ export default function ProfileEditPage() {
       if (blockedData.success) {
         setBlockedUsers(blockedData.data);
       }
-    } catch (error) {
+    } 
+    catch (error) {
       console.error('Failed to fetch data:', error);
       toastError('Failed to load profile data');
-    } finally {
+    } 
+    finally {
       setLoading(false);
     }
-  };
+  }, [router, toastError]);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
 
   const handleUpdatePersonal = async (e: React.FormEvent) => {
     e.preventDefault();
-    //
 
     try {
       const token = localStorage.getItem('accessToken');
@@ -155,6 +156,7 @@ export default function ProfileEditPage() {
       }
     } catch (error) {
       toastError('Failed to update profile');
+      console.log(error);
     }
   };
 
@@ -184,8 +186,10 @@ export default function ProfileEditPage() {
       } else {
         toastError(data.message || 'Failed to update settings');
       }
-    } catch (error) {
+    } 
+    catch (error) {
       toastError('Failed to update settings');
+      console.log(error);
     }
   };
 
@@ -215,8 +219,10 @@ export default function ProfileEditPage() {
       } else {
         toastError(data.message || 'Failed to update privacy settings');
       }
-    } catch (error) {
+    } 
+    catch (error) {
       toastError('Failed to update privacy settings');
+      console.log(error);
     }
   };
 
@@ -237,8 +243,10 @@ export default function ProfileEditPage() {
       } else {
         toastError(data.message || 'Failed to unblock user');
       }
-    } catch (error) {
+    } 
+    catch (error) {
       toastError('Failed to unblock user');
+      console.log(error);
     }
   };
 
@@ -276,19 +284,63 @@ export default function ProfileEditPage() {
       } else {
         toastError(data.message || 'Failed to delete account');
       }
-    } catch (error) {
+    } 
+    catch (error) {
       toastError('Failed to delete account');
+      console.log(error);
     }
   };
 
   if (loading) {
-    toastInfo('Loading profile...');
-    return null;
+    return (
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 py-8 px-4">
+        <div className="max-w-5xl mx-auto">
+          <div className="mb-6">
+            <div className="h-6 w-32 bg-gray-200 dark:bg-gray-700 rounded animate-pulse mb-4"></div>
+            <div className="h-8 w-48 bg-gray-200 dark:bg-gray-700 rounded animate-pulse"></div>
+          </div>
+          
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
+            <div className="flex items-center justify-center py-12">
+              <div className="text-center">
+                <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mb-4"></div>
+                <p className="text-gray-600 dark:text-gray-400">Loading profile...</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   if (!profile) {
-    toastError('Failed to load profile');
-    return null;
+    return (
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 py-8 px-4">
+        <div className="max-w-5xl mx-auto">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
+            <div className="text-center py-12">
+              <div className="text-red-600 dark:text-red-400 text-5xl mb-4">⚠️</div>
+              <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">Failed to Load Profile</h2>
+              <p className="text-gray-600 dark:text-gray-400 mb-6">Unable to load your profile data. Please try again.</p>
+              <div className="flex gap-4 justify-center">
+                <button
+                  onClick={() => window.location.reload()}
+                  className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition"
+                >
+                  Retry
+                </button>
+                <Link
+                  href="/dashboard"
+                  className="px-6 py-2 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-900 dark:text-white rounded-lg transition"
+                >
+                  Back to Dashboard
+                </Link>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -543,7 +595,7 @@ export default function ProfileEditPage() {
                       <label htmlFor="onlineStatus" className="text-sm font-medium text-gray-700 dark:text-gray-300">
                         Show Online Status
                       </label>
-                      <p className="text-xs text-gray-500 dark:text-gray-400">Let others see when you're online</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">Let others see when you`re online</p>
                     </div>
                     <input
                       type="checkbox"
@@ -588,7 +640,7 @@ export default function ProfileEditPage() {
 
               {blockedUsers.length === 0 ? (
                 <p className="text-gray-600 dark:text-gray-400 text-center py-8">
-                  You haven't blocked any users yet
+                  You haven`t blocked any users yet
                 </p>
               ) : (
                 <div className="space-y-4">
@@ -600,14 +652,15 @@ export default function ProfileEditPage() {
                       <div className="flex items-center space-x-3">
                         {user.is_anonymous_block ? (
                           // Anonymous user display
-                          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-400 to-pink-500 flex items-center justify-center text-white font-bold">
+                          <div className="w-10 h-10 rounded-full bg-linear-to-br from-purple-400 to-pink-500 flex items-center justify-center text-white font-bold">
                             ?
                           </div>
                         ) : (
-                          // Regular user display
-                          <img
+                          <Image
                             src={user.dp_url || 'https://via.placeholder.com/40'}
                             alt={user.name}
+                            width={40}
+                            height={40}
                             className="w-10 h-10 rounded-full object-cover"
                           />
                         )}

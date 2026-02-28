@@ -1,10 +1,10 @@
 'use client';
 
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState, useRef, useMemo } from 'react';
 import { io, Socket } from 'socket.io-client';
 
 interface SocketContextType {
-  socket: Socket | null;
+  getSocket: () => Socket | null;
   isConnected: boolean;
   joinConversation: (conversationId: string) => void;
   leaveConversation: (conversationId: string) => void;
@@ -14,7 +14,7 @@ interface SocketContextType {
 }
 
 const SocketContext = createContext<SocketContextType>({
-  socket: null,
+  getSocket: () => null,
   isConnected: false,
   joinConversation: () => {},
   leaveConversation: () => {},
@@ -25,25 +25,23 @@ const SocketContext = createContext<SocketContextType>({
 
 export const useSocket = () => useContext(SocketContext);
 
+
 export function SocketProvider({ children }: { children: React.ReactNode }) {
-  const [socket, setSocket] = useState<Socket | null>(null);
+  const socketRef = useRef<Socket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
 
   useEffect(() => {
     const token = localStorage.getItem('accessToken');
-    
-    if (!token) {
-      return;
-    }
+    if (!token) return;
 
     const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
-    
     const socketInstance = io(API_URL, {
-      auth: {
-        token,
-      },
+      auth: { token },
       transports: ['websocket', 'polling'],
     });
+
+    // assign to ref instead of setState
+    socketRef.current = socketInstance;
 
     socketInstance.on('connect', () => {
       console.log('Socket connected:', socketInstance.id);
@@ -60,55 +58,39 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       setIsConnected(false);
     });
 
-    setSocket(socketInstance);
-
     return () => {
       socketInstance.disconnect();
+      socketRef.current = null;
     };
   }, []);
 
-  const joinConversation = (conversationId: string) => {
-    if (socket && isConnected) {
-      socket.emit('join-conversation', conversationId);
-    }
-  };
-
-  const leaveConversation = (conversationId: string) => {
-    if (socket && isConnected) {
-      socket.emit('leave-conversation', conversationId);
-    }
-  };
-
-  const joinGroup = (groupId: string) => {
-    if (socket && isConnected) {
-      socket.emit('join-group', groupId);
-    }
-  };
-
-  const leaveGroup = (groupId: string) => {
-    if (socket && isConnected) {
-      socket.emit('leave-group', groupId);
-    }
-  };
-
-  const sendTyping = (conversationId: string, isTyping: boolean) => {
-    if (socket && isConnected) {
-      socket.emit('typing', { conversationId, isTyping });
-    }
-  };
+  const contextValue = useMemo(() => ({
+    getSocket: () => socketRef.current,
+    isConnected,
+    joinConversation: (conversationId: string) => {
+      const s = socketRef.current;
+      if (s && isConnected) s.emit('join-conversation', conversationId);
+    },
+    leaveConversation: (conversationId: string) => {
+      const s = socketRef.current;
+      if (s && isConnected) s.emit('leave-conversation', conversationId);
+    },
+    joinGroup: (groupId: string) => {
+      const s = socketRef.current;
+      if (s && isConnected) s.emit('join-group', groupId);
+    },
+    leaveGroup: (groupId: string) => {
+      const s = socketRef.current;
+      if (s && isConnected) s.emit('leave-group', groupId);
+    },
+    sendTyping: (conversationId: string, isTyping: boolean) => {
+      const s = socketRef.current;
+      if (s && isConnected) s.emit('typing', { conversationId, isTyping });
+    },
+  }), [isConnected]);
 
   return (
-    <SocketContext.Provider
-      value={{
-        socket,
-        isConnected,
-        joinConversation,
-        leaveConversation,
-        joinGroup,
-        leaveGroup,
-        sendTyping,
-      }}
-    >
+    <SocketContext.Provider value={contextValue}>
       {children}
     </SocketContext.Provider>
   );

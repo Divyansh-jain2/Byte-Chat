@@ -34,20 +34,20 @@ export default function TermsAndConditions() {
       </button>
 
       <div className="max-w-4xl mx-auto">
-        <div className="relative bg-gradient-to-br from-white/10 via-white/5 to-white/10 backdrop-blur-2xl rounded-3xl shadow-[0_8px_32px_0_rgba(120,150,255,0.2)] p-10 border border-white/20">
+        <div className="relative bg-linear-to-br from-white/10 via-white/5 to-white/10 backdrop-blur-2xl rounded-3xl shadow-[0_8px_32px_0_rgba(120,150,255,0.2)] p-10 border border-white/20">
           {/* Card glow effect */}
-          <div className="absolute inset-0 bg-gradient-to-br from-blue-400/5 via-purple-400/5 to-transparent rounded-3xl blur-xl opacity-50"></div>
+          <div className="absolute inset-0 bg-linear-to-br from-blue-400/5 via-purple-400/5 to-transparent rounded-3xl blur-xl opacity-50"></div>
           
           <div className="relative z-10">
         {/* Header */}
         <div className="mb-10 text-center">
-          <div className="inline-block mb-4 p-3 bg-gradient-to-br from-blue-500/20 to-purple-500/20 backdrop-blur-sm rounded-2xl border border-white/10">
+          <div className="inline-block mb-4 p-3 bg-linear-to-br from-blue-500/20 to-purple-500/20 backdrop-blur-sm rounded-2xl border border-white/10">
             <svg className="w-12 h-12 text-blue-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
             </svg>
           </div>
-          <h1 className="text-5xl font-bold bg-gradient-to-r from-blue-300 via-purple-300 to-teal-300 bg-clip-text text-transparent mb-3">Terms & Conditions</h1>
-          <div className="h-1 w-32 mx-auto bg-gradient-to-r from-blue-400/50 via-purple-400/50 to-teal-400/50 rounded-full mb-3"></div>
+          <h1 className="text-5xl font-bold bg-linear-to-r from-blue-300 via-purple-300 to-teal-300 bg-clip-text text-transparent mb-3">Terms & Conditions</h1>
+          <div className="h-1 w-32 mx-auto bg-linear-to-r from-blue-400/50 via-purple-400/50 to-teal-400/50 rounded-full mb-3"></div>
           <p className="text-white/70">Last Updated: February 10, 2026</p>
         </div>
 
@@ -88,7 +88,7 @@ export default function TermsAndConditions() {
             <ul className="list-disc list-inside text-white/80 space-y-2 ml-4">
               <li>Treat all users with respect and courtesy</li>
               <li>Use appropriate language in all communications</li>
-              <li>Respect others' privacy and personal boundaries</li>
+              <li>Respect other`s privacy and personal boundaries</li>
               <li>Not engage in harassment, bullying, or hate speech</li>
               <li>Not share inappropriate or offensive content</li>
               <li>Not impersonate others or create fake accounts</li>
@@ -201,7 +201,7 @@ export default function TermsAndConditions() {
             <h2 className="text-3xl font-bold text-white mb-4">9. Limitation of Liability</h2>
             <div className="bg-red-500/10 border-l-4 border-red-400/50 p-4 mb-4 rounded-r-xl backdrop-blur-sm">
               <p className="text-white/90">
-                <strong className="text-red-300">Platform "As Is":</strong> This platform is provided "as is" without warranties of any kind.
+                <strong className="text-red-300">Platform `As Is`:</strong> This platform is provided `as is` without warranties of any kind.
               </p>
             </div>
             <p className="text-white/80 leading-relaxed mb-4">

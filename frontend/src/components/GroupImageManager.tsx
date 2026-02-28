@@ -1,9 +1,10 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import ImageUploader from '@/components/ImageUploader';
 import AvatarSelector from '@/components/AvatarSelector';
 import { uploadGroupPicture, deleteGroupPicture, getGroupDP, selectGroupPresetAvatar } from '@/services/image.service';
+import type { Group } from '@/types/chat.types'; 
 
 interface GroupImageManagerProps {
   groupId: string;
@@ -13,23 +14,8 @@ interface GroupImageManagerProps {
   onDeleteSuccess?: () => void;
 }
 
-interface Group {
-  group_id: string;
-  group_name: string;
-  group_desc: string;
-  group_dp_url: string | null;
-  is_public: boolean;
-  max_members: number;
-  member_count?: number;
-}
-
 export default function GroupImageManager({ 
-  groupId, 
-  isAdmin = false,
-  currentImageUrl,
-  onUploadSuccess,
-  onDeleteSuccess 
-}: GroupImageManagerProps) {
+  groupId, isAdmin = false, currentImageUrl, onUploadSuccess, onDeleteSuccess }: GroupImageManagerProps) {
   const [group, setGroup] = useState<Group | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -41,14 +27,8 @@ export default function GroupImageManager({
   const displayImageUrl = useMemo(() => {
     return getGroupDP(currentImageUrl || group?.group_dp_url);
   }, [currentImageUrl, group?.group_dp_url]);
-
-  useEffect(() => {
-    if (!currentImageUrl) {
-      fetchGroup();
-    }
-  }, [groupId, currentImageUrl]);
-
-  const fetchGroup = async () => {
+  
+  const fetchGroup = useCallback(async () => {
     try {
       const token = localStorage.getItem('accessToken');
       if (!token) return;
@@ -61,10 +41,17 @@ export default function GroupImageManager({
       if (data.success) {
         setGroup(data.data);
       }
-    } catch (error) {
+    } 
+    catch (error) {
       console.error('Failed to fetch group:', error);
     }
-  };
+  }, [groupId]);
+
+    useEffect(() => {
+    if (!currentImageUrl) {
+      fetchGroup();
+    }
+  }, [groupId, currentImageUrl, fetchGroup]);
 
   const handleImageUpload = async (file: File) => {
     setIsLoading(true);
@@ -78,24 +65,39 @@ export default function GroupImageManager({
       }
 
       const result = await uploadGroupPicture(groupId, file, token);
+      const group = result.data?.group;
       
-      if (result.success) {
+      if (result.success && group) {
         setMessage({ type: 'success', text: 'Group picture uploaded successfully!' });
-        setGroup(result.data.group);
+        setGroup(group);
         
         // Call onUploadSuccess callback if provided
-        if (onUploadSuccess && result.data.group.group_dp_url) {
-          onUploadSuccess(result.data.group.group_dp_url);
+        if (onUploadSuccess && group.group_dp_url) {
+          onUploadSuccess(group.group_dp_url);
         }
       } else {
         setMessage({ type: 'error', text: 'Failed to upload image' });
       }
-    } catch (error: any) {
-      setMessage({ 
-        type: 'error', 
-        text: error.response?.data?.message || 'Failed to upload image. Make sure you are an admin.' 
-      });
-    } finally {
+    } 
+    catch (error: unknown) {
+      if (
+        typeof error === 'object' &&
+        error !== null &&
+        'response' in error &&
+        typeof (error as { response?: { data?: { message?: string } } }).response?.data?.message === 'string'
+      ) {
+        setMessage({
+          type: 'error',
+          text: (error as { response: { data: { message: string } } }).response.data.message,
+        });
+      } else {
+        setMessage({
+          type: 'error',
+          text: 'Failed to upload image. Make sure you are an admin.',
+        });
+      }
+    }
+    finally {
       setIsLoading(false);
     }
   };
@@ -119,7 +121,7 @@ export default function GroupImageManager({
       
       if (result.success) {
         setMessage({ type: 'success', text: 'Group picture deleted successfully!' });
-        setGroup(result.data.group);
+        setGroup(group);
         
         // Call onDeleteSuccess callback if provided
         if (onDeleteSuccess) {
@@ -128,12 +130,26 @@ export default function GroupImageManager({
       } else {
         setMessage({ type: 'error', text: 'Failed to delete image' });
       }
-    } catch (error: any) {
-      setMessage({ 
-        type: 'error', 
-        text: error.response?.data?.message || 'Failed to delete image. Make sure you are an admin.' 
-      });
-    } finally {
+    } 
+    catch (error: unknown) {
+      if (
+        typeof error === 'object' &&
+        error !== null &&
+        'response' in error &&
+        typeof (error as { response?: { data?: { message?: string } } }).response?.data?.message === 'string'
+      ) {
+        setMessage({
+          type: 'error',
+          text: (error as { response: { data: { message: string } } }).response.data.message,
+        });
+      } else {
+        setMessage({
+          type: 'error',
+          text: 'Failed to delete image. Make sure you are an admin.',
+        });
+      }
+    }
+    finally {
       setIsLoading(false);
     }
   };
@@ -150,25 +166,41 @@ export default function GroupImageManager({
       }
 
       const result = await selectGroupPresetAvatar(groupId, avatarId, token);
+      const group = result.data?.group;
       
-      if (result.success) {
+      if (result.success && group) {
         setMessage({ type: 'success', text: 'Group avatar selected successfully!' });
-        setGroup(result.data.group);
+        setGroup(group);
         setShowAvatarSelector(false);
         
         // Call onUploadSuccess callback if provided
-        if (onUploadSuccess && result.data.group.group_dp_url) {
-          onUploadSuccess(result.data.group.group_dp_url);
+        if (onUploadSuccess && group.group_dp_url) {
+          onUploadSuccess(group.group_dp_url);
         }
       } else {
         setMessage({ type: 'error', text: 'Failed to select avatar' });
       }
-    } catch (error: any) {
-      setMessage({ 
-        type: 'error', 
-        text: error.response?.data?.message || 'Failed to select avatar. Make sure you are an admin.' 
-      });
-    } finally {
+    } 
+    catch (error: unknown) {
+      if (
+        typeof error === 'object' &&
+        error !== null &&
+        'response' in error &&
+        typeof (error as { response?: { data?: { message?: string } } }).response?.data?.message === 'string'
+      ) {
+        setMessage({
+          type: 'error',
+          text: (error as { response: { data: { message: string } } }).response.data.message,
+        });
+      } else {
+        setMessage({
+          type: 'error',
+          text: 'Failed to select avatar. Make sure you are an admin.',
+        });
+      }
+    }
+    
+    finally {
       setIsLoading(false);
     }
   };
