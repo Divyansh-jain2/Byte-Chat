@@ -144,8 +144,13 @@
 - **Report Types**: Multiple report categories (harassment, spam, inappropriate content)
 - **Report Management**: View submitted reports and their status
 
-
-
+## Other
 - **Toast Notifications**: User feedback notifications
 - **My Identities**: View all anonymous identities
+
+## Customization & Personalization
+- **Bio Links**: Add links to social media in bio [insta, twitter, linkedin]
+- **User Profiles**: Rich user profiles with more information
+- **QR Code Profile**: Share profile via QR code
+
 

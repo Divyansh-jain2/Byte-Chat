@@ -19,6 +19,7 @@ export const profileController = {
         `SELECT 
           user_id, roll_no, name, gender, branch, 
           dp_url, dob, bio, is_verified, 
+          instagram_url, twitter_url, linkedin_url,
           created_at, updated_at
          FROM users 
          WHERE user_id = $1`,
@@ -47,7 +48,9 @@ export const profileController = {
       const result = await pool.query(
         `SELECT 
           user_id, roll_no, name, gender, branch, 
-          dp_url, dob, bio, created_at
+          dp_url, dob, bio, 
+          instagram_url, twitter_url, linkedin_url,
+          created_at
          FROM users 
          WHERE UPPER(roll_no) = UPPER($1) AND is_verified = TRUE AND is_active = TRUE`,
         [rollNo]
@@ -189,7 +192,7 @@ export const profileController = {
         });
       }
       const userId = req.user.userId;
-      const { dob, bio, dpUrl } = req.body;
+      const { dob, bio, dpUrl, instagramUrl, twitterUrl, linkedinUrl } = req.body;
 
       // Validate dob if provided
       if (dob) {
@@ -224,6 +227,24 @@ export const profileController = {
         params.push(dpUrl);
       }
 
+      if (instagramUrl !== undefined) {
+        paramCount++;
+        updates.push(`instagram_url = $${paramCount}`);
+        params.push(instagramUrl || null);
+      }
+
+      if (twitterUrl !== undefined) {
+        paramCount++;
+        updates.push(`twitter_url = $${paramCount}`);
+        params.push(twitterUrl || null);
+      }
+
+      if (linkedinUrl !== undefined) {
+        paramCount++;
+        updates.push(`linkedin_url = $${paramCount}`);
+        params.push(linkedinUrl || null);
+      }
+
       if (updates.length === 0) {
         throw new ApiError(400, 'No fields to update');
       }
@@ -233,7 +254,7 @@ export const profileController = {
         UPDATE users 
         SET ${updates.join(', ')}, updated_at = NOW()
         WHERE user_id = $${paramCount + 1}
-        RETURNING user_id, roll_no, name, gender, branch, dp_url, dob, bio, updated_at
+        RETURNING user_id, roll_no, name, gender, branch, dp_url, dob, bio, instagram_url, twitter_url, linkedin_url, updated_at
       `;
 
       const result = await pool.query(query, params);
@@ -257,7 +278,7 @@ export const profileController = {
         });
       }
       const userId = req.user.userId;
-      const { dob, bio, dpUrl } = req.body;
+      const { dob, bio, dpUrl, instagramUrl, twitterUrl, linkedinUrl } = req.body;
 
       // Validate dob if provided
       if (dob) {
@@ -296,6 +317,24 @@ export const profileController = {
         params.push(dpUrl);
       }
 
+      if (instagramUrl !== undefined) {
+        paramCount++;
+        updates.push(`instagram_url = $${paramCount}`);
+        params.push(instagramUrl || null);
+      }
+
+      if (twitterUrl !== undefined) {
+        paramCount++;
+        updates.push(`twitter_url = $${paramCount}`);
+        params.push(twitterUrl || null);
+      }
+
+      if (linkedinUrl !== undefined) {
+        paramCount++;
+        updates.push(`linkedin_url = $${paramCount}`);
+        params.push(linkedinUrl || null);
+      }
+
       if (updates.length === 0) {
         throw new ApiError(400, 'No fields to update');
       }
@@ -305,7 +344,7 @@ export const profileController = {
         UPDATE users 
         SET ${updates.join(', ')}, updated_at = NOW()
         WHERE user_id = $${paramCount + 1}
-        RETURNING user_id, roll_no, name, gender, branch, dp_url, dob, bio, updated_at
+        RETURNING user_id, roll_no, name, gender, branch, dp_url, dob, bio, instagram_url, twitter_url, linkedin_url, updated_at
       `;
 
       const result = await pool.query(query, params);

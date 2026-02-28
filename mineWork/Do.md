@@ -14,10 +14,6 @@
 - **Message Reactions**: React to messages with emojis (👍, ❤️, 😂, etc.)
 - **Reply/Quote**: Reply to specific messages with threading
 
-## Customization & Personalization
-- **Profile Customization**: Rich profile pages with more info
-- **Bio Links**: Add links to social media in bio
-
 ## Group Administration
 - **Invite Links/Codes**: Generate shareable invite links with expiry
 
@@ -42,10 +38,6 @@
 - **CDN Integration**: Serve static assets via CDN
 - **Redis Caching**: Cache frequently accessed data
 - **Database Optimization**: Query optimization and indexing
-
-## Social & Community Features
-- **User Profiles**: Rich user profiles with more information
-- **QR Code Profile**: Share profile via QR code
 
 # ################## SHELVED ########################
 
