@@ -1,23 +1,25 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import { SocketProvider } from "@/contexts/SocketContext";
 import { ToastProvider } from "@/contexts/ToastContext";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const inter = Inter({
+  variable: "--font-inter",
   subsets: ["latin"],
+  weight: ["400", "500", "600", "700", "800"],
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const jetbrainsMono = JetBrains_Mono({
+  variable: "--font-mono",
   subsets: ["latin"],
+  weight: ["400", "500"],
 });
 
 export const metadata: Metadata = {
-  title: "BYTE-CHAT - IIT Mandi",
-  description: "Student Portal for IIT Mandi",
+  title: "BYTE-CHAT — IIT Mandi",
+  description: "The exclusive messaging platform for IIT Mandi students.",
 };
 
 export default function RootLayout({
@@ -28,7 +30,8 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        className={`${inter.variable} ${jetbrainsMono.variable}`}
+        style={{ fontFamily: "var(--font-inter, 'Inter', sans-serif)" }}
       >
         <ThemeProvider>
           <SocketProvider>
@@ -41,3 +44,4 @@ export default function RootLayout({
     </html>
   );
 }
+

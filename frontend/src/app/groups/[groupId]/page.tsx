@@ -123,10 +123,11 @@ export default function GroupDetailsPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-neutral-50 dark:bg-neutral-950">
-        <div className="text-center">
-          <div className="w-16 h-16 border-4 border-neutral-300 dark:border-neutral-700 border-t-neutral-900 dark:border-t-neutral-100 rounded-sm animate-spin mx-auto mb-4"></div>
-          <p className="text-neutral-600 dark:text-neutral-400 font-mono">LOADING...</p>
+      <div className="min-h-screen bg-mesh-warm flex items-center justify-center">
+        <div className="text-center animate-fade-in">
+          <div className="w-16 h-16 rounded-full border-4 border-transparent mx-auto mb-4 animate-spin"
+            style={{ borderTopColor: 'var(--pink)', borderRightColor: 'var(--coral)' }} />
+          <p className="text-sm font-medium" style={{ color: 'var(--muted)' }}>Loading group…</p>
         </div>
       </div>
     );
@@ -134,219 +135,169 @@ export default function GroupDetailsPage() {
 
   if (error || !group) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-neutral-50 dark:bg-neutral-950">
-        <div className="text-center border-4 border-neutral-900 dark:border-neutral-100 p-8 bg-white dark:bg-black">
-          <p className="text-neutral-900 dark:text-neutral-100 text-lg mb-4 font-mono">
-            {error || 'Group not found'}
-          </p>
-          <Link
-            href="/dashboard"
-            className="inline-block px-6 py-3 bg-neutral-900 dark:bg-neutral-100 text-neutral-100 dark:text-neutral-900 font-mono font-bold border-2 border-neutral-900 dark:border-neutral-100 hover:bg-neutral-700 dark:hover:bg-neutral-300 transition-colors"
-          >
-            ← BACK TO DASHBOARD
-          </Link>
+      <div className="min-h-screen bg-mesh-warm flex items-center justify-center p-6">
+        <div className="glass-strong rounded-3xl p-12 text-center max-w-md animate-scale-in">
+          <div className="text-5xl mb-4">❌</div>
+          <h2 className="text-xl font-bold mb-2" style={{ color: 'var(--heading)' }}>{error || 'Group not found'}</h2>
+          <Link href="/dashboard" className="btn-romance mt-6 inline-block">← Back to Dashboard</Link>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-neutral-50 dark:bg-neutral-950">
-      {/* Header */}
-      <header className="border-b-4 border-neutral-900 dark:border-neutral-100 bg-white dark:bg-black">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="flex items-center gap-3 mb-2">
-                {group.group_dp_url ? (
-                  <Image
-                    src={group.group_dp_url}
-                    alt={group.group_name}
-                    width={32}
-                    height={32}
-                    className="object-cover border-2 border-neutral-900 dark:border-neutral-100"
-                  />
-                ) : (
-                  <div className="w-16 h-16 bg-neutral-200 dark:bg-neutral-800 border-2 border-neutral-900 dark:border-neutral-100 flex items-center justify-center font-mono font-bold text-neutral-900 dark:text-neutral-100">
-                    {group.group_name.charAt(0).toUpperCase()}
-                  </div>
-                )}
-                <h1 className="text-4xl font-bold text-neutral-900 dark:text-neutral-100 font-mono">
-                  {group.group_name.toUpperCase()}
-                </h1>
-                <span className={`px-3 py-1 text-sm font-mono font-bold border-2 border-neutral-900 dark:border-neutral-100 ${
-                  group.is_public 
-                    ? 'bg-green-200 dark:bg-green-800 text-green-900 dark:text-green-100'
-                    : 'bg-orange-200 dark:bg-orange-800 text-orange-900 dark:text-orange-100'
-                }`}>
-                  {group.is_public ? 'PUBLIC' : 'PRIVATE'}
-                </span>
-              </div>
-              <p className="text-neutral-600 dark:text-neutral-400 font-mono">
-                Created by {group.creator_name} ({group.creator_roll_no})
-              </p>
-            </div>
-            <div className="flex gap-2">
-              {group.is_member && (group.user_is_admin || group.user_is_owner) && (
-                <>
-                  <button
-                    onClick={() => setShowEditModal(true)}
-                    className="px-6 py-3 bg-blue-600 dark:bg-blue-500 text-white font-mono font-bold border-2 border-neutral-900 dark:border-neutral-100 hover:bg-blue-700 transition-colors"
-                  >
-                    EDIT GROUP
-                  </button>
-                  <Link
-                    href={`/groups/${groupId}/manage`}
-                    className="px-6 py-3 bg-purple-600 dark:bg-purple-500 text-white font-mono font-bold border-2 border-neutral-900 dark:border-neutral-100 hover:bg-purple-700 transition-colors"
-                  >
-                    MANAGE MEMBERS
-                  </Link>
-                </>
+    <div className="min-h-screen bg-mesh-warm antialiased">
+      {/* Blobs */}
+      <div className="fixed inset-0 pointer-events-none -z-10 overflow-hidden">
+        <div className="absolute top-[-10%] right-[-5%] w-96 h-96 bg-linear-to-br from-cyan-300/15 to-transparent rounded-full blur-3xl" />
+        <div className="absolute bottom-[-5%] left-[-3%] w-80 h-80 bg-linear-to-br from-blue-300/10 to-transparent rounded-full blur-3xl" />
+      </div>
+
+      {/* Nav */}
+      <header className="glass-nav sticky top-0 z-50 px-6 py-4">
+        <div className="max-w-5xl mx-auto flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3 min-w-0">
+            <Link href="/dashboard" className="btn-ghost px-3 py-2 text-sm shrink-0">← Back</Link>
+            <div className="flex items-center gap-3 min-w-0">
+              {group.group_dp_url ? (
+                <Image src={group.group_dp_url} alt={group.group_name} width={40} height={40}
+                  className="w-10 h-10 rounded-xl object-cover ring-2 ring-white/20 shrink-0" />
+              ) : (
+                <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold shrink-0"
+                  style={{ background: 'var(--grad-ocean)' }}>
+                  {group.group_name.charAt(0).toUpperCase()}
+                </div>
               )}
-              <Link
-                href="/dashboard"
-                className="px-6 py-3 bg-neutral-200 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 font-mono font-bold border-2 border-neutral-900 dark:border-neutral-100 hover:bg-neutral-300 dark:hover:bg-neutral-700 transition-colors"
-              >
-                ← BACK
-              </Link>
+              <div className="min-w-0">
+                <h1 className="text-lg font-bold truncate heading-romance">{group.group_name}</h1>
+                <p className="text-xs truncate" style={{ color: 'var(--muted)' }}>
+                  by {group.creator_name} · {group.member_count}/{group.max_members} members
+                </p>
+              </div>
             </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {group.is_member && (group.user_is_admin || group.user_is_owner) && (
+              <>
+                <button onClick={() => setShowEditModal(true)} className="btn-ghost px-4 py-2 text-sm">Edit</button>
+                <Link href={`/groups/${groupId}/manage`} className="btn-purple px-4 py-2 text-sm">Manage</Link>
+              </>
+            )}
           </div>
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Group Info */}
-        <div className="bg-white dark:bg-black border-4 border-neutral-900 dark:border-neutral-100 p-6 mb-6">
-          <h2 className="text-2xl font-bold text-neutral-900 dark:text-neutral-100 font-mono mb-4">
-            [GROUP INFORMATION]
-          </h2>
-          
-          {group.group_desc && (
-            <div className="mb-4">
-              <h3 className="text-sm font-bold text-neutral-600 dark:text-neutral-400 font-mono mb-2">DESCRIPTION</h3>
-              <p className="text-neutral-900 dark:text-neutral-100 font-mono">{group.group_desc}</p>
-            </div>
-          )}
+      <main className="max-w-5xl mx-auto px-6 py-8 space-y-6">
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="bg-neutral-50 dark:bg-neutral-950 border-2 border-neutral-900 dark:border-neutral-100 p-4">
-              <h3 className="text-sm font-bold text-neutral-600 dark:text-neutral-400 font-mono mb-2">MEMBERS</h3>
-              <p className="text-2xl font-bold text-neutral-900 dark:text-neutral-100 font-mono">
-                {group.member_count} / {group.max_members}
-              </p>
-            </div>
-            <div className="bg-neutral-50 dark:bg-neutral-950 border-2 border-neutral-900 dark:border-neutral-100 p-4">
-              <h3 className="text-sm font-bold text-neutral-600 dark:text-neutral-400 font-mono mb-2">CREATED</h3>
-              <p className="text-lg font-bold text-neutral-900 dark:text-neutral-100 font-mono">
-                {new Date(group.created_at).toLocaleDateString()}
-              </p>
-            </div>
-            <div className="bg-neutral-50 dark:bg-neutral-950 border-2 border-neutral-900 dark:border-neutral-100 p-4">
-              <h3 className="text-sm font-bold text-neutral-600 dark:text-neutral-400 font-mono mb-2">TYPE</h3>
-              <p className="text-lg font-bold text-neutral-900 dark:text-neutral-100 font-mono">
-                {group.is_public ? 'PUBLIC' : 'PRIVATE'}
-              </p>
+        {/* Group Info Card */}
+        <div className="glass-strong rounded-3xl p-7 animate-fade-in">
+          <div className="flex items-start justify-between gap-4 mb-6">
+            <div className="flex items-center gap-4">
+              {group.group_dp_url ? (
+                <Image src={group.group_dp_url} alt={group.group_name} width={72} height={72}
+                  className="w-18 h-18 rounded-2xl object-cover ring-2 ring-white/20 shrink-0" />
+              ) : (
+                <div className="w-18 h-18 rounded-2xl flex items-center justify-center text-3xl font-bold text-white shrink-0"
+                  style={{ background: 'var(--grad-ocean)', width: 72, height: 72 }}>
+                  {group.group_name.charAt(0).toUpperCase()}
+                </div>
+              )}
+              <div>
+                <div className="flex items-center gap-2 flex-wrap mb-1">
+                  <h2 className="text-2xl font-bold" style={{ color: 'var(--heading)' }}>{group.group_name}</h2>
+                  <span className={`px-3 py-0.5 rounded-full text-xs font-semibold ${
+                    group.is_public ? 'bg-emerald-500/15 text-emerald-400' : 'bg-orange-500/15 text-orange-400'
+                  }`}>
+                    {group.is_public ? '🌐 Public' : '🔒 Private'}
+                  </span>
+                </div>
+                {group.group_desc && (
+                  <p className="text-sm" style={{ color: 'var(--muted)' }}>{group.group_desc}</p>
+                )}
+              </div>
             </div>
           </div>
 
+          {/* Stats */}
+          <div className="grid grid-cols-3 gap-3 mb-6">
+            {[
+              { label: 'Members', value: `${group.member_count}/${group.max_members}` },
+              { label: 'Created', value: new Date(group.created_at).toLocaleDateString() },
+              { label: 'Type', value: group.is_public ? 'Public' : 'Private' },
+            ].map(s => (
+              <div key={s.label} className="glass rounded-2xl p-4 text-center">
+                <p className="text-base font-bold mb-0.5" style={{ color: 'var(--heading)' }}>{s.value}</p>
+                <p className="text-xs" style={{ color: 'var(--muted)' }}>{s.label}</p>
+              </div>
+            ))}
+          </div>
+
           {/* Action Buttons */}
-          <div className="mt-6 flex gap-2 flex-wrap">
+          <div className="flex gap-3 flex-wrap">
             {!group.is_member && group.is_public && (
               <>
-                <button
-                  onClick={() => handleJoinGroup(false)}
-                  className="px-6 py-3 bg-neutral-900 dark:bg-neutral-100 text-neutral-100 dark:text-neutral-900 font-mono font-bold border-2 border-neutral-900 dark:border-neutral-100 hover:bg-neutral-700 dark:hover:bg-neutral-300 transition-colors"
-                >
-                  JOIN GROUP
+                <button onClick={() => handleJoinGroup(false)} className="btn-romance px-6 py-3 text-sm font-semibold flex items-center gap-2">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
+                  </svg>
+                  Join Group
                 </button>
-                <button
-                  onClick={() => handleJoinGroup(true)}
-                  className="px-6 py-3 bg-linear-to-r from-neutral-600 to-neutral-800 dark:from-neutral-400 dark:to-neutral-200 text-neutral-100 dark:text-neutral-900 font-mono font-bold border-2 border-neutral-900 dark:border-neutral-100 hover:from-neutral-700 hover:to-neutral-900 transition-all"
-                >
-                  JOIN ANONYMOUSLY
+                <button onClick={() => handleJoinGroup(true)} className="btn-purple px-6 py-3 text-sm font-semibold flex items-center gap-2">
+                  🎭 Join Anonymously
                 </button>
               </>
             )}
             {group.is_member && (
               <>
-                <Link
-                  href={`/groups/${groupId}/chat`}
-                  className="px-6 py-3 bg-neutral-900 dark:bg-neutral-100 text-neutral-100 dark:text-neutral-900 font-mono font-bold border-2 border-neutral-900 dark:border-neutral-100 hover:bg-neutral-700 dark:hover:bg-neutral-300 transition-colors"
-                >
-                  OPEN CHAT
+                <Link href={`/groups/${groupId}/chat`} className="btn-romance px-6 py-3 text-sm font-semibold flex items-center gap-2">
+                  💬 Open Chat
                 </Link>
-                <button
-                  onClick={handleLeaveGroup}
-                  className="px-6 py-3 bg-red-600 text-white font-mono font-bold border-2 border-neutral-900 dark:border-neutral-100 hover:bg-red-700 transition-colors"
-                >
-                  LEAVE GROUP
+                <button onClick={handleLeaveGroup} className="px-6 py-3 rounded-2xl text-sm font-semibold glass transition-all hover:scale-105 flex items-center gap-2" style={{ color: '#EF4444' }}>
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                  </svg>
+                  Leave Group
                 </button>
               </>
             )}
-            {/* Report Button - Available to everyone viewing the group */}
             {group && (
-              <ReportGroupButton 
-                groupId={group.group_id}
-                groupName={group.group_name}
-              />
+              <ReportGroupButton groupId={group.group_id} groupName={group.group_name} />
             )}
           </div>
         </div>
 
-        {/* Members List (only if user is a member) */}
+        {/* Members List */}
         {group.is_member && members.length > 0 && (
-          <div className="bg-white dark:bg-black border-4 border-neutral-900 dark:border-neutral-100 p-6">
-            <h2 className="text-2xl font-bold text-neutral-900 dark:text-neutral-100 font-mono mb-4">
-              [MEMBERS] ({members.length})
+          <div className="glass-strong rounded-3xl p-7 animate-fade-in" style={{ animationDelay: '100ms' }}>
+            <h2 className="text-xl font-bold mb-6 flex items-center gap-2" style={{ color: 'var(--heading)' }}>
+              <span>👥</span> Members <span className="text-base font-normal" style={{ color: 'var(--muted)' }}>({members.length})</span>
             </h2>
-
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {members.map((member) => (
-                <div
-                  key={member.member_id}
-                  className="bg-neutral-50 dark:bg-neutral-950 border-2 border-neutral-900 dark:border-neutral-100 p-4"
-                >
-                  <div className="flex items-start gap-3">
-                    {member.dp_url ? (
-                      <Image
-                        src={member.dp_url}
-                        alt={member.name}
-                        width={32}
-                        height={32}
-                        className="border-2 border-neutral-900 dark:border-neutral-100 object-cover"
-                      />
+                <div key={member.member_id} className="glass rounded-2xl p-4">
+                  <div className="flex items-center gap-3">
+                    {member.dp_url && !member.is_anonymous ? (
+                      <Image src={member.dp_url} alt={member.name} width={44} height={44}
+                        className="w-11 h-11 rounded-full object-cover ring-2 ring-white/20 shrink-0" />
                     ) : (
-                      <div className="w-12 h-12 border-2 border-neutral-900 dark:border-neutral-100 bg-neutral-300 dark:bg-neutral-700 flex items-center justify-center text-neutral-900 dark:text-neutral-100 font-bold font-mono text-xl">
+                      <div className="w-11 h-11 rounded-full flex items-center justify-center text-white font-bold text-base shrink-0"
+                        style={{ background: member.is_anonymous ? 'var(--grad-mystery)' : 'var(--grad-romance)' }}>
                         {(member.is_anonymous ? member.anonymous_name : member.name)?.charAt(0).toUpperCase()}
                       </div>
                     )}
-                    
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap mb-1">
-                        <span className="font-bold text-neutral-900 dark:text-neutral-100 font-mono truncate">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5 flex-wrap mb-0.5">
+                        <span className="font-semibold text-sm truncate" style={{ color: 'var(--heading)' }}>
                           {member.is_anonymous ? member.anonymous_name : member.name}
                         </span>
-                        {member.is_owner && (
-                          <span className="px-2 py-0.5 bg-purple-200 dark:bg-purple-800 text-purple-900 dark:text-purple-100 text-xs font-mono font-bold border border-neutral-900 dark:border-neutral-100">
-                            OWNER
-                          </span>
-                        )}
-                        {member.is_admin && !member.is_owner && (
-                          <span className="px-2 py-0.5 bg-blue-200 dark:bg-blue-800 text-blue-900 dark:text-blue-100 text-xs font-mono font-bold border border-neutral-900 dark:border-neutral-100">
-                            ADMIN
-                          </span>
-                        )}
-                        {member.is_anonymous && (
-                          <span className="px-2 py-0.5 bg-gray-200 dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-xs font-mono font-bold border border-neutral-900 dark:border-neutral-100">
-                            ANON
-                          </span>
-                        )}
+                        {member.is_owner && <span className="px-1.5 py-0.5 rounded text-xs bg-purple-500/15 text-purple-400">👑</span>}
+                        {member.is_admin && !member.is_owner && <span className="px-1.5 py-0.5 rounded text-xs bg-blue-500/15 text-blue-400">🛡️</span>}
+                        {member.is_anonymous && <span className="px-1.5 py-0.5 rounded text-xs bg-white/10 text-gray-400">🎭</span>}
                       </div>
-                      <p className="text-xs text-neutral-600 dark:text-neutral-400 font-mono">
-                        {member.is_anonymous 
-                          ? `${member.anonymous_gender?.toUpperCase()} • Anonymous`
-                          : `${member.roll_no} • ${member.branch}`
-                        }
+                      <p className="text-xs truncate" style={{ color: 'var(--muted)' }}>
+                        {member.is_anonymous
+                          ? `${member.anonymous_gender} · Anonymous`
+                          : `${member.roll_no} · ${member.branch}`}
                       </p>
                     </div>
                   </div>
@@ -357,30 +308,23 @@ export default function GroupDetailsPage() {
         )}
       </main>
 
-      {/* Edit Group Modal */}
+      {/* Edit Modal */}
       {showEditModal && group && (
         <EditGroupModal
           group={group}
           onClose={() => setShowEditModal(false)}
-          onSuccess={() => {
-            setShowEditModal(false);
-            fetchGroupData();
-          }}
+          onSuccess={() => { setShowEditModal(false); fetchGroupData(); }}
         />
       )}
     </div>
   );
 }
 
-// Edit Group Modal Component
-function EditGroupModal({ 
-  group, 
-  onClose, 
-  onSuccess 
-}: { 
-  group: GroupDetails; 
-  onClose: () => void; 
-  onSuccess: () => void;
+// Edit Group Modal
+function EditGroupModal({
+  group, onClose, onSuccess
+}: {
+  group: GroupDetails; onClose: () => void; onSuccess: () => void;
 }) {
   const [formData, setFormData] = useState({
     group_name: group.group_name,
@@ -393,113 +337,67 @@ function EditGroupModal({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
-    setError('');
-
+    setLoading(true); setError('');
     try {
       await groupService.updateGroup(group.group_id, formData);
       onSuccess();
-    } 
-    catch (err: unknown) {
+    } catch (err: unknown) {
       let errorMsg = 'Failed to update group';
       if (typeof err === 'object' && err !== null && 'message' in err && typeof (err as { message?: string }).message === 'string') {
         errorMsg = (err as { message: string }).message;
       }
       setError(errorMsg);
-    }
-    finally {
+    } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white dark:bg-black border-4 border-neutral-900 dark:border-neutral-100 max-w-md w-full p-6">
-        <h2 className="text-2xl font-bold text-neutral-900 dark:text-neutral-100 mb-4 font-mono">
-          [EDIT GROUP]
-        </h2>
-        
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="glass-strong rounded-3xl p-8 max-w-md w-full animate-scale-in">
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-xl font-bold heading-romance">Edit Group</h2>
+          <button onClick={onClose} className="btn-ghost w-9 h-9 rounded-full flex items-center justify-center">✕</button>
+        </div>
         {error && (
-          <div className="mb-4 p-3 bg-red-100 dark:bg-red-900 border-2 border-red-600 text-red-900 dark:text-red-100 font-mono text-sm">
-            {error}
-          </div>
+          <div className="glass rounded-2xl p-3 mb-5 border border-red-400/30 bg-red-500/10 text-red-400 text-sm">{error}</div>
         )}
-
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-bold text-neutral-900 dark:text-neutral-100 mb-2 font-mono">
-              GROUP NAME*
-            </label>
-            <input
-              type="text"
-              required
-              value={formData.group_name}
+            <label className="block text-sm font-medium mb-2" style={{ color: 'var(--body)' }}>Group Name*</label>
+            <input type="text" required value={formData.group_name}
               onChange={(e) => setFormData({ ...formData, group_name: e.target.value })}
-              className="w-full px-4 py-2 border-2 border-neutral-900 dark:border-neutral-100 bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 font-mono focus:outline-none focus:ring-4 focus:ring-neutral-400"
-            />
+              className="input-romance w-full" />
           </div>
-
           <div>
-            <label className="block text-sm font-bold text-neutral-900 dark:text-neutral-100 mb-2 font-mono">
-              DESCRIPTION
-            </label>
-            <textarea
-              value={formData.group_desc}
+            <label className="block text-sm font-medium mb-2" style={{ color: 'var(--body)' }}>Description</label>
+            <textarea value={formData.group_desc}
               onChange={(e) => setFormData({ ...formData, group_desc: e.target.value })}
-              className="w-full px-4 py-2 border-2 border-neutral-900 dark:border-neutral-100 bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 font-mono focus:outline-none focus:ring-4 focus:ring-neutral-400"
-              rows={3}
-            />
+              className="input-romance w-full resize-none" rows={3} />
           </div>
-
           <div>
-            <label className="block text-sm font-bold text-neutral-900 dark:text-neutral-100 mb-2 font-mono">
-              GROUP DISPLAY PICTURE
-            </label>
+            <label className="block text-sm font-medium mb-2" style={{ color: 'var(--body)' }}>Group Picture</label>
             <GroupImageManager
               groupId={group.group_id}
               isAdmin={group.user_is_admin || group.user_is_owner}
               currentImageUrl={formData.group_dp_url || undefined}
-              onUploadSuccess={(url: string) => {
-                setFormData({ ...formData, group_dp_url: url });
-              }}
-              onDeleteSuccess={() => {
-                setFormData({ ...formData, group_dp_url: '' });
-              }}
+              onUploadSuccess={(url: string) => setFormData({ ...formData, group_dp_url: url })}
+              onDeleteSuccess={() => setFormData({ ...formData, group_dp_url: '' })}
             />
           </div>
-
           <div>
-            <label className="block text-sm font-bold text-neutral-900 dark:text-neutral-100 mb-2 font-mono">
-              MAX MEMBERS (2-500)
+            <label className="block text-sm font-medium mb-2" style={{ color: 'var(--body)' }}>
+              Max Members (2–500)
             </label>
-            <input
-              type="number"
-              required
-              min={group.member_count}
-              max={500}
-              value={formData.max_members}
+            <input type="number" required min={group.member_count} max={500} value={formData.max_members}
               onChange={(e) => setFormData({ ...formData, max_members: parseInt(e.target.value) })}
-              className="w-full px-4 py-2 border-2 border-neutral-900 dark:border-neutral-100 bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 font-mono focus:outline-none focus:ring-4 focus:ring-neutral-400"
-            />
-            <p className="text-xs text-neutral-500 dark:text-neutral-400 font-mono mt-1">
-              Current members: {group.member_count}
-            </p>
+              className="input-romance w-full" />
+            <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>Current members: {group.member_count}</p>
           </div>
-
-          <div className="flex gap-2 mt-6">
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex-1 px-4 py-3 bg-neutral-200 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 font-mono font-bold border-2 border-neutral-900 dark:border-neutral-100 hover:bg-neutral-300 dark:hover:bg-neutral-700 transition-colors"
-            >
-              CANCEL
-            </button>
-            <button
-              type="submit"
-              disabled={loading}
-              className="flex-1 px-4 py-3 bg-neutral-900 dark:bg-neutral-100 text-neutral-100 dark:text-neutral-900 font-mono font-bold border-2 border-neutral-900 dark:border-neutral-100 hover:bg-neutral-700 dark:hover:bg-neutral-300 transition-colors disabled:opacity-50"
-            >
-              {loading ? 'SAVING...' : 'SAVE'}
+          <div className="flex gap-3 pt-2">
+            <button type="button" onClick={onClose} className="btn-ghost flex-1">Cancel</button>
+            <button type="submit" disabled={loading} className="btn-romance flex-1">
+              {loading ? 'Saving…' : 'Save Changes'}
             </button>
           </div>
         </form>

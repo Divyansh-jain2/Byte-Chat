@@ -1,0 +1,43 @@
+/* Dashboard Page Specific Styles - Modular & Independent */
+
+.dashboard-search-input {
+  width: 14rem; /* 56 = w-56 */
+  padding: 0.625rem 1rem 0.625rem 2.75rem; /* py-2.5 + pl-11 */
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(10px);
+  border: 1.5px solid rgba(0, 0, 0, 0.25);
+  border-radius: 1rem;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: var(--heading);
+  transition: all 0.2s ease;
+  outline: none;
+}
+
+/* Dark theme - adjust for better visibility */
+html[data-theme="dark"] .dashboard-search-input,
+.dark .dashboard-search-input {
+  border-color: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.dashboard-search-input:focus {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(236, 72, 153, 0.4);
+  box-shadow: 0 0 0 3px rgba(236, 72, 153, 0.1);
+}
+
+.dashboard-search-input::placeholder {
+  color: var(--muted);
+  opacity: 0.6;
+}
+
+/* Search icon positioning */
+.dashboard-search-icon {
+  position: absolute;
+  left: 0.875rem; /* 14px from left */
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+  z-index: 1;
+}

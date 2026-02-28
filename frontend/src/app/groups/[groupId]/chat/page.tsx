@@ -318,254 +318,179 @@ const handleSendMessage = async (e: React.FormEvent) => {
 
 if (loading) {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-neutral-50 dark:bg-neutral-950">
-      <div className="text-center">
-        <div className="w-16 h-16 border-4 border-neutral-300 dark:border-neutral-700 border-t-neutral-900 dark:border-t-neutral-100 rounded-sm animate-spin mx-auto mb-4"></div>
-        <p className="text-neutral-600 dark:text-neutral-400 font-mono">LOADING...</p>
+    <div className="h-screen bg-mesh-warm flex items-center justify-center">
+      <div className="text-center animate-fade-in">
+        <div className="w-16 h-16 rounded-full border-4 border-transparent mx-auto mb-4 animate-spin"
+          style={{ borderTopColor: 'var(--pink)', borderRightColor: 'var(--coral)' }} />
+        <p className="text-sm font-medium" style={{ color: 'var(--muted)' }}>Loading chat…</p>
       </div>
     </div>
   );
 }
 
 return (
-  <div className="min-h-screen bg-neutral-50 dark:bg-neutral-950 flex flex-col">
-    <header className="border-b-4 border-neutral-900 dark:border-neutral-100 bg-white dark:bg-black p-4">
-      <div className="max-w-5xl mx-auto flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-neutral-900 dark:text-neutral-100 font-mono">[GROUP CHAT]</h1>
-        <div className="flex gap-2">
-          <Link
-            href={`/groups/${groupId}`}
-            className="px-4 py-2 bg-neutral-200 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 font-mono font-bold border-2 border-neutral-900 dark:border-neutral-100 hover:bg-neutral-300 dark:hover:bg-neutral-700 transition-colors"
-          >
-            VIEW GROUP
-          </Link>
-          <Link
-            href="/dashboard"
-            className="px-4 py-2 bg-neutral-200 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 font-mono font-bold border-2 border-neutral-900 dark:border-neutral-100 hover:bg-neutral-300 dark:hover:bg-neutral-700 transition-colors"
-          >
-            BACK
-          </Link>
+  <div className="h-screen bg-mesh-warm antialiased flex flex-col">
+    {/* Fixed blob */}
+    <div className="fixed inset-0 pointer-events-none -z-10 overflow-hidden">
+      <div className="absolute top-[-10%] right-[-5%] w-80 h-80 bg-linear-to-br from-cyan-300/10 to-transparent rounded-full blur-3xl" />
+    </div>
+
+    {/* Chat Header */}
+    <header className="glass-nav shrink-0 px-4 py-3 flex items-center justify-between z-20">
+      <div className="flex items-center gap-3">
+        <Link href={`/groups/${groupId}`} className="btn-ghost w-9 h-9 rounded-full flex items-center justify-center text-lg">←</Link>
+        <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold shrink-0"
+          style={{ background: 'var(--grad-ocean)' }}>
+          👥
         </div>
+        <div>
+          <p className="font-semibold text-sm" style={{ color: 'var(--heading)' }}>Group Chat</p>
+          <p className="text-xs" style={{ color: 'var(--muted)' }}>
+            {messages.length > 0 ? `${messages.length} messages` : 'No messages yet'}
+          </p>
+        </div>
+      </div>
+      <div className="flex items-center gap-2">
+        <button
+          onClick={() => setShowCreatePoll(!showCreatePoll)}
+          className={`btn-ghost px-3 py-1.5 text-xs font-semibold flex items-center gap-1.5 ${showCreatePoll ? 'text-blue-400' : ''}`}
+        >
+          📊 {showCreatePoll ? 'Hide Poll' : 'Poll'}
+        </button>
+        <Link href="/dashboard" className="btn-ghost px-3 py-1.5 text-xs">Dashboard</Link>
       </div>
     </header>
 
-    <main className="flex-1 max-w-5xl mx-auto w-full p-4">
-      <div className="mb-4 flex gap-2">
-        <button
-          onClick={() => setShowCreatePoll(!showCreatePoll)}
-          className="px-4 py-2 bg-blue-600 dark:bg-blue-500 text-white font-mono font-bold border-2 border-neutral-900 dark:border-neutral-100 hover:bg-blue-700 transition-colors"
-        >
-          {showCreatePoll ? 'HIDE POLL' : '+ POLL'}
-        </button>
+    {/* Poll Panel (collapsible) */}
+    {showCreatePoll && (
+      <div className="shrink-0 px-4 pt-3">
+        <QuickPollForm groupId={groupId} onSuccess={() => { setShowCreatePoll(false); fetchPolls(); }} />
       </div>
+    )}
 
-      {/* Create Poll Form */}
-      {showCreatePoll && <QuickPollForm groupId={groupId} onSuccess={() => { setShowCreatePoll(false); fetchPolls(); }} />}
-
-      {/* Active Polls Section */}
-      <div className="bg-white dark:bg-black border-4 border-neutral-900 dark:border-neutral-100 p-4 mb-4">
-        {polls.length > 0 && (
-            <div className="mb-6 space-y-3">
-              {polls.map((poll) => (
-                <div key={poll.poll_id} className="bg-blue-50 dark:bg-blue-950 border-2 border-blue-600 dark:border-blue-400 p-3">
-                  <div className="flex items-start gap-2 mb-2">
-                    <span className="text-lg">📊</span>
-                    <div className="flex-1">
-                      <h4 className="font-bold text-neutral-900 dark:text-neutral-100 font-mono text-sm">
-                        {poll.title}
-                      </h4>
-                      {poll.description && (
-                        <p className="text-xs text-neutral-600 dark:text-neutral-400 font-mono mt-1">
-                          {poll.description}
-                        </p>
-                      )}
-                    </div>
-                    <span className={`px-2 py-0.5 text-xs font-mono font-bold border border-neutral-900 dark:border-neutral-100 ${
-                      poll.status === 'active' ? 'bg-green-200 text-green-900' :
-                      poll.status === 'passed' ? 'bg-blue-200 text-blue-900' :
-                      'bg-red-200 text-red-900'
-                    }`}>
-                      {poll.status.toUpperCase()}
-                    </span>
-                  </div>
-
-                  {/* Vote Progress */}
-                  <div className="my-2">
-                    <div className="h-3 border border-neutral-900 dark:border-neutral-100 flex overflow-hidden">
-                      <div 
-                        className="bg-green-500"
-                        style={{ width: `${(poll.votes_for / poll.total_voters) * 100}%` }}
-                      />
-                      <div 
-                        className="bg-red-500"
-                        style={{ width: `${(poll.votes_against / poll.total_voters) * 100}%` }}
-                        />
-                    </div>
+    {/* Active Polls */}
+    {polls.length > 0 && (
+      <div className="shrink-0 px-4 pt-2 space-y-2 max-h-48 overflow-y-auto">
+        {polls.map((poll) => (
+          <div key={poll.poll_id} className="glass rounded-2xl p-3">
+            <div className="flex items-start justify-between gap-2 mb-2">
+              <div className="flex items-center gap-2">
+                <span className="text-base">📊</span>
+                <p className="text-sm font-semibold" style={{ color: 'var(--heading)' }}>{poll.title}</p>
               </div>
-
-              <div className="flex justify-between text-xs font-mono mt-1">
-                <span className="text-green-700 dark:text-green-300">FOR: {poll.votes_for}</span>
-                <span className="text-neutral-600 dark:text-neutral-400">
-                  {poll.votes_for + poll.votes_against}/{poll.total_voters}
-                </span>
-                <span className="text-red-700 dark:text-red-300">AGAINST: {poll.votes_against}</span>
-              </div>
-              
-            {showCreatePoll && <QuickPollForm groupId={groupId} onSuccess={() => { setShowCreatePoll(false); fetchPolls(); }} />}
-
-            {/* Vote Buttons */}
+              <span className={`px-2 py-0.5 rounded-full text-xs font-semibold shrink-0 ${
+                poll.status === 'active' ? 'bg-emerald-500/15 text-emerald-400' :
+                poll.status === 'passed' ? 'bg-blue-500/15 text-blue-400' :
+                'bg-red-500/15 text-red-400'
+              }`}>{poll.status}</span>
+            </div>
+            {/* Progress bar */}
+            <div className="h-2 rounded-full overflow-hidden my-2" style={{ background: 'var(--glass-bg)' }}>
+              <div className="h-full bg-linear-to-r from-emerald-500 to-emerald-400 rounded-full"
+                style={{ width: `${(poll.votes_for / Math.max(poll.total_voters, 1)) * 100}%` }} />
+            </div>
+            <div className="flex justify-between text-xs mb-2" style={{ color: 'var(--muted)' }}>
+              <span className="text-emerald-400">{poll.votes_for} for</span>
+              <span>{poll.votes_for + poll.votes_against}/{poll.total_voters}</span>
+              <span className="text-red-400">{poll.votes_against} against</span>
+            </div>
             {poll.status === 'active' && (
-              <div className="flex gap-2 mt-2">
-                <button
-                  onClick={() => handleVote(poll.poll_id, true)}
-                  disabled={poll.has_voted && poll.user_vote === true}
-                  className={`flex-1 px-3 py-1 text-xs font-mono font-bold border border-neutral-900 dark:border-neutral-100 ${
-                    poll.has_voted && poll.user_vote === true
-                      ? 'bg-green-600 text-white cursor-default'
-                      : 'bg-green-200 text-green-900 hover:bg-green-300'
-                  }`}
-                >
-                  ✓ FOR
-                </button>
-                <button
-                  onClick={() => handleVote(poll.poll_id, false)}
-                  disabled={poll.has_voted && poll.user_vote === false}
-                  className={`flex-1 px-3 py-1 text-xs font-mono font-bold border border-neutral-900 dark:border-neutral-100 ${
-                    poll.has_voted && poll.user_vote === false
-                      ? 'bg-red-600 text-white cursor-default'
-                      : 'bg-red-200 text-red-900 hover:bg-red-300'
-                  }`}
-                >
-                  ✗ AGAINST
-                </button>
+              <div className="flex gap-2">
+                <button onClick={() => handleVote(poll.poll_id, true)} disabled={poll.has_voted && poll.user_vote === true}
+                  className={`flex-1 py-1 rounded-xl text-xs font-semibold transition-all ${
+                    poll.has_voted && poll.user_vote === true ? 'bg-emerald-500 text-white' : 'bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25'
+                  }`}>✓ For</button>
+                <button onClick={() => handleVote(poll.poll_id, false)} disabled={poll.has_voted && poll.user_vote === false}
+                  className={`flex-1 py-1 rounded-xl text-xs font-semibold transition-all ${
+                    poll.has_voted && poll.user_vote === false ? 'bg-red-500 text-white' : 'bg-red-500/15 text-red-400 hover:bg-red-500/25'
+                  }`}>✗ Against</button>
               </div>
             )}
-            <div className="text-xs text-neutral-500 dark:text-neutral-400 font-mono mt-1">
-              Expires: {new Date(poll.expires_at).toLocaleString()}
-            </div>
           </div>
         ))}
       </div>
     )}
-  </div>
 
-  {/* Messages */}
-  <div className="bg-white dark:bg-black border-4 border-neutral-900 dark:border-neutral-100 p-4 h-[70vh] overflow-y-auto mt-4">
-          {messages.length === 0 ? (
-            <div className="text-center text-neutral-500 dark:text-neutral-400 font-mono mt-10">
-              No messages yet. Start the conversation!
-            </div>
-          ) : (
-            messages.map((msg) => (
-              <div key={msg.message_id} className={`mb-4 ${msg.is_my_message ? 'text-right' : 'text-left'}`}>
-                <div className="inline-block max-w-[80%]">
-                  {!msg.is_my_message && (
-                    <div className="text-xs text-neutral-500 dark:text-neutral-400 font-mono mb-1">
-                      {msg.sender?.name || 'Unknown'}
-                    </div>
-                  )}
-                  <div className={`px-4 py-2 border-2 border-neutral-900 dark:border-neutral-100 font-mono text-sm ${msg.is_my_message ? 'bg-neutral-900 text-neutral-100 dark:bg-neutral-100 dark:text-neutral-900' : 'bg-neutral-100 dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100'}`}>
-                    {/* Display Image if message type is image */}
-                    {msg.message_type === 'image' && msg.media_url && (
-                      <div className="mb-2">
-                        <Image
-                          src={msg.media_url}
-                          alt="Shared image"
-                          width={400} // Adjust as needed or make dynamic
-                          height={300} // Adjust as needed or make dynamic
-                          className="max-w-full rounded cursor-pointer hover:opacity-90"
-                          onClick={() => window.open(msg.media_url, '_blank')}
-                          style={{ objectFit: 'contain', cursor: 'pointer' }}
-                        />
-                      </div>
-                    )}
-                    {msg.encrypted_content}
-                  </div>
-                </div>
-              </div>
-            ))
-          )}
-          <div ref={messagesEndRef} />
+    {/* Messages */}
+    <div className="flex-1 overflow-y-auto px-4 py-4 space-y-2 custom-scrollbar">
+      {messages.length === 0 ? (
+        <div className="h-full flex items-center justify-center">
+          <div className="text-center animate-fade-in">
+            <div className="text-4xl mb-3">💬</div>
+            <p className="text-sm" style={{ color: 'var(--muted)' }}>No messages yet. Start the conversation!</p>
+          </div>
         </div>
-
-        <form onSubmit={handleSendMessage} className="mt-4 flex gap-2 relative">
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            onChange={handleImageSelect}
-            className="hidden"
-          />
-          
-          {imagePreview && (
-            <div className="absolute bottom-20 left-4 bg-white dark:bg-black border-2 border-neutral-900 dark:border-neutral-100 p-2">
-              <Image
-                src={imagePreview}
-                alt="Preview"
-                width={256} 
-                height={128}
-                className="max-w-xs max-h-32"
-              />
-              <button
-                type="button"
-                onClick={handleRemoveImage}
-                className="mt-1 px-2 py-1 bg-red-600 text-white font-mono text-xs hover:bg-red-700"
-              >
-                REMOVE
-              </button>
+      ) : (
+        messages.map((msg) => (
+          <div key={msg.message_id} className={`flex ${msg.is_my_message ? 'justify-end' : 'justify-start'}`}>
+            <div className={`max-w-[75%] ${msg.is_my_message ? 'bubble-sent' : 'bubble-received'}`}>
+              {!msg.is_my_message && msg.sender && (
+                <p className="text-xs font-semibold mb-1.5 opacity-80">
+                  {msg.sender.name || 'Unknown'}
+                  {msg.sender.is_anonymous && <span className="ml-1.5 text-[10px] opacity-60">(Anon)</span>}
+                </p>
+              )}
+              {msg.message_type === 'image' && msg.media_url && (
+                <div className="mb-2 -mx-1">
+                  <Image src={msg.media_url} alt="Shared image" width={300} height={200}
+                    className="max-w-full rounded-xl cursor-pointer hover:opacity-90 transition-opacity"
+                    onClick={() => window.open(msg.media_url, '_blank')}
+                    style={{ objectFit: 'contain' }} />
+                </div>
+              )}
+              {msg.encrypted_content && (
+                <p className="whitespace-pre-wrap wrap-break-word leading-relaxed">{msg.encrypted_content}</p>
+              )}
             </div>
-          )}
-
-          {/* Emoji Picker */}
-          {showEmojiPicker && (
-            <div ref={emojiPickerRef} className="absolute bottom-20 left-20 z-50">
-              <EmojiPicker
-                onEmojiClick={handleEmojiSelect}
-                autoFocusSearch={false}
-                theme={typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches ? Theme.DARK : Theme.LIGHT}
-              />
-            </div>
-          )}
-          
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={sending || uploadingImage}
-            className="px-4 py-3 border-2 border-neutral-900 dark:border-neutral-100 bg-white dark:bg-black text-neutral-900 dark:text-neutral-100 font-mono hover:bg-neutral-100 dark:hover:bg-neutral-900 disabled:opacity-50"
-            title="Upload image"
-          >
-            📎
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-            disabled={sending || uploadingImage}
-            className="px-4 py-3 border-2 border-neutral-900 dark:border-neutral-100 bg-white dark:bg-black text-neutral-900 dark:text-neutral-100 font-mono hover:bg-neutral-100 dark:hover:bg-neutral-900 disabled:opacity-50"
-            title="Add emoji"
-          >
-            😊
-          </button>
-          
-          <input
-            ref={messageInputRef}
-            type="text"
-            value={newMessage}
-            onChange={(e) => setNewMessage(e.target.value)}
-            placeholder="Type a message..."
-            className="flex-1 px-4 py-3 border-2 border-neutral-900 dark:border-neutral-100 bg-white dark:bg-black text-neutral-900 dark:text-neutral-100 font-mono focus:outline-none"
-          />
-          <button
-            type="submit"
-            disabled={sending || uploadingImage}
-            className="px-6 py-3 bg-neutral-900 dark:bg-neutral-100 text-neutral-100 dark:text-neutral-900 font-mono font-bold border-2 border-neutral-900 dark:border-neutral-100 hover:bg-neutral-700 dark:hover:bg-neutral-300 transition-colors disabled:opacity-50"
-          >
-            {uploadingImage ? 'UPLOADING...' : sending ? 'SENDING...' : 'SEND'}
-          </button>
-        </form>
-      </main>
+          </div>
+        ))
+      )}
+      <div ref={messagesEndRef} />
     </div>
-  );
+
+    {/* Image preview */}
+    {imagePreview && (
+      <div className="shrink-0 px-4 pb-2">
+        <div className="glass rounded-2xl p-3 flex items-center gap-3">
+          <Image src={imagePreview} alt="Preview" width={80} height={60}
+            className="rounded-xl object-contain shrink-0" />
+          <div className="flex-1 min-w-0">
+            <p className="text-xs" style={{ color: 'var(--muted)' }}>Image ready to send</p>
+          </div>
+          <button onClick={handleRemoveImage} className="btn-ghost w-8 h-8 rounded-full flex items-center justify-center text-red-400">✕</button>
+        </div>
+      </div>
+    )}
+
+    {/* Emoji Picker */}
+    {showEmojiPicker && (
+      <div ref={emojiPickerRef} className="absolute bottom-20 left-4 z-50">
+        <EmojiPicker onEmojiClick={handleEmojiSelect} autoFocusSearch={false}
+          theme={typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches ? Theme.DARK : Theme.LIGHT} />
+      </div>
+    )}
+
+    {/* Input Bar */}
+    <div className="glass-nav shrink-0 px-4 py-3 z-10">
+      <input ref={fileInputRef} type="file" accept="image/*" onChange={handleImageSelect} className="hidden" />
+      <form onSubmit={handleSendMessage} className="flex items-center gap-2">
+        <button type="button" onClick={() => fileInputRef.current?.click()} disabled={sending || uploadingImage}
+          className="btn-ghost w-10 h-10 rounded-full flex items-center justify-center text-lg shrink-0" title="Upload image">
+          📎
+        </button>
+        <button type="button" onClick={() => setShowEmojiPicker(!showEmojiPicker)} disabled={sending || uploadingImage}
+          className="btn-ghost w-10 h-10 rounded-full flex items-center justify-center text-lg shrink-0" title="Emoji">
+          😊
+        </button>
+        <input ref={messageInputRef} type="text" value={newMessage} onChange={(e) => setNewMessage(e.target.value)}
+          placeholder="Type a message…" className="input-romance flex-1 py-2.5" />
+        <button type="submit" disabled={sending || uploadingImage} className="btn-romance shrink-0 px-5 py-2.5">
+          {uploadingImage ? '↑' : sending ? '…' : 'Send'}
+        </button>
+      </form>
+    </div>
+  </div>
+);
 }
 
 // Quick Poll Form Component
@@ -585,58 +510,37 @@ function QuickPollForm({ groupId, onSuccess }: { groupId: string; onSuccess: () 
       await groupService.createPoll(groupId, formData);
       onSuccess();
       setFormData({ poll_type: 'kick_member', title: '', expires_in_hours: 24 });
-    } 
-    catch (err: unknown) {
+    } catch (err: unknown) {
       let errorMsg = 'Failed to create poll';
       if (typeof err === 'object' && err !== null && 'message' in err && typeof (err as { message?: string }).message === 'string') {
         errorMsg = (err as { message: string }).message;
       }
-      // setError(errorMsg);
       toast.error(errorMsg);
-    }
-    finally {
+    } finally {
       setLoading(false);
     }
   };
 
   return (
-    <form onSubmit={handleSubmit} className="bg-blue-50 dark:bg-blue-950 border-2 border-blue-600 dark:border-blue-400 p-3 mb-4">
-      <h3 className="font-bold text-neutral-900 dark:text-neutral-100 font-mono text-sm mb-3">CREATE POLL</h3>
+    <form onSubmit={handleSubmit} className="glass rounded-2xl p-4 mb-2">
+      <h3 className="text-sm font-bold mb-3" style={{ color: 'var(--heading)' }}>Create Poll</h3>
       <div className="space-y-2">
-        <input
-          type="text"
-          required
-          value={formData.title}
+        <input type="text" required value={formData.title}
           onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-          placeholder="Poll question..."
-          className="w-full px-3 py-2 border border-neutral-900 dark:border-neutral-100 bg-white dark:bg-black text-neutral-900 dark:text-neutral-100 font-mono text-sm focus:outline-none"
-        />
+          placeholder="Poll question…" className="input-romance w-full text-sm" />
         <div className="flex gap-2">
-          <select
-            value={formData.poll_type}
-            onChange={(e) => setFormData({ ...formData, poll_type: e.target.value })}
-            className="flex-1 px-3 py-2 border border-neutral-900 dark:border-neutral-100 bg-white dark:bg-black text-neutral-900 dark:text-neutral-100 font-mono text-sm"
-          >
+          <select value={formData.poll_type} onChange={(e) => setFormData({ ...formData, poll_type: e.target.value })}
+            className="select-romance flex-1 text-sm">
             <option value="kick_member">Kick Member</option>
             <option value="make_admin">Make Admin</option>
             <option value="remove_admin">Remove Admin</option>
             <option value="change_group_name">Change Name</option>
           </select>
-          <input
-            type="number"
-            min={1}
-            max={168}
-            value={formData.expires_in_hours}
+          <input type="number" min={1} max={168} value={formData.expires_in_hours}
             onChange={(e) => setFormData({ ...formData, expires_in_hours: parseInt(e.target.value) })}
-            className="w-20 px-3 py-2 border border-neutral-900 dark:border-neutral-100 bg-white dark:bg-black text-neutral-900 dark:text-neutral-100 font-mono text-sm"
-            placeholder="hrs"
-          />
-          <button
-            type="submit"
-            disabled={loading}
-            className="px-4 py-2 bg-blue-600 text-white font-mono font-bold border border-neutral-900 dark:border-neutral-100 hover:bg-blue-700 disabled:opacity-50 text-sm"
-          >
-            {loading ? '...' : 'POST'}
+            className="input-romance w-20 text-sm" placeholder="hrs" />
+          <button type="submit" disabled={loading} className="btn-romance px-4 py-2 text-sm">
+            {loading ? '…' : 'Post'}
           </button>
         </div>
       </div>

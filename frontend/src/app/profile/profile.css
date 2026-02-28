@@ -1,0 +1,97 @@
+/* Profile Pages Specific Styles - Modular & Independent */
+
+/* Thicker, more prominent buttons */
+.profile-btn-primary {
+  padding: 0.875rem 1.5rem; /* Thicker padding - 14px vertical, 24px horizontal */
+  border-radius: 1rem;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  line-height: 1.5;
+  background: var(--grad-romance);
+  color: white;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 12px rgba(236, 72, 153, 0.2);
+}
+
+.profile-btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(236, 72, 153, 0.3);
+}
+
+.profile-btn-primary:active {
+  transform: translateY(0);
+}
+
+.profile-btn-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.profile-btn-secondary {
+  padding: 0.875rem 1.5rem;
+  border-radius: 1rem;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  line-height: 1.5;
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(10px);
+  border: 1.5px solid rgba(0, 0, 0, 0.15);
+  color: var(--body);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+html[data-theme="dark"] .profile-btn-secondary,
+.dark .profile-btn-secondary {
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.profile-btn-secondary:hover {
+  background: rgba(255, 255, 255, 0.1);
+  transform: translateY(-1px);
+}
+
+.profile-btn-secondary:active {
+  transform: translateY(0);
+}
+
+/* Input fields for profile forms */
+.profile-input {
+  width: 100%;
+  padding: 0.875rem 1rem;
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(10px);
+  border: 1.5px solid rgba(0, 0, 0, 0.25);
+  border-radius: 1rem;
+  font-size: 0.9375rem;
+  line-height: 1.5;
+  color: var(--heading);
+  transition: all 0.2s ease;
+  outline: none;
+}
+
+html[data-theme="dark"] .profile-input,
+.dark .profile-input {
+  border-color: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.profile-input:focus {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(236, 72, 153, 0.4);
+  box-shadow: 0 0 0 3px rgba(236, 72, 153, 0.1);
+}
+
+.profile-input::placeholder {
+  color: var(--muted);
+  opacity: 0.6;
+}
+
+/* Textarea variant */
+.profile-textarea {
+  min-height: 6rem;
+  resize: vertical;
+}

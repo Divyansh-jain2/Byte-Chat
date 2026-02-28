@@ -6,6 +6,8 @@ import Link from 'next/link';
 import ProfileImageManager from '@/components/ProfileImageManager';
 import Image from 'next/image';
 import { useToast } from '@/contexts/ToastContext';
+import { useTheme } from '@/contexts/ThemeContext';
+import '../profile.css';
 
 interface UserProfile {
   user_id: string;
@@ -42,6 +44,8 @@ interface BlockedUser {
 
 export default function ProfileEditPage() {
   const router = useRouter();
+  const { theme, toggleTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [, setSettings] = useState<UserSettings | null>(null);
   const [blockedUsers, setBlockedUsers] = useState<BlockedUser[]>([]);
@@ -54,13 +58,16 @@ export default function ProfileEditPage() {
   const [bio, setBio] = useState('');
   const [dob, setDob] = useState('');
   const [dpUrl, setDpUrl] = useState('');
-  const [theme, setTheme] = useState('light');
   const [emailNotifications, setEmailNotifications] = useState(true);
   const [notificationEnabled, setNotificationEnabled] = useState(true);
   const [privacyProfilePublic, setPrivacyProfilePublic] = useState(true);
   const [privacyShowOnlineStatus, setPrivacyShowOnlineStatus] = useState(true);
   const [privacyAllowAnonymousChats, setPrivacyAllowAnonymousChats] = useState(true);
   const [deletePassword, setDeletePassword] = useState('');
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const fetchData = useCallback(async () => {
     try {
@@ -102,7 +109,6 @@ export default function ProfileEditPage() {
       if (settingsData.success) {
         const s = settingsData.data;
         setSettings(s);
-        setTheme(s.theme || 'light');
         setEmailNotifications(s.email_notifications ?? true);
         setNotificationEnabled(s.notification_enabled ?? true);
         setPrivacyProfilePublic(s.privacy_profile_public ?? true);
@@ -293,21 +299,11 @@ export default function ProfileEditPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 py-8 px-4">
-        <div className="max-w-5xl mx-auto">
-          <div className="mb-6">
-            <div className="h-6 w-32 bg-gray-200 dark:bg-gray-700 rounded animate-pulse mb-4"></div>
-            <div className="h-8 w-48 bg-gray-200 dark:bg-gray-700 rounded animate-pulse"></div>
-          </div>
-          
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
-            <div className="flex items-center justify-center py-12">
-              <div className="text-center">
-                <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mb-4"></div>
-                <p className="text-gray-600 dark:text-gray-400">Loading profile...</p>
-              </div>
-            </div>
-          </div>
+      <div className="min-h-screen bg-mesh-warm flex items-center justify-center">
+        <div className="text-center animate-fade-in">
+          <div className="w-16 h-16 rounded-full border-4 border-transparent mx-auto mb-4 animate-spin"
+            style={{ borderTopColor: 'var(--pink)', borderRightColor: 'var(--coral)' }} />
+          <p className="text-sm font-medium" style={{ color: 'var(--muted)' }}>Loading profile…</p>
         </div>
       </div>
     );
@@ -315,380 +311,248 @@ export default function ProfileEditPage() {
 
   if (!profile) {
     return (
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 py-8 px-4">
-        <div className="max-w-5xl mx-auto">
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
-            <div className="text-center py-12">
-              <div className="text-red-600 dark:text-red-400 text-5xl mb-4">⚠️</div>
-              <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">Failed to Load Profile</h2>
-              <p className="text-gray-600 dark:text-gray-400 mb-6">Unable to load your profile data. Please try again.</p>
-              <div className="flex gap-4 justify-center">
-                <button
-                  onClick={() => window.location.reload()}
-                  className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition"
-                >
-                  Retry
-                </button>
-                <Link
-                  href="/dashboard"
-                  className="px-6 py-2 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-900 dark:text-white rounded-lg transition"
-                >
-                  Back to Dashboard
-                </Link>
-              </div>
-            </div>
+      <div className="min-h-screen bg-mesh-warm flex items-center justify-center p-6">
+        <div className="glass-strong rounded-3xl p-12 text-center max-w-md animate-scale-in">
+          <div className="text-5xl mb-4">⚠️</div>
+          <h2 className="text-xl font-bold mb-2" style={{ color: 'var(--heading)' }}>Failed to load profile</h2>
+          <p className="text-sm mb-6" style={{ color: 'var(--muted)' }}>Unable to load your profile data. Please try again.</p>
+          <div className="flex gap-3 justify-center">
+            <button onClick={() => window.location.reload()} className="profile-btn-primary">Retry</button>
+            <Link href="/dashboard" className="btn-ghost px-5 py-2.5">Dashboard</Link>
           </div>
         </div>
       </div>
     );
   }
 
+  const tabs = [
+    { id: 'personal', label: 'Personal' },
+    { id: 'settings', label: 'Settings' },
+    { id: 'privacy', label: 'Privacy' },
+    { id: 'blocks', label: `Blocked (${blockedUsers.length})` },
+    { id: 'security', label: 'Security' },
+  ] as const;
+
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 py-8 px-4">
-      <div className="max-w-5xl mx-auto">
-        {/* Header */}
-        <div className="mb-6 flex items-center justify-between">
-          <div>
-            <Link href="/dashboard" className="text-blue-600 hover:text-blue-700 dark:text-blue-400 mb-4 inline-block">
-              ← Back to Dashboard
-            </Link>
-            <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Edit Profile</h1>
+    <div className="min-h-screen bg-mesh-warm antialiased">
+      {/* Blobs */}
+      <div className="fixed inset-0 pointer-events-none -z-10 overflow-hidden">
+        <div className="absolute top-[-10%] right-[-5%] w-96 h-96 bg-linear-to-br from-pink-300/15 to-transparent rounded-full blur-3xl" />
+        <div className="absolute bottom-[-5%] left-[-3%] w-80 h-80 bg-linear-to-br from-purple-300/10 to-transparent rounded-full blur-3xl" />
+      </div>
+
+      {/* Nav */}
+      <header className="glass-nav sticky top-0 z-50 px-6 py-4">
+        <div className="max-w-4xl mx-auto flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <Link href="/dashboard" className="btn-ghost px-3 py-2 text-sm flex items-center gap-2">← Back</Link>
+            <div>
+              <h1 className="text-xl font-bold heading-romance">Edit Profile</h1>
+              <p className="text-xs" style={{ color: 'var(--muted)' }}>{profile.name} · {profile.roll_no}</p>
+            </div>
           </div>
-          <button
-            onClick={handleLogout}
-            className="px-6 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition flex items-center gap-2"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-            </svg>
-            Logout
-          </button>
+          <div className="flex items-center gap-2">
+            {mounted && (
+              <button
+                onClick={toggleTheme}
+                className="px-3 py-2 rounded-xl text-sm font-semibold glass transition-all hover:scale-105"
+                style={{ color: 'var(--body)' }}
+                aria-label="Toggle theme"
+              >
+                {theme === 'light' ? '🌙' : '☀️'}
+              </button>
+            )}
+            <button onClick={handleLogout} className="btn-ghost px-4 py-2 text-sm text-red-400 hover:text-red-300 flex items-center gap-2">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+              </svg>
+              Logout
+            </button>
+          </div>
         </div>
+      </header>
 
-        {/* Toast notifications handled globally */}
+      <main className="max-w-4xl mx-auto px-6 py-8">
 
-        {/* Tabs */}
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow mb-6">
-          <div className="flex border-b border-gray-200 dark:border-gray-700 overflow-x-auto">
+        {/* Tab Bar */}
+        <div className="glass rounded-2xl p-1.5 flex gap-1 mb-8 overflow-x-auto animate-fade-in">
+          {tabs.map(tab => (
             <button
-              onClick={() => setActiveTab('personal')}
-              className={`px-6 py-3 font-medium whitespace-nowrap ${activeTab === 'personal' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'}`}
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`px-4 py-2 rounded-xl text-sm font-semibold whitespace-nowrap transition-all duration-200 ${
+                activeTab === tab.id ? 'text-white shadow-lg' : 'hover:bg-white/10'
+              }`}
+              style={activeTab === tab.id ? { background: 'var(--grad-romance)' } : { color: 'var(--muted)' }}
             >
-              Personal Info
+              {tab.label}
             </button>
-            <button
-              onClick={() => setActiveTab('settings')}
-              className={`px-6 py-3 font-medium whitespace-nowrap ${activeTab === 'settings' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'}`}
-            >
-              Settings
-            </button>
-            <button
-              onClick={() => setActiveTab('privacy')}
-              className={`px-6 py-3 font-medium whitespace-nowrap ${activeTab === 'privacy' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'}`}
-            >
-              Privacy
-            </button>
-            <button
-              onClick={() => setActiveTab('blocks')}
-              className={`px-6 py-3 font-medium whitespace-nowrap ${activeTab === 'blocks' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'}`}
-            >
-              Blocked Users ({blockedUsers.length})
-            </button>
-            <button
-              onClick={() => setActiveTab('security')}
-              className={`px-6 py-3 font-medium whitespace-nowrap ${activeTab === 'security' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'}`}
-            >
-              Security
-            </button>
-          </div>
+          ))}
         </div>
 
         {/* Tab Content */}
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-          {/* Personal Info Tab */}
+        <div className="glass-strong rounded-3xl p-8 animate-fade-in">
+
+          {/* Personal Info */}
           {activeTab === 'personal' && (
             <div>
-              <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-6">Personal Information</h2>
+              <h2 className="text-xl font-bold mb-6" style={{ color: 'var(--heading)' }}>Personal Information</h2>
 
-              {/* View-Only Fields */}
-              <div className="space-y-4 mb-6 p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
-                <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Account Details (Read-Only)</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-600 dark:text-gray-400">Name</label>
-                    <p className="mt-1 text-gray-900 dark:text-white">{profile.name}</p>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-600 dark:text-gray-400">Roll Number</label>
-                    <p className="mt-1 text-gray-900 dark:text-white">{profile.roll_no}</p>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-600 dark:text-gray-400">Branch</label>
-                    <p className="mt-1 text-gray-900 dark:text-white">{profile.branch}</p>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-600 dark:text-gray-400">Gender</label>
-                    <p className="mt-1 text-gray-900 dark:text-white">{profile.gender}</p>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-600 dark:text-gray-400">Joined</label>
-                    <p className="mt-1 text-gray-900 dark:text-white">
-                      {new Date(profile.created_at).toLocaleDateString()}
-                    </p>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-600 dark:text-gray-400">Verified</label>
-                    <p className="mt-1 text-gray-900 dark:text-white">
-                      {profile.is_verified ? '✓ Verified' : '✗ Not Verified'}
-                    </p>
-                  </div>
+              {/* Read-only fields */}
+              <div className="glass rounded-2xl p-5 mb-6">
+                <p className="text-xs font-semibold uppercase mb-4" style={{ color: 'var(--muted)' }}>Account Details (Read-Only)</p>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                  {[
+                    { label: 'Name', value: profile.name },
+                    { label: 'Roll Number', value: profile.roll_no },
+                    { label: 'Branch', value: profile.branch },
+                    { label: 'Gender', value: profile.gender },
+                    { label: 'Joined', value: new Date(profile.created_at).toLocaleDateString() },
+                    { label: 'Verified', value: profile.is_verified ? '✓ Verified' : '✗ Not Verified' },
+                  ].map(f => (
+                    <div key={f.label}>
+                      <p className="text-xs mb-1" style={{ color: 'var(--muted)' }}>{f.label}</p>
+                      <p className="text-sm font-medium" style={{ color: 'var(--heading)' }}>{f.value}</p>
+                    </div>
+                  ))}
                 </div>
               </div>
 
-              {/* Editable Fields */}
-              <form onSubmit={handleUpdatePersonal} className="space-y-6">
+              {/* Editable */}
+              <form onSubmit={handleUpdatePersonal} className="space-y-5">
                 <div>
-                  <label htmlFor="bio" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Bio
-                  </label>
+                  <label htmlFor="bio" className="block text-sm font-medium mb-2" style={{ color: 'var(--body)' }}>Bio</label>
                   <textarea
                     id="bio"
                     value={bio}
                     onChange={(e) => setBio(e.target.value)}
                     rows={4}
-                    className="mt-1 block w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                    placeholder="Tell us about yourself..."
+                    className="input-romance w-full resize-none"
+                    placeholder="Tell us about yourself…"
                   />
                 </div>
-
                 <div>
-                  <label htmlFor="dob" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Date of Birth
-                  </label>
-                  <input
-                    type="date"
-                    id="dob"
-                    value={dob}
-                    onChange={(e) => setDob(e.target.value)}
-                    className="mt-1 block w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  />
+                  <label htmlFor="dob" className="block text-sm font-medium mb-2" style={{ color: 'var(--body)' }}>Date of Birth</label>
+                  <input type="date" id="dob" value={dob} onChange={(e) => setDob(e.target.value)} className="input-romance w-full" />
                 </div>
-
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
-                    Profile Picture
-                  </label>
+                  <label className="block text-sm font-medium mb-3" style={{ color: 'var(--body)' }}>Profile Picture</label>
                   <ProfileImageManager
                     currentImageUrl={profile?.dp_url || undefined}
                     onUploadSuccess={(url: string) => {
                       setDpUrl(url);
-                      if (profile) {
-                        setProfile({ ...profile, dp_url: url });
-                      }
-                      toastSuccess('Profile picture updated successfully!');
+                      if (profile) setProfile({ ...profile, dp_url: url });
+                      toastSuccess('Profile picture updated!');
                     }}
                     onDeleteSuccess={() => {
                       setDpUrl('');
-                      if (profile) {
-                        setProfile({ ...profile, dp_url: null });
-                      }
-                      toastSuccess('Profile picture removed successfully!');
+                      if (profile) setProfile({ ...profile, dp_url: null });
+                      toastSuccess('Profile picture removed!');
                     }}
                   />
                 </div>
-
-                <button
-                  type="submit"
-                  className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg transition"
-                >
-                  Save Personal Info
-                </button>
+                <button type="submit" className="profile-btn-primary w-full">Save Personal Info</button>
               </form>
             </div>
           )}
 
-          {/* Settings Tab */}
+          {/* Settings */}
           {activeTab === 'settings' && (
             <div>
-              <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-6">App Settings</h2>
-
+              <h2 className="text-xl font-bold mb-6" style={{ color: 'var(--heading)' }}>App Settings</h2>
               <form onSubmit={handleUpdateSettings} className="space-y-6">
                 <div>
-                  <label htmlFor="theme" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    Theme Mode
-                  </label>
-                  <select
-                    id="theme"
-                    value={theme}
-                    onChange={(e) => setTheme(e.target.value)}
-                    className="block w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  >
+                  <label htmlFor="theme" className="block text-sm font-medium mb-2" style={{ color: 'var(--body)' }}>Theme Mode</label>
+                  <select id="theme" value={theme} onChange={() => toggleTheme()} className="select-romance w-full">
                     <option value="light">Light</option>
                     <option value="dark">Dark</option>
-                    <option value="system">System</option>
                   </select>
                 </div>
-
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <label htmlFor="emailNotif" className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                      Email Notifications
+                {[
+                  { id: 'emailNotif', label: 'Email Notifications', checked: emailNotifications, onChange: setEmailNotifications },
+                  { id: 'notifEnabled', label: 'Push Notifications', checked: notificationEnabled, onChange: setNotificationEnabled },
+                ].map(toggle => (
+                  <div key={toggle.id} className="glass rounded-2xl p-4 flex items-center justify-between">
+                    <label htmlFor={toggle.id} className="text-sm font-medium cursor-pointer" style={{ color: 'var(--body)' }}>
+                      {toggle.label}
                     </label>
                     <input
-                      type="checkbox"
-                      id="emailNotif"
-                      checked={emailNotifications}
-                      onChange={(e) => setEmailNotifications(e.target.checked)}
-                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                      type="checkbox" id={toggle.id} checked={toggle.checked}
+                      onChange={(e) => toggle.onChange(e.target.checked)}
+                      className="w-4 h-4 accent-pink-500"
                     />
                   </div>
-
-                  <div className="flex items-center justify-between">
-                    <label htmlFor="notifEnabled" className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                      Push Notifications
-                    </label>
-                    <input
-                      type="checkbox"
-                      id="notifEnabled"
-                      checked={notificationEnabled}
-                      onChange={(e) => setNotificationEnabled(e.target.checked)}
-                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                    />
-                  </div>
-                </div>
-
-                <button
-                  type="submit"
-                  className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg transition"
-                >
-                  Save Settings
-                </button>
+                ))}
+                <button type="submit" className="profile-btn-primary w-full">Save Settings</button>
               </form>
             </div>
           )}
 
-          {/* Privacy Tab */}
+          {/* Privacy */}
           {activeTab === 'privacy' && (
             <div>
-              <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-6">Privacy Settings</h2>
-
-              <form onSubmit={handleUpdatePrivacy} className="space-y-6">
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
+              <h2 className="text-xl font-bold mb-6" style={{ color: 'var(--heading)' }}>Privacy Settings</h2>
+              <form onSubmit={handleUpdatePrivacy} className="space-y-4">
+                {[
+                  { id: 'publicProfile', label: 'Public Profile', desc: 'Allow others to view your profile', checked: privacyProfilePublic, onChange: setPrivacyProfilePublic },
+                  { id: 'onlineStatus', label: 'Show Online Status', desc: "Let others see when you're online", checked: privacyShowOnlineStatus, onChange: setPrivacyShowOnlineStatus },
+                  { id: 'allowAnon', label: 'Allow Anonymous Chats', desc: 'Allow anonymous users to message you', checked: privacyAllowAnonymousChats, onChange: setPrivacyAllowAnonymousChats },
+                ].map(toggle => (
+                  <div key={toggle.id} className="glass rounded-2xl p-4 flex items-center justify-between gap-4">
                     <div>
-                      <label htmlFor="publicProfile" className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                        Public Profile
-                      </label>
-                      <p className="text-xs text-gray-500 dark:text-gray-400">Allow others to view your profile</p>
+                      <label htmlFor={toggle.id} className="text-sm font-medium cursor-pointer block" style={{ color: 'var(--body)' }}>{toggle.label}</label>
+                      <p className="text-xs" style={{ color: 'var(--muted)' }}>{toggle.desc}</p>
                     </div>
-                    <input
-                      type="checkbox"
-                      id="publicProfile"
-                      checked={privacyProfilePublic}
-                      onChange={(e) => setPrivacyProfilePublic(e.target.checked)}
-                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                    />
+                    <input type="checkbox" id={toggle.id} checked={toggle.checked} onChange={(e) => toggle.onChange(e.target.checked)} className="w-4 h-4 accent-pink-500 shrink-0" />
                   </div>
-
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <label htmlFor="onlineStatus" className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                        Show Online Status
-                      </label>
-                      <p className="text-xs text-gray-500 dark:text-gray-400">Let others see when you`re online</p>
-                    </div>
-                    <input
-                      type="checkbox"
-                      id="onlineStatus"
-                      checked={privacyShowOnlineStatus}
-                      onChange={(e) => setPrivacyShowOnlineStatus(e.target.checked)}
-                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                    />
-                  </div>
-
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <label htmlFor="allowAnonymousChats" className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                        Allow Anonymous Chats
-                      </label>
-                      <p className="text-xs text-gray-500 dark:text-gray-400">Allow anonymous users to message you</p>
-                    </div>
-                    <input
-                      type="checkbox"
-                      id="allowAnonymousChats"
-                      checked={privacyAllowAnonymousChats}
-                      onChange={(e) => setPrivacyAllowAnonymousChats(e.target.checked)}
-                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                    />
-                  </div>
-                </div>
-
-                <button
-                  type="submit"
-                  className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg transition"
-                >
-                  Save Privacy Settings
-                </button>
+                ))}
+                <button type="submit" className="profile-btn-primary w-full mt-2">Save Privacy Settings</button>
               </form>
             </div>
           )}
 
-          {/* Blocked Users Tab */}
+          {/* Blocked Users */}
           {activeTab === 'blocks' && (
             <div>
-              <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-6">Blocked Users</h2>
-
+              <h2 className="text-xl font-bold mb-6" style={{ color: 'var(--heading)' }}>Blocked Users</h2>
               {blockedUsers.length === 0 ? (
-                <p className="text-gray-600 dark:text-gray-400 text-center py-8">
-                  You haven`t blocked any users yet
-                </p>
+                <div className="text-center py-12">
+                  <div className="text-4xl mb-3">🚫</div>
+                  <p className="text-sm" style={{ color: 'var(--muted)' }}>You haven&#39;t blocked any users yet</p>
+                </div>
               ) : (
-                <div className="space-y-4">
+                <div className="space-y-3">
                   {blockedUsers.map((user) => (
-                    <div
-                      key={user.blocked_id}
-                      className="flex items-center justify-between p-4 border border-gray-200 dark:border-gray-700 rounded-lg"
-                    >
-                      <div className="flex items-center space-x-3">
+                    <div key={user.blocked_id} className="glass rounded-2xl p-4 flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-3">
                         {user.is_anonymous_block ? (
-                          // Anonymous user display
-                          <div className="w-10 h-10 rounded-full bg-linear-to-br from-purple-400 to-pink-500 flex items-center justify-center text-white font-bold">
-                            ?
-                          </div>
+                          <div className="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm shrink-0"
+                            style={{ background: 'var(--grad-mystery)' }}>?</div>
                         ) : (
                           <Image
                             src={user.dp_url || 'https://via.placeholder.com/40'}
-                            alt={user.name}
-                            width={40}
-                            height={40}
-                            className="w-10 h-10 rounded-full object-cover"
+                            alt={user.name} width={40} height={40}
+                            className="w-10 h-10 rounded-full object-cover ring-2 ring-white/20 shrink-0"
                           />
                         )}
                         <div>
-                          <p className="font-medium text-gray-900 dark:text-white">
+                          <p className="font-semibold text-sm" style={{ color: 'var(--heading)' }}>
                             {user.name}
                             {user.is_anonymous_block && (
-                              <span className="ml-2 px-2 py-0.5 text-xs bg-purple-100 dark:bg-purple-900 text-purple-800 dark:text-purple-200 rounded-full">
-                                Anonymous
-                              </span>
+                              <span className="ml-2 px-2 py-0.5 text-xs rounded-full bg-purple-500/15 text-purple-400">Anon</span>
                             )}
                           </p>
-                          {!user.is_anonymous_block && user.roll_no && (
-                            <p className="text-sm text-gray-600 dark:text-gray-400">{user.roll_no}</p>
-                          )}
-                          {user.is_anonymous_block && (
-                            <p className="text-sm text-gray-600 dark:text-gray-400">{user.gender}</p>
-                          )}
+                          <p className="text-xs" style={{ color: 'var(--muted)' }}>
+                            {user.is_anonymous_block ? user.gender : user.roll_no}
+                          </p>
                           {user.block_reason && (
-                            <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
-                              Reason: {user.block_reason}
-                            </p>
+                            <p className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>Reason: {user.block_reason}</p>
                           )}
                         </div>
                       </div>
                       <button
                         onClick={() => handleUnblockUser(user.blocked_id)}
-                        className="px-4 py-2 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-900 dark:text-white rounded-lg transition"
+                        className="btn-ghost text-xs px-3 py-1.5 shrink-0"
                       >
                         Unblock
                       </button>
@@ -699,72 +563,57 @@ export default function ProfileEditPage() {
             </div>
           )}
 
-          {/* Security Tab */}
+          {/* Security */}
           {activeTab === 'security' && (
-            <div>
-              <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-6">Security</h2>
+            <div className="space-y-5">
+              <h2 className="text-xl font-bold" style={{ color: 'var(--heading)' }}>Security</h2>
 
-              <div className="space-y-6">
-                {/* Logout Section */}
-                <div className="p-4 bg-green-50 dark:bg-green-900 border border-green-200 dark:border-green-700 rounded-lg">
-                  <h3 className="font-medium text-green-900 dark:text-green-100 mb-2">Logout</h3>
-                  <p className="text-sm text-green-700 dark:text-green-300 mb-3">
-                    Sign out from your account on this device.
-                  </p>
-                  <button
-                    onClick={handleLogout}
-                    className="inline-flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition"
-                  >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-                    </svg>
-                    Logout from Account
+              {/* Logout */}
+              <div className="glass rounded-2xl p-5 border border-emerald-400/20">
+                <h3 className="font-semibold text-emerald-400 mb-1">Logout</h3>
+                <p className="text-sm mb-4" style={{ color: 'var(--muted)' }}>Sign out from your account on this device.</p>
+                <button onClick={handleLogout} className="flex items-center gap-2 px-4 py-2 rounded-xl font-medium text-sm bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 transition-all">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                  </svg>
+                  Logout from Account
+                </button>
+              </div>
+
+              {/* Reset password */}
+              <div className="glass rounded-2xl p-5 border border-blue-400/20">
+                <h3 className="font-semibold text-blue-400 mb-1">Change Password</h3>
+                <p className="text-sm mb-4" style={{ color: 'var(--muted)' }}>Reset your password via OTP on the login page.</p>
+                <Link href="/forgot-password" className="inline-flex items-center gap-2 px-4 py-2 rounded-xl font-medium text-sm bg-blue-500/15 text-blue-400 hover:bg-blue-500/25 transition-all">
+                  Reset Password
+                </Link>
+              </div>
+
+              {/* Delete account */}
+              <div className="glass rounded-2xl p-5 border border-red-400/20">
+                <h3 className="font-semibold text-red-400 mb-1">Danger Zone</h3>
+                <p className="text-sm mb-4" style={{ color: 'var(--muted)' }}>
+                  Deleting your account is permanent and cannot be undone. All your data will be lost.
+                </p>
+                <form onSubmit={handleDeleteAccount} className="space-y-3">
+                  <input
+                    type="password" value={deletePassword}
+                    onChange={(e) => setDeletePassword(e.target.value)}
+                    placeholder="Enter your password to confirm"
+                    required
+                    className="input-romance w-full border-red-400/30 focus:border-red-400/60"
+                    style={{ borderColor: 'rgba(248,113,113,0.3)' }}
+                  />
+                  <button type="submit" className="w-full py-2.5 rounded-xl font-semibold text-sm bg-red-500/15 text-red-400 hover:bg-red-500/25 transition-all border border-red-400/20">
+                    Delete Account Permanently
                   </button>
-                </div>
-
-                {/* Password Reset Section */}
-                <div className="p-4 bg-blue-50 dark:bg-blue-900 border border-blue-200 dark:border-blue-700 rounded-lg">
-                  <h3 className="font-medium text-blue-900 dark:text-blue-100 mb-2">Change Password</h3>
-                  <p className="text-sm text-blue-700 dark:text-blue-300 mb-3">
-                    Use the forgot password option on the login page to reset your password via OTP.
-                  </p>
-                  <Link
-                    href="/forgot-password"
-                    className="inline-block px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition"
-                  >
-                    Reset Password
-                  </Link>
-                </div>
-
-                {/* Delete Account Section */}
-                <div className="p-4 bg-red-50 dark:bg-red-900 border border-red-200 dark:border-red-700 rounded-lg">
-                  <h3 className="font-medium text-red-900 dark:text-red-100 mb-2">Danger Zone</h3>
-                  <p className="text-sm text-red-700 dark:text-red-300 mb-4">
-                    Deleting your account is permanent and cannot be undone. All your data will be lost.
-                  </p>
-
-                  <form onSubmit={handleDeleteAccount} className="space-y-3">
-                    <input
-                      type="password"
-                      value={deletePassword}
-                      onChange={(e) => setDeletePassword(e.target.value)}
-                      placeholder="Enter your password to confirm"
-                      required
-                      className="block w-full rounded-md border border-red-300 dark:border-red-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 focus:border-red-500 focus:outline-none focus:ring-1 focus:ring-red-500"
-                    />
-                    <button
-                      type="submit"
-                      className="w-full bg-red-600 hover:bg-red-700 text-white font-medium py-2 px-4 rounded-lg transition"
-                    >
-                      Delete Account Permanently
-                    </button>
-                  </form>
-                </div>
+                </form>
               </div>
             </div>
           )}
+
         </div>
-      </div>
+      </main>
     </div>
   );
 }

@@ -3,7 +3,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { useTheme } from '@/contexts/ThemeContext';
 import { BlockUserButton } from '@/components/ModerationComponents';
 import { checkIfBlocked } from '@/services/moderation.service';
 import Image from 'next/image';
@@ -11,8 +10,6 @@ import Image from 'next/image';
 export default function ViewProfile() {
   const params = useParams();
   const router = useRouter();
-  const { theme, toggleTheme } = useTheme();
-  
   const rollNo = params.rollNo as string;
   // need proper error handling
   const [profile, setProfile] = useState<any>(null);
@@ -22,6 +19,7 @@ export default function ViewProfile() {
   const [isBlocked, setIsBlocked] = useState(false);
   const [blockMessage, setBlockMessage] = useState('');
   const [, setBlockedByOther] = useState(false);
+  const [navigating, setNavigating] = useState(false);
 
   const fetchProfile = useCallback ( async () => {
     try {
@@ -94,265 +92,159 @@ export default function ViewProfile() {
     fetchProfile(); // Refresh profile after blocking/unblocking
   };
 
+  const handleStartChat = (userId: string, isAnonymous: boolean = false) => {
+    if (navigating) return; // Prevent double-clicks
+    setNavigating(true);
+    router.push(`/chat/new?userId=${userId}&anonymous=${isAnonymous}`);
+  };
+
   if (isLoading) {
     return (
-      <div className={`min-h-screen flex items-center justify-center ${
-        theme === 'dark' 
-          ? 'bg-linear-to-br from-gray-900 via-purple-900 to-gray-900' 
-          : 'bg-linear-to-br from-blue-50 via-purple-50 to-pink-50'
-      }`}>
-        <div className="w-12 h-12 border-4 border-purple-500 border-t-transparent rounded-full animate-spin"></div>
+      <div className="min-h-screen bg-mesh-warm flex items-center justify-center">
+        <div className="text-center animate-fade-in">
+          <div className="w-16 h-16 rounded-full border-4 border-transparent mx-auto mb-4 animate-spin"
+            style={{ borderTopColor: 'var(--pink)', borderRightColor: 'var(--coral)' }} />
+          <p className="text-sm font-medium" style={{ color: 'var(--muted)' }}>Loading profile…</p>
+        </div>
       </div>
     );
   }
 
   if (error || !profile) {
     return (
-      <div className={`min-h-screen flex items-center justify-center p-4 ${
-        theme === 'dark' 
-          ? 'bg-linear-to-br from-gray-900 via-purple-900 to-gray-900' 
-          : 'bg-linear-to-br from-blue-50 via-purple-50 to-pink-50'
-      }`}>
-        <div className={`backdrop-blur-md rounded-2xl p-8 text-center ${
-          theme === 'dark' ? 'bg-white/10' : 'bg-white/60'
-        }`}>
-          <p className={`text-xl mb-4 ${theme === 'dark' ? 'text-white' : 'text-gray-800'}`}>
-            {error || 'Profile not found'}
-          </p>
-          <button
-            onClick={() => router.back()}
-            className="px-6 py-2 bg-linear-to-r from-purple-500 to-pink-500 text-white rounded-lg hover:from-purple-600 hover:to-pink-600"
-          >
-            Go Back
-          </button>
+      <div className="min-h-screen bg-mesh-warm flex items-center justify-center p-4">
+        <div className="glass-strong rounded-3xl p-8 text-center max-w-sm animate-scale-in">
+          <div className="text-4xl mb-4">😕</div>
+          <p className="font-semibold mb-6" style={{ color: 'var(--heading)' }}>{error || 'Profile not found'}</p>
+          <button onClick={() => router.back()} className="btn-romance px-6 py-2.5">Go Back</button>
         </div>
       </div>
     );
   }
 
   return (
-    <div className={`min-h-screen p-6 ${
-      theme === 'dark' 
-        ? 'bg-linear-to-br from-gray-900 via-purple-900 to-gray-900' 
-        : 'bg-linear-to-br from-blue-50 via-purple-50 to-pink-50'
-    }`}>
-      {/* Header */}
-      <div className="max-w-4xl mx-auto mb-6">
-        <div className="flex justify-between items-center">
-          <button
-            onClick={() => router.back()}
-            className={`px-4 py-2 rounded-lg backdrop-blur-md transition-all ${
-              theme === 'dark'
-                ? 'bg-white/10 hover:bg-white/20 text-white'
-                : 'bg-white/50 hover:bg-white/70 text-gray-800'
-            }`}
-          >
-            ← Back
-          </button>
-          <button
-            onClick={toggleTheme}
-            className={`p-3 rounded-lg backdrop-blur-md transition-all ${
-              theme === 'dark'
-                ? 'bg-white/10 hover:bg-white/20 text-white'
-                : 'bg-white/50 hover:bg-white/70 text-gray-800'
-            }`}
-          >
-            {theme === 'dark' ? '☀️' : '🌙'}
-          </button>
-        </div>
+    <div className="min-h-screen bg-mesh-warm antialiased">
+      {/* Blobs */}
+      <div className="fixed inset-0 pointer-events-none -z-10 overflow-hidden">
+        <div className="absolute top-[-10%] right-[-5%] w-96 h-96 bg-linear-to-br from-pink-300/10 to-transparent rounded-full blur-3xl" />
+        <div className="absolute bottom-[-10%] left-[-5%] w-80 h-80 bg-linear-to-tr from-purple-300/10 to-transparent rounded-full blur-3xl" />
       </div>
 
-      {/* Profile Card */}
-      <div className="max-w-4xl mx-auto">
-        <div className={`backdrop-blur-md rounded-2xl shadow-2xl overflow-hidden ${
-          theme === 'dark'
-            ? 'bg-white/10 border border-white/20'
-            : 'bg-white/60 border border-white/40'
-        }`}>
-          {/* Cover Header */}
-          <div className="h-32 bg-linear-to-r from-purple-500 to-pink-500"></div>
+      {/* Nav bar */}
+      <header className="glass-nav sticky top-0 z-20 px-4 py-3 flex items-center justify-between">
+        <button onClick={() => router.back()} className="btn-ghost w-9 h-9 rounded-full flex items-center justify-center text-lg">←</button>
+        <p className="font-semibold text-sm" style={{ color: 'var(--heading)' }}>Profile</p>
+        <div className="w-9" /> {/* spacer */}
+      </header>
 
-          {/* Profile Content */}
-          <div className="p-8">
-            {/* Profile Picture & Basic Info */}
-            <div className="flex flex-col md:flex-row items-center md:items-start gap-6 -mt-20">
-              <Image
-                src={profile.dp_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${profile.roll_no}`}
-                alt={profile.name}
-                width={32}
-                height={32}
-                className="rounded-full border-4 border-white shadow-xl object-cover"
-              />
-              <div className="flex-1 text-center md:text-left mt-16 md:mt-10">
-                <h1 className={`text-3xl font-bold mb-2 ${
-                  theme === 'dark' ? 'text-white' : 'text-gray-800'
-                }`}>
-                  {profile.name}
-                </h1>
-                <p className={`text-lg mb-2 ${
-                  theme === 'dark' ? 'text-gray-300' : 'text-gray-600'
-                }`}>
-                  {profile.roll_no}
-                </p>
-                <div className="flex flex-wrap justify-center md:justify-start gap-2 mb-4">
-                  <span className={`px-3 py-1 rounded-full text-sm ${
-                    theme === 'dark' ? 'bg-purple-500/20 text-purple-300' : 'bg-purple-100 text-purple-700'
-                  }`}>
-                    {profile.branch}
-                  </span>
-                  <span className={`px-3 py-1 rounded-full text-sm ${
-                    theme === 'dark' ? 'bg-pink-500/20 text-pink-300' : 'bg-pink-100 text-pink-700'
-                  }`}>
-                    {profile.gender}
-                  </span>
+      <main className="max-w-lg mx-auto px-4 py-6">
+        {/* Cover + avatar */}
+        <div className="glass-strong rounded-3xl overflow-hidden mb-4 animate-fade-in">
+          {/* Cover */}
+          <div className="h-28 w-full" style={{ background: 'var(--grad-romance)' }} />
+          {/* Profile content */}
+          <div className="px-6 pb-6">
+            {/* Avatar */}
+            <div className="-mt-12 mb-4">
+              {profile.dp_url ? (
+                <Image src={profile.dp_url} alt={profile.name} width={96} height={96}
+                  className="w-24 h-24 rounded-2xl object-cover border-4 shadow-xl"
+                  style={{ borderColor: 'var(--glass-bg)' }} />
+              ) : (
+                <div className="w-24 h-24 rounded-2xl flex items-center justify-center text-white text-3xl font-bold border-4 shadow-xl"
+                  style={{ background: 'var(--grad-romance)', borderColor: 'var(--glass-bg)' }}>
+                  {profile.name?.charAt(0).toUpperCase() || '?'}
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-start justify-between gap-4 flex-wrap">
+              <div>
+                <h1 className="text-2xl font-bold mb-1" style={{ color: 'var(--heading)' }}>{profile.name}</h1>
+                <p className="text-sm mb-3" style={{ color: 'var(--muted)' }}>{profile.roll_no}</p>
+                <div className="flex flex-wrap gap-2">
+                  {profile.branch && (
+                    <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-purple-500/15 text-purple-400">{profile.branch}</span>
+                  )}
+                  {profile.gender && (
+                    <span className="px-2.5 py-1 rounded-full text-xs font-semibold" style={{ background: 'var(--grad-romance)', color: '#fff' }}>{profile.gender}</span>
+                  )}
                   {profile.is_verified && (
-                    <span className={`px-3 py-1 rounded-full text-sm ${
-                      theme === 'dark' ? 'bg-green-500/20 text-green-300' : 'bg-green-100 text-green-700'
-                    }`}>
-                      ✓ Verified
-                    </span>
+                    <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-500/15 text-emerald-400">✓ Verified</span>
                   )}
                 </div>
               </div>
 
-              {/* Action Buttons */}
-              <div className="flex flex-col gap-2 mt-16 md:mt-10">
+              {/* Action buttons */}
+              <div className="flex flex-col gap-2 mt-1">
                 {isOwnProfile ? (
                   <Link href="/profile/edit">
-                    <button className="px-6 py-2 bg-linear-to-r from-purple-500 to-pink-500 text-white rounded-lg hover:from-purple-600 hover:to-pink-600 transition-all">
-                      ✏️ Edit Profile
-                    </button>
+                    <button className="btn-romance px-4 py-2 text-sm">✏️ Edit Profile</button>
                   </Link>
                 ) : (
                   <>
                     {blockMessage && (
-                      <div className={`px-4 py-2 rounded-lg text-center ${
-                        theme === 'dark' 
-                          ? 'bg-yellow-500/20 text-yellow-300 border border-yellow-500/30' 
-                          : 'bg-yellow-100 text-yellow-800 border border-yellow-300'
-                      }`}>
-                        🚫 {blockMessage}
-                      </div>
+                      <div className="glass rounded-xl px-3 py-2 text-xs text-yellow-400 text-center">🚫 {blockMessage}</div>
                     )}
                     <div className="flex gap-2">
                       <button 
-                        disabled={isBlocked}
-                        className={`px-6 py-2 rounded-lg transition-all ${
-                          isBlocked 
-                            ? 'bg-gray-400 cursor-not-allowed opacity-50' 
-                            : 'bg-linear-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600'
-                        } text-white`}
-                      >
+                        onClick={() => handleStartChat(profile.user_id, false)}
+                        disabled={isBlocked || navigating}
+                        className="btn-romance px-4 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed">
                         💬 Message
                       </button>
                       <button 
-                        disabled={isBlocked}
-                        className={`px-6 py-2 rounded-lg backdrop-blur-md transition-all ${
-                          isBlocked 
-                            ? 'bg-gray-400 cursor-not-allowed opacity-50 text-gray-300' 
-                            : theme === 'dark'
-                              ? 'bg-white/10 hover:bg-white/20 text-white'
-                              : 'bg-white/50 hover:bg-white/70 text-gray-800'
-                        }`}
-                      >
-                        🎭 Send Anonymous
+                        onClick={() => handleStartChat(profile.user_id, true)}
+                        disabled={isBlocked || navigating}
+                        className="btn-purple px-4 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed">
+                        🎭 Anon
                       </button>
                     </div>
-                    <div className="mt-2">
-                      <BlockUserButton 
-                        userId={profile.user_id}
-                        userName={profile.name}
-                        isBlocked={isBlocked}
-                        onBlockStatusChange={handleBlockStatusChange}
-                      />
+                    <div>
+                      <BlockUserButton userId={profile.user_id} userName={profile.name}
+                        isBlocked={isBlocked} onBlockStatusChange={handleBlockStatusChange} />
                     </div>
                   </>
                 )}
               </div>
             </div>
-
-            {/* Bio Section */}
-            {profile.bio && (
-              <div className={`mt-8 p-6 rounded-xl ${
-                theme === 'dark' ? 'bg-white/5' : 'bg-white/50'
-              }`}>
-                <h2 className={`text-xl font-bold mb-3 ${
-                  theme === 'dark' ? 'text-white' : 'text-gray-800'
-                }`}>
-                  About
-                </h2>
-                <p className={theme === 'dark' ? 'text-gray-300' : 'text-gray-700'}>
-                  {profile.bio}
-                </p>
-              </div>
-            )}
-
-            {/* Details Grid */}
-            <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-4">
-              {profile.dob && (
-                <div className={`p-4 rounded-xl ${
-                  theme === 'dark' ? 'bg-white/5' : 'bg-white/50'
-                }`}>
-                  <p className={`text-sm mb-1 ${
-                    theme === 'dark' ? 'text-gray-400' : 'text-gray-600'
-                  }`}>
-                    Date of Birth
-                  </p>
-                  <p className={`font-medium ${
-                    theme === 'dark' ? 'text-white' : 'text-gray-800'
-                  }`}>
-                    {new Date(profile.dob).toLocaleDateString('en-US', {
-                      year: 'numeric',
-                      month: 'long',
-                      day: 'numeric'
-                    })}
-                  </p>
-                </div>
-              )}
-
-              <div className={`p-4 rounded-xl ${
-                theme === 'dark' ? 'bg-white/5' : 'bg-white/50'
-              }`}>
-                <p className={`text-sm mb-1 ${
-                  theme === 'dark' ? 'text-gray-400' : 'text-gray-600'
-                }`}>
-                  Member Since
-                </p>
-                <p className={`font-medium ${
-                  theme === 'dark' ? 'text-white' : 'text-gray-800'
-                }`}>
-                  {new Date(profile.created_at).toLocaleDateString('en-US', {
-                    year: 'numeric',
-                    month: 'long'
-                  })}
-                </p>
-              </div>
-
-              {profile.last_login && (
-                <div className={`p-4 rounded-xl ${
-                  theme === 'dark' ? 'bg-white/5' : 'bg-white/50'
-                }`}>
-                  <p className={`text-sm mb-1 ${
-                    theme === 'dark' ? 'text-gray-400' : 'text-gray-600'
-                  }`}>
-                    Last Active
-                  </p>
-                  <p className={`font-medium ${
-                    theme === 'dark' ? 'text-white' : 'text-gray-800'
-                  }`}>
-                    {new Date(profile.last_login).toLocaleDateString('en-US', {
-                      month: 'short',
-                      day: 'numeric',
-                      hour: '2-digit',
-                      minute: '2-digit'
-                    })}
-                  </p>
-                </div>
-              )}
-            </div>
           </div>
         </div>
-      </div>
+
+        {/* Bio */}
+        {profile.bio && (
+          <div className="glass-card rounded-3xl p-5 mb-4 animate-fade-in">
+            <h2 className="text-sm font-bold mb-2" style={{ color: 'var(--muted)' }}>ABOUT</h2>
+            <p className="text-sm leading-relaxed" style={{ color: 'var(--body)' }}>{profile.bio}</p>
+          </div>
+        )}
+
+        {/* Details grid */}
+        <div className="grid grid-cols-2 gap-3 animate-fade-in">
+          {profile.dob && (
+            <div className="glass-card rounded-2xl p-4">
+              <p className="text-xs mb-1 font-medium" style={{ color: 'var(--muted)' }}>Birthday</p>
+              <p className="text-sm font-semibold" style={{ color: 'var(--heading)' }}>
+                {new Date(profile.dob).toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}
+              </p>
+            </div>
+          )}
+          <div className="glass-card rounded-2xl p-4">
+            <p className="text-xs mb-1 font-medium" style={{ color: 'var(--muted)' }}>Member Since</p>
+            <p className="text-sm font-semibold" style={{ color: 'var(--heading)' }}>
+              {new Date(profile.created_at).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}
+            </p>
+          </div>
+          {profile.last_login && (
+            <div className="glass-card rounded-2xl p-4">
+              <p className="text-xs mb-1 font-medium" style={{ color: 'var(--muted)' }}>Last Active</p>
+              <p className="text-sm font-semibold" style={{ color: 'var(--heading)' }}>
+                {new Date(profile.last_login).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+              </p>
+            </div>
+          )}
+        </div>
+      </main>
     </div>
   );
 }

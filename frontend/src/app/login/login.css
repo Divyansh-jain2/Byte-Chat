@@ -1,0 +1,75 @@
+/* Login Page Specific Styles - Modular & Independent */
+
+.login-input-with-icon {
+  width: 100%;
+  padding: 0.875rem 1rem 0.875rem 3rem; /* 14px top/bottom, 16px right, 48px left */
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(10px);
+  border: 1.5px solid rgba(0, 0, 0, 0.25);
+  border-radius: 1rem;
+  font-size: 0.9375rem;
+  line-height: 1.5;
+  color: var(--heading);
+  transition: all 0.2s ease;
+  outline: none;
+}
+
+/* Dark theme - adjust for better visibility */
+html[data-theme="dark"] .login-input-with-icon,
+.dark .login-input-with-icon {
+  border-color: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.login-input-with-icon:focus {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(236, 72, 153, 0.4);
+  box-shadow: 0 0 0 3px rgba(236, 72, 153, 0.1);
+}
+
+.login-input-with-icon::placeholder {
+  color: var(--muted);
+  opacity: 0.6;
+}
+
+.login-input-with-icon.uppercase {
+  text-transform: uppercase;
+}
+
+.login-input-with-icon.font-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+.login-input-with-icon.tracking-wide {
+  letter-spacing: 0.025em;
+}
+
+/* Password input with right icon */
+.login-input-password {
+  padding-right: 3rem; /* 48px right for eye icon */
+}
+
+/* Icon container positioning */
+.login-icon-left {
+  position: absolute;
+  left: 1rem; /* 16px from left */
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.login-icon-right {
+  position: absolute;
+  right: 1rem; /* 16px from right */
+  top: 50%;
+  transform: translateY(-50%);
+  cursor: pointer;
+  z-index: 1;
+  padding: 0.125rem;
+  transition: color 0.2s ease;
+}
+
+.login-icon-right:hover {
+  color: var(--heading);
+}

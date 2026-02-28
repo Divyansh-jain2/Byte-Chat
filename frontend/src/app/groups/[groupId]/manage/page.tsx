@@ -152,219 +152,153 @@ export default function ManageGroupPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-neutral-50 dark:bg-neutral-950">
-        <div className="text-center">
-          <div className="w-16 h-16 border-4 border-neutral-300 dark:border-neutral-700 border-t-neutral-900 dark:border-t-neutral-100 rounded-sm animate-spin mx-auto mb-4"></div>
-          <p className="text-neutral-600 dark:text-neutral-400 font-mono">LOADING...</p>
+      <div className="min-h-screen bg-mesh-warm flex items-center justify-center">
+        <div className="text-center animate-fade-in">
+          <div className="w-16 h-16 rounded-full border-4 border-transparent mx-auto mb-4 animate-spin"
+            style={{ borderTopColor: 'var(--pink)', borderRightColor: 'var(--coral)' }} />
+          <p className="text-sm font-medium" style={{ color: 'var(--muted)' }}>Loading members…</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-neutral-50 dark:bg-neutral-950">
-      {/* Header */}
-      <header className="border-b-4 border-neutral-900 dark:border-neutral-100 bg-white dark:bg-black">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-4xl font-bold text-neutral-900 dark:text-neutral-100 font-mono">
-                [MANAGE GROUP]
-              </h1>
-              <p className="mt-2 text-neutral-600 dark:text-neutral-400 font-mono">
-                Add or remove members
-              </p>
-            </div>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setShowAddMember(true)}
-                className="px-6 py-3 bg-green-600 dark:bg-green-500 text-white font-mono font-bold border-2 border-neutral-900 dark:border-neutral-100 hover:bg-green-700 transition-colors"
-              >
-                + ADD MEMBER
-              </button>
-              <button
-                onClick={() => router.back()}
-                className="px-6 py-3 bg-neutral-200 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 font-mono font-bold border-2 border-neutral-900 dark:border-neutral-100 hover:bg-neutral-300 dark:hover:bg-neutral-700 transition-colors"
-              >
-                ← BACK
-              </button>
-            </div>
+    <div className="min-h-screen bg-mesh-warm antialiased">
+      {/* Decorative blobs */}
+      <div className="fixed inset-0 pointer-events-none -z-10 overflow-hidden">
+        <div className="absolute top-[-10%] right-[-5%] w-96 h-96 bg-linear-to-br from-purple-300/10 to-transparent rounded-full blur-3xl" />
+        <div className="absolute bottom-[-10%] left-[-5%] w-80 h-80 bg-linear-to-tr from-pink-300/10 to-transparent rounded-full blur-3xl" />
+      </div>
+
+      {/* Nav */}
+      <header className="glass-nav sticky top-0 z-20 px-4 py-3 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <button onClick={() => router.back()} className="btn-ghost w-9 h-9 rounded-full flex items-center justify-center text-lg">←</button>
+          <div>
+            <p className="font-bold text-sm" style={{ color: 'var(--heading)' }}>Manage Members</p>
+            <p className="text-xs" style={{ color: 'var(--muted)' }}>{members.length} member{members.length !== 1 ? 's' : ''}</p>
           </div>
         </div>
+        <button onClick={() => setShowAddMember(true)} className="btn-romance px-4 py-2 text-sm">+ Add Member</button>
       </header>
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <main className="max-w-2xl mx-auto px-4 py-6">
         {error && (
-          <div className="mb-6 p-4 bg-red-100 dark:bg-red-900 border-2 border-red-600 text-red-900 dark:text-red-100 font-mono">
-            {error}
+          <div className="glass rounded-2xl p-4 mb-4 bg-red-500/10 border border-red-500/20">
+            <p className="text-red-400 text-sm">{error}</p>
           </div>
         )}
 
-        <div className="bg-white dark:bg-black border-4 border-neutral-900 dark:border-neutral-100 p-6 mb-6">
-          <h2 className="text-2xl font-bold text-neutral-900 dark:text-neutral-100 font-mono mb-4">
-            MEMBERS ({members.length})
-          </h2>
-
-          <div className="space-y-2">
-            {members.map((member) => (
-              <div
-                key={member.member_id}
-                className="flex items-center justify-between p-4 bg-neutral-50 dark:bg-neutral-950 border-2 border-neutral-900 dark:border-neutral-100"
-              >
-                <div className="flex items-center gap-4">
-                  {member.dp_url ? (
-                    <Image
-                      src={member.dp_url}
-                      alt={member.name}
-                      width={32}
-                      height={32}
-                      className="border-2 border-neutral-900 dark:border-neutral-100 object-cover"
-                    />
-                  ) : (
-                    <div className="w-12 h-12 border-2 border-neutral-900 dark:border-neutral-100 bg-neutral-300 dark:bg-neutral-700 flex items-center justify-center text-neutral-900 dark:text-neutral-100 font-bold font-mono text-xl">
-                      {member.name.charAt(0).toUpperCase()}
-                    </div>
-                  )}
-                  
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold text-neutral-900 dark:text-neutral-100 font-mono">
-                        {member.is_anonymous ? member.anonymous_name : member.name}
-                      </span>
-                      {member.is_owner && (
-                        <span className="px-2 py-0.5 bg-purple-200 dark:bg-purple-800 text-purple-900 dark:text-purple-100 text-xs font-mono font-bold border border-neutral-900 dark:border-neutral-100">
-                          OWNER
-                        </span>
-                      )}
-                      {member.is_admin && !member.is_owner && (
-                        <span className="px-2 py-0.5 bg-blue-200 dark:bg-blue-800 text-blue-900 dark:text-blue-100 text-xs font-mono font-bold border border-neutral-900 dark:border-neutral-100">
-                          ADMIN
-                        </span>
-                      )}
-                      {member.is_anonymous && (
-                        <span className="px-2 py-0.5 bg-gray-200 dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-xs font-mono font-bold border border-neutral-900 dark:border-neutral-100">
-                          ANON
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-sm text-neutral-600 dark:text-neutral-400 font-mono">
-                      {member.is_anonymous 
-                        ? `${member.anonymous_gender?.toUpperCase()} • Anonymous`
-                        : `${member.roll_no} • ${member.branch}`
-                      }
-                    </p>
-                    <p className="text-xs text-neutral-500 dark:text-neutral-400 font-mono">
-                      Joined: {new Date(member.joined_at).toLocaleDateString()}
-                    </p>
-                  </div>
+        {/* Members list */}
+        <div className="glass-strong rounded-3xl p-4 space-y-2">
+          {members.map((member) => (
+            <div key={member.member_id} className="glass rounded-2xl p-4 flex items-center gap-4">
+              {/* Avatar */}
+              {member.dp_url ? (
+                <Image src={member.dp_url} alt={member.name} width={44} height={44}
+                  className="rounded-xl object-cover shrink-0 w-11 h-11" />
+              ) : (
+                <div className="w-11 h-11 rounded-xl flex items-center justify-center text-white font-bold text-base shrink-0"
+                  style={{ background: member.is_anonymous ? 'var(--grad-mystery)' : 'var(--grad-romance)' }}>
+                  {member.is_anonymous ? '🎭' : (member.name?.charAt(0).toUpperCase() || '?')}
                 </div>
+              )}
 
-                <div className="flex gap-2">
-                  {/* Promote to Admin - only owners can promote, and only non-admins */}
-                  {isOwner && !member.is_admin && !member.is_owner && (
-                    <button
-                      onClick={() => handlePromoteMember(member.member_id, member.is_anonymous ? member.anonymous_name || 'Anonymous' : member.name)}
-                      className="px-4 py-2 bg-blue-600 text-white font-mono font-bold border-2 border-neutral-900 dark:border-neutral-100 hover:bg-blue-700 transition-colors text-xs"
-                    >
-                      MAKE ADMIN
-                    </button>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="font-semibold text-sm truncate" style={{ color: 'var(--heading)' }}>
+                    {member.is_anonymous ? (member.anonymous_name || 'Anonymous') : member.name}
+                  </span>
+                  {member.is_owner && (
+                    <span className="px-1.5 py-0.5 rounded-md text-xs font-semibold bg-purple-500/15 text-purple-400">👑 Owner</span>
                   )}
-                  {/* Remove - can't remove owner, only works for private groups */}
-                  {!member.is_owner && groupIsPrivate && (
-                    <button
-                      onClick={() => handleRemoveMember(member.member_id, member.is_anonymous ? member.anonymous_name || 'Anonymous' : member.name)}
-                      className="px-4 py-2 bg-red-600 text-white font-mono font-bold border-2 border-neutral-900 dark:border-neutral-100 hover:bg-red-700 transition-colors text-xs"
-                    >
-                      REMOVE
-                    </button>
+                  {member.is_admin && !member.is_owner && (
+                    <span className="px-1.5 py-0.5 rounded-md text-xs font-semibold bg-blue-500/15 text-blue-400">🛡️ Admin</span>
+                  )}
+                  {member.is_anonymous && (
+                    <span className="px-1.5 py-0.5 rounded-md text-xs font-semibold bg-purple-500/10 text-purple-300">🎭 Anon</span>
                   )}
                 </div>
+                <p className="text-xs mt-0.5 truncate" style={{ color: 'var(--muted)' }}>
+                  {member.is_anonymous
+                    ? `${member.anonymous_gender || 'Unknown'} · Anonymous`
+                    : `${member.roll_no} · ${member.branch}`}
+                </p>
+                <p className="text-xs" style={{ color: 'var(--muted)', opacity: 0.6 }}>
+                  Joined {new Date(member.joined_at).toLocaleDateString()}
+                </p>
               </div>
-            ))}
-          </div>
+
+              <div className="flex flex-col gap-1.5 shrink-0">
+                {isOwner && !member.is_admin && !member.is_owner && (
+                  <button onClick={() => handlePromoteMember(member.member_id, member.is_anonymous ? (member.anonymous_name || 'Anonymous') : member.name)}
+                    className="btn-ghost px-3 py-1 text-xs rounded-xl text-blue-400">
+                    Make Admin
+                  </button>
+                )}
+                {!member.is_owner && groupIsPrivate && (
+                  <button onClick={() => handleRemoveMember(member.member_id, member.is_anonymous ? (member.anonymous_name || 'Anonymous') : member.name)}
+                    className="btn-ghost px-3 py-1 text-xs rounded-xl text-red-400">
+                    Remove
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+
+          {members.length === 0 && (
+            <div className="text-center py-12">
+              <div className="text-4xl mb-3">👥</div>
+              <p className="text-sm" style={{ color: 'var(--muted)' }}>No members yet.</p>
+            </div>
+          )}
         </div>
       </main>
 
       {/* Add Member Modal */}
       {showAddMember && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-black border-4 border-neutral-900 dark:border-neutral-100 max-w-2xl w-full p-6 max-h-[80vh] overflow-y-auto">
-            <h2 className="text-2xl font-bold text-neutral-900 dark:text-neutral-100 mb-4 font-mono">
-              [ADD MEMBER]
-            </h2>
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-4">
+          <div className="glass-strong rounded-3xl w-full max-w-lg max-h-[80vh] flex flex-col overflow-hidden animate-scale-in">
+            <div className="flex items-center justify-between p-5 pb-3">
+              <h2 className="font-bold text-lg" style={{ color: 'var(--heading)' }}>Add Member</h2>
+              <button onClick={() => { setShowAddMember(false); setSearchQuery(''); }}
+                className="btn-ghost w-9 h-9 rounded-full flex items-center justify-center">✕</button>
+            </div>
 
-            <input
-              type="text"
-              placeholder="Search users..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full px-4 py-2 mb-4 border-2 border-neutral-900 dark:border-neutral-100 bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 font-mono focus:outline-none focus:ring-4 focus:ring-neutral-400"
-            />
+            <div className="px-5 pb-3">
+              <input type="text" placeholder="Search by name or roll no…" value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)} className="input-romance w-full" />
+            </div>
 
-            <div className="space-y-2 mb-4">
+            <div className="flex-1 overflow-y-auto px-5 pb-5 space-y-2 custom-scrollbar">
               {filteredAvailableUsers.length === 0 ? (
-                <p className="text-center text-neutral-500 dark:text-neutral-400 font-mono py-4">
-                  No users available
-                </p>
+                <div className="text-center py-8">
+                  <p className="text-sm" style={{ color: 'var(--muted)' }}>No users available</p>
+                </div>
               ) : (
                 filteredAvailableUsers.map((user) => (
-                  <div
-                    key={user.user_id}
-                    className="flex items-center justify-between p-3 bg-neutral-50 dark:bg-neutral-950 border-2 border-neutral-900 dark:border-neutral-100"
-                  >
-                    <div className="flex items-center gap-3">
-                      {user.dp_url ? (
-                        <Image
-                          src={user.dp_url}
-                          alt={user.name}
-                          width={24}
-                          height={24}
-                          className="border-2 border-neutral-900 dark:border-neutral-100 object-cover"
-                        />
-                      ) : (
-                        <div className="w-10 h-10 border-2 border-neutral-900 dark:border-neutral-100 bg-neutral-300 dark:bg-neutral-700 flex items-center justify-center text-neutral-900 dark:text-neutral-100 font-bold font-mono">
-                          {user.name.charAt(0).toUpperCase()}
-                        </div>
-                      )}
-                      
-                      <div>
-                        <p className="font-bold text-neutral-900 dark:text-neutral-100 font-mono">
-                          {user.name}
-                        </p>
-                        <p className="text-sm text-neutral-600 dark:text-neutral-400 font-mono">
-                          {user.roll_no} • {user.branch}
-                        </p>
+                  <div key={user.user_id} className="glass rounded-2xl p-3 flex items-center gap-3">
+                    {user.dp_url ? (
+                      <Image src={user.dp_url} alt={user.name} width={40} height={40}
+                        className="rounded-xl object-cover w-10 h-10 shrink-0" />
+                    ) : (
+                      <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold shrink-0"
+                        style={{ background: 'var(--grad-romance)' }}>
+                        {user.name?.charAt(0).toUpperCase() || '?'}
                       </div>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <p className="font-semibold text-sm truncate" style={{ color: 'var(--heading)' }}>{user.name}</p>
+                      <p className="text-xs truncate" style={{ color: 'var(--muted)' }}>{user.roll_no} · {user.branch}</p>
                     </div>
-
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => handleAddMember(user.user_id, false)}
-                        className="px-3 py-1 bg-neutral-900 dark:bg-neutral-100 text-neutral-100 dark:text-neutral-900 font-mono font-bold border-2 border-neutral-900 dark:border-neutral-100 hover:bg-neutral-700 dark:hover:bg-neutral-300 transition-colors text-xs"
-                      >
-                        ADD
-                      </button>
-                      <button
-                        onClick={() => handleAddMember(user.user_id, true)}
-                        className="px-3 py-1 bg-linear-to-r from-neutral-600 to-neutral-800 dark:from-neutral-400 dark:to-neutral-200 text-neutral-100 dark:text-neutral-900 font-mono font-bold border-2 border-neutral-900 dark:border-neutral-100 hover:from-neutral-700 hover:to-neutral-900 transition-all text-xs"
-                      >
-                        ADD ANON
-                      </button>
+                    <div className="flex gap-1.5 shrink-0">
+                      <button onClick={() => handleAddMember(user.user_id, false)} className="btn-romance px-3 py-1.5 text-xs">Add</button>
+                      <button onClick={() => handleAddMember(user.user_id, true)} className="btn-purple px-3 py-1.5 text-xs">🎭 Anon</button>
                     </div>
                   </div>
                 ))
               )}
             </div>
-
-            <button
-              onClick={() => {
-                setShowAddMember(false);
-                setSearchQuery('');
-              }}
-              className="w-full px-4 py-3 bg-neutral-200 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 font-mono font-bold border-2 border-neutral-900 dark:border-neutral-100 hover:bg-neutral-300 dark:hover:bg-neutral-700 transition-colors"
-            >
-              CLOSE
-            </button>
           </div>
         </div>
       )}

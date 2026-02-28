@@ -278,9 +278,9 @@ export default function ProfileImageManager({
 
             {/* Divider */}
             <div className="flex items-center gap-4">
-              <div className="flex-1 h-px bg-gray-200 dark:bg-gray-700"></div>
-              <span className="text-sm text-gray-500 dark:text-gray-400 font-medium">OR</span>
-              <div className="flex-1 h-px bg-gray-200 dark:bg-gray-700"></div>
+              <div className="flex-1 h-px" style={{ background: 'var(--border-light)' }}></div>
+              <span className="text-sm font-medium" style={{ color: 'var(--muted)' }}>OR</span>
+              <div className="flex-1 h-px" style={{ background: 'var(--border-light)' }}></div>
             </div>
 
             {/* Avatar Selector Section */}
@@ -291,9 +291,9 @@ export default function ProfileImageManager({
                   e.preventDefault();
                   setShowAvatarSelector(!showAvatarSelector);
                 }}
-                className="w-full flex items-center justify-between px-4 py-3 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors"
+                className="w-full flex items-center justify-between px-4 py-3 glass rounded-xl transition-all hover:scale-[1.02]"
               >
-                <span className="text-lg font-semibold text-gray-900 dark:text-white">
+                <span className="text-lg font-semibold" style={{ color: 'var(--heading)' }}>
                   {showAvatarSelector ? 'Hide' : 'Show'} Preset Avatars
                 </span>
                 <svg 
@@ -301,6 +301,7 @@ export default function ProfileImageManager({
                   fill="none" 
                   stroke="currentColor" 
                   viewBox="0 0 24 24"
+                  style={{ color: 'var(--body)' }}
                 >
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                 </svg>

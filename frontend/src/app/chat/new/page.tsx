@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { chatService } from '@/services/chat.service';
 import anonymousChatService from '@/services/anonymous-chat.service';
@@ -17,6 +17,7 @@ export default function NewChatPage() {
   const [status, setStatus] = useState<'sending' | 'success' | 'error'>('sending');
   const [error, setError] = useState<string>('');
   const [retrying, setRetrying] = useState(false);
+  const requestSentRef = useRef(false);
 
   const sendRequest = useCallback(async (receiverId: string, isAnonymous: boolean) => {
     try {
@@ -88,6 +89,11 @@ export default function NewChatPage() {
   }, [router]);
 
   useEffect(() => {
+    // Skip if request already sent (prevents double-call in React Strict Mode)
+    if (requestSentRef.current) {
+      return;
+    }
+
     const userId = searchParams.get('userId');
     const isAnonymous = searchParams.get('anonymous') === 'true';
 
@@ -108,6 +114,8 @@ export default function NewChatPage() {
       }
     }
 
+    // Mark request as sent
+    requestSentRef.current = true;
     sendRequest(userId, isAnonymous);
   }, [sendRequest, searchParams]);
 
@@ -117,104 +125,54 @@ export default function NewChatPage() {
     
     if (userId) {
       setRetrying(true);
+      requestSentRef.current = false; // Reset to allow retry
       sendRequest(userId, isAnonymous);
     }
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
-      <div className="max-w-md w-full bg-white dark:bg-gray-800 rounded-lg shadow-lg p-8">
+    <div className="min-h-screen bg-mesh-warm antialiased flex items-center justify-center p-4">
+      {/* Blobs */}
+      <div className="fixed inset-0 pointer-events-none -z-10 overflow-hidden">
+        <div className="absolute top-[-10%] right-[-10%] w-96 h-96 bg-linear-to-br from-pink-300/15 to-transparent rounded-full blur-3xl" />
+      </div>
+
+      <div className="glass-strong rounded-3xl p-8 max-w-sm w-full text-center animate-scale-in">
         {status === 'sending' && (
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-600 mx-auto mb-4"></div>
-            <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
-              Opening Chat...
-            </h2>
-            <p className="text-gray-600 dark:text-gray-400">
-              Please wait
-            </p>
-          </div>
+          <>
+            <div className="w-16 h-16 rounded-full border-4 border-transparent mx-auto mb-5 animate-spin"
+              style={{ borderTopColor: 'var(--pink)', borderRightColor: 'var(--coral)' }} />
+            <h2 className="text-xl font-bold mb-2" style={{ color: 'var(--heading)' }}>Opening Chat…</h2>
+            <p className="text-sm" style={{ color: 'var(--muted)' }}>Please wait a moment</p>
+          </>
         )}
 
         {status === 'success' && (
-          <div className="text-center">
-            <div className="mb-4">
-              <svg
-                className="w-16 h-16 text-green-500 mx-auto"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-                />
-              </svg>
+          <>
+            <div className="w-16 h-16 rounded-full bg-emerald-500/15 flex items-center justify-center mx-auto mb-5">
+              <span className="text-2xl">✓</span>
             </div>
-            <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
-              Chat Ready!
-            </h2>
-            <p className="text-gray-600 dark:text-gray-400 mb-4">
-              Opening conversation...
-            </p>
-            <p className="text-sm text-gray-500">Redirecting...</p>
-          </div>
+            <h2 className="text-xl font-bold mb-2" style={{ color: 'var(--heading)' }}>Chat Ready!</h2>
+            <p className="text-sm" style={{ color: 'var(--muted)' }}>Opening conversation…</p>
+          </>
         )}
 
         {status === 'error' && (
-          <div className="text-center">
-            <div className="mb-4">
-              <svg
-                className="w-16 h-16 text-red-500 mx-auto"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                />
-              </svg>
+          <>
+            <div className="w-16 h-16 rounded-full bg-red-500/15 flex items-center justify-center mx-auto mb-5">
+              <span className="text-2xl">!</span>
             </div>
-            <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
-              Request Failed
-            </h2>
-            <p className="text-red-600 dark:text-red-400 mb-6">{error}</p>
+            <h2 className="text-xl font-bold mb-2" style={{ color: 'var(--heading)' }}>Request Failed</h2>
+            <p className="text-sm mb-6 text-red-400">{error}</p>
             <div className="flex gap-3 justify-center">
-              <button
-                onClick={handleRetry}
-                disabled={retrying}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
-              >
+              <button onClick={handleRetry} disabled={retrying} className="btn-romance px-5 py-2.5 text-sm flex items-center gap-2 disabled:opacity-60">
                 {retrying ? (
-                  <>
-                    <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                    </svg>
-                    Retrying...
-                  </>
-                ) : (
-                  <>
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                    </svg>
-                    Try Again
-                  </>
-                )}
+                  <><span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" /> Retrying…</>
+                ) : '↺ Try Again'}
               </button>
-              <button
-                onClick={() => router.push('/dashboard')}
-                className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
-              >
-                Back to Dashboard
-              </button>
+              <button onClick={() => router.push('/dashboard')} className="btn-ghost px-5 py-2.5 text-sm">Dashboard</button>
             </div>
-          </div>
+          </>
         )}
       </div>
     </div>

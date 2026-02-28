@@ -2,13 +2,11 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useTheme } from '@/contexts/ThemeContext';
 import Image from 'next/image';
+import '../profile.css';
 
 export default function CompleteProfile() {
   const router = useRouter();
-  const { theme, toggleTheme } = useTheme();
-  
   const [formData, setFormData] = useState({
     dob: '',
     bio: '',
@@ -102,163 +100,87 @@ export default function CompleteProfile() {
   };
 
   return (
-    <div className={`min-h-screen flex items-center justify-center p-4 ${
-      theme === 'dark' 
-        ? 'bg-linear-to-br from-gray-900 via-purple-900 to-gray-900' 
-        : 'bg-linear-to-br from-blue-50 via-purple-50 to-pink-50'
-    }`}>
-      {/* Theme Toggle */}
-      <button
-        onClick={toggleTheme}
-        className={`fixed top-6 right-6 p-3 rounded-full backdrop-blur-md transition-all ${
-          theme === 'dark'
-            ? 'bg-white/10 hover:bg-white/20 text-white'
-            : 'bg-white/50 hover:bg-white/70 text-gray-800'
-        }`}
-      >
-        {theme === 'dark' ? '☀️' : '🌙'}
-      </button>
+    <div className="min-h-screen bg-mesh-warm antialiased flex items-center justify-center p-4">
+      {/* Blobs */}
+      <div className="fixed inset-0 pointer-events-none -z-10 overflow-hidden">
+        <div className="absolute top-[-10%] right-[-10%] w-96 h-96 bg-linear-to-br from-pink-300/15 to-transparent rounded-full blur-3xl" />
+        <div className="absolute bottom-[-10%] left-[-10%] w-80 h-80 bg-linear-to-tr from-purple-300/10 to-transparent rounded-full blur-3xl" />
+      </div>
 
-      <div className={`w-full max-w-2xl backdrop-blur-md rounded-2xl shadow-2xl p-8 ${
-        theme === 'dark'
-          ? 'bg-white/10 border border-white/20'
-          : 'bg-white/60 border border-white/40'
-      }`}>
-        <h1 className={`text-4xl font-bold mb-2 text-center ${
-          theme === 'dark' ? 'text-white' : 'text-gray-800'
-        }`}>
-          Complete Your Profile 🎨
-        </h1>
-        <p className={`text-center mb-8 ${
-          theme === 'dark' ? 'text-gray-300' : 'text-gray-600'
-        }`}>
-          Add some details to personalize your BYTE-CHAT experience
-        </p>
+      <div className="w-full max-w-lg animate-scale-in">
+        {/* Header */}
+        <div className="text-center mb-8">
+          <div className="text-5xl mb-3">🎨</div>
+          <h1 className="text-3xl font-bold mb-2" style={{ color: 'var(--heading)' }}>Complete Your Profile</h1>
+          <p className="text-sm" style={{ color: 'var(--muted)' }}>Add details to personalize your BYTE-CHAT experience</p>
+        </div>
 
-        {error && (
-          <div className="mb-6 p-4 bg-red-500/20 border border-red-500/50 rounded-lg text-red-200 backdrop-blur-sm">
-            {error}
-          </div>
-        )}
+        <div className="glass-strong rounded-3xl p-6 sm:p-8">
+          {error && (
+            <div className="mb-5 glass rounded-2xl p-4 bg-red-500/10 border border-red-500/20">
+              <p className="text-red-400 text-sm">{error}</p>
+            </div>
+          )}
 
-        <form onSubmit={handleSubmit} className="space-y-6">
-          {/* Profile Picture */}
-          <div>
-            <label className={`block text-sm font-medium mb-2 ${
-              theme === 'dark' ? 'text-gray-200' : 'text-gray-700'
-            }`}>
-              Profile Picture
-            </label>
-            <div className="flex items-center gap-4">
-              {formData.dpUrl && (
-                <Image
-                  src={formData.dpUrl}
-                  alt="Profile Preview"
-                  width={128}
-                  height={128}
-                  className="rounded-full object-cover"
-                />
-              )}
-              <div className="flex-1">
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={handleImageUpload}
-                  className={`w-full p-3 rounded-lg backdrop-blur-sm transition-all ${
-                    theme === 'dark'
-                      ? 'bg-white/10 border border-white/20 text-white placeholder-gray-400 focus:border-purple-400'
-                      : 'bg-white/50 border border-gray-300 text-gray-800 placeholder-gray-500 focus:border-purple-500'
-                  }`}
-                  disabled={uploadingImage}
-                />
-                <p className={`text-xs mt-1 ${
-                  theme === 'dark' ? 'text-gray-400' : 'text-gray-500'
-                }`}>
-                  Max 2MB, JPG/PNG
-                </p>
+          <form onSubmit={handleSubmit} className="space-y-5">
+            {/* Profile Picture */}
+            <div>
+              <label className="block text-xs font-semibold mb-2 uppercase tracking-wider" style={{ color: 'var(--muted)' }}>
+                Profile Picture
+              </label>
+              <div className="flex items-center gap-4">
+                {formData.dpUrl ? (
+                  <Image src={formData.dpUrl} alt="Preview" width={72} height={72}
+                    className="w-18 h-18 rounded-2xl object-cover shrink-0" />
+                ) : (
+                  <div className="w-16 h-16 rounded-2xl flex items-center justify-center text-2xl shrink-0"
+                    style={{ background: 'var(--glass-bg)' }}>👤</div>
+                )}
+                <div className="flex-1">
+                  <input type="file" accept="image/*" onChange={handleImageUpload}
+                    disabled={uploadingImage} className="input-romance w-full text-sm py-2 cursor-pointer" />
+                  <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>Max 2MB · JPG/PNG</p>
+                  {uploadingImage && <p className="text-xs mt-1" style={{ color: 'var(--pink)' }}>Uploading…</p>}
+                </div>
               </div>
             </div>
-          </div>
 
-          {/* Date of Birth */}
-          <div>
-            <label htmlFor="dob" className={`block text-sm font-medium mb-2 ${
-              theme === 'dark' ? 'text-gray-200' : 'text-gray-700'
-            }`}>
-              Date of Birth *
-            </label>
-            <input
-              type="date"
-              id="dob"
-              name="dob"
-              value={formData.dob}
-              onChange={handleChange}
-              required
-              className={`w-full p-3 rounded-lg backdrop-blur-sm transition-all ${
-                theme === 'dark'
-                  ? 'bg-white/10 border border-white/20 text-white focus:border-purple-400'
-                  : 'bg-white/50 border border-gray-300 text-gray-800 focus:border-purple-500'
-              }`}
-            />
-          </div>
+            {/* Date of Birth */}
+            <div>
+              <label htmlFor="dob" className="block text-xs font-semibold mb-2 uppercase tracking-wider" style={{ color: 'var(--muted)' }}>
+                Date of Birth *
+              </label>
+              <input type="date" id="dob" name="dob" value={formData.dob}
+                onChange={handleChange} required className="input-romance w-full" />
+            </div>
 
-          {/* Bio */}
-          <div>
-            <label htmlFor="bio" className={`block text-sm font-medium mb-2 ${
-              theme === 'dark' ? 'text-gray-200' : 'text-gray-700'
-            }`}>
-              Bio (Max 500 characters)
-            </label>
-            <textarea
-              id="bio"
-              name="bio"
-              value={formData.bio}
-              onChange={handleChange}
-              maxLength={500}
-              rows={4}
-              placeholder="Tell us about yourself..."
-              className={`w-full p-3 rounded-lg backdrop-blur-sm transition-all resize-none ${
-                theme === 'dark'
-                  ? 'bg-white/10 border border-white/20 text-white placeholder-gray-400 focus:border-purple-400'
-                  : 'bg-white/50 border border-gray-300 text-gray-800 placeholder-gray-500 focus:border-purple-500'
-              }`}
-            />
-            <p className={`text-xs mt-1 text-right ${
-              theme === 'dark' ? 'text-gray-400' : 'text-gray-500'
-            }`}>
-              {formData.bio.length}/500
-            </p>
-          </div>
+            {/* Bio */}
+            <div>
+              <label htmlFor="bio" className="block text-xs font-semibold mb-2 uppercase tracking-wider" style={{ color: 'var(--muted)' }}>
+                Bio <span className="normal-case font-normal">(optional, max 500 chars)</span>
+              </label>
+              <textarea id="bio" name="bio" value={formData.bio} onChange={handleChange}
+                maxLength={500} rows={4} placeholder="Tell us about yourself…"
+                className="input-romance w-full resize-none" />
+              <p className="text-xs mt-1 text-right" style={{ color: 'var(--muted)' }}>{formData.bio.length}/500</p>
+            </div>
 
-          {/* Submit Button */}
-          <button
-            type="submit"
-            disabled={isLoading || uploadingImage}
-            className="w-full p-4 rounded-lg font-semibold text-white bg-linear-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 disabled:from-gray-400 disabled:to-gray-500 disabled:cursor-not-allowed transition-all shadow-lg hover:shadow-xl"
-          >
-            {isLoading ? (
-              <span className="flex items-center justify-center gap-2">
-                <span className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-                Completing Profile...
-              </span>
-            ) : (
-              'Complete Profile →'
-            )}
-          </button>
+            {/* Submit */}
+            <button type="submit" disabled={isLoading || uploadingImage} className="profile-btn-primary w-full py-3 text-base font-semibold">
+              {isLoading ? (
+                <span className="flex items-center justify-center gap-2">
+                  <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                  Completing…
+                </span>
+              ) : 'Complete Profile →'}
+            </button>
 
-          {/* Skip Button */}
-          <button
-            type="button"
-            onClick={() => router.push('/dashboard')}
-            className={`w-full p-4 rounded-lg font-semibold transition-all ${
-              theme === 'dark'
-                ? 'bg-white/10 hover:bg-white/20 text-white'
-                : 'bg-gray-200 hover:bg-gray-300 text-gray-800'
-            }`}
-          >
-            Skip for now
-          </button>
-        </form>
+            {/* Skip */}
+            <button type="button" onClick={() => router.push('/dashboard')} className="btn-ghost w-full py-3 text-sm">
+              Skip for now
+            </button>
+          </form>
+        </div>
       </div>
     </div>
   );

@@ -40,141 +40,144 @@ export default function MyGroupsPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-neutral-50 dark:bg-neutral-950">
-        <div className="text-center">
-          <div className="w-16 h-16 border-4 border-neutral-300 dark:border-neutral-700 border-t-neutral-900 dark:border-t-neutral-100 rounded-sm animate-spin mx-auto mb-4"></div>
-          <p className="text-neutral-600 dark:text-neutral-400 font-mono">LOADING...</p>
+      <div className="min-h-screen bg-mesh-warm flex items-center justify-center">
+        <div className="text-center animate-fade-in">
+          <div className="w-16 h-16 rounded-full border-4 border-transparent mx-auto mb-4 animate-spin"
+            style={{ borderTopColor: 'var(--pink)', borderRightColor: 'var(--coral)' }} />
+          <p className="text-sm font-medium" style={{ color: 'var(--muted)' }}>Loading groups…</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-neutral-50 dark:bg-neutral-950">
-      {/* Header */}
-      <header className="border-b-4 border-neutral-900 dark:border-neutral-100 bg-white dark:bg-black">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-          <div className="flex items-center justify-between">
+    <div className="min-h-screen bg-mesh-warm antialiased">
+      {/* Blobs */}
+      <div className="fixed inset-0 pointer-events-none -z-10 overflow-hidden">
+        <div className="absolute top-[-10%] right-[-5%] w-96 h-96 bg-linear-to-br from-cyan-300/15 to-transparent rounded-full blur-3xl" />
+        <div className="absolute bottom-[-5%] left-[-3%] w-80 h-80 bg-linear-to-br from-blue-300/10 to-transparent rounded-full blur-3xl" />
+      </div>
+
+      {/* Nav */}
+      <header className="glass-nav sticky top-0 z-50 px-6 py-4">
+        <div className="max-w-6xl mx-auto flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <Link href="/dashboard" className="btn-ghost px-3 py-2 text-sm flex items-center gap-2">
+              ← Back
+            </Link>
             <div>
-              <h1 className="text-4xl font-bold text-neutral-900 dark:text-neutral-100 font-mono">
-                [MY GROUPS]
-              </h1>
-              <p className="mt-2 text-neutral-600 dark:text-neutral-400 font-mono">
-                Groups you`ve joined or created
+              <h1 className="text-xl font-bold heading-romance">My Groups</h1>
+              <p className="text-xs" style={{ color: 'var(--muted)' }}>
+                {groups.length} group{groups.length !== 1 ? 's' : ''} joined
               </p>
             </div>
-            <div className="flex gap-2">
-              <Link
-                href="/my-identities"
-                className="px-4 py-3 bg-neutral-200 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 font-mono font-bold border-2 border-neutral-900 dark:border-neutral-100 hover:bg-neutral-300 dark:hover:bg-neutral-700 transition-colors"
-              >
-                🎭 IDENTITIES
-              </Link>
-              <Link
-                href="/dashboard"
-                className="px-6 py-3 bg-neutral-200 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 font-mono font-bold border-2 border-neutral-900 dark:border-neutral-100 hover:bg-neutral-300 dark:hover:bg-neutral-700 transition-colors"
-              >
-                ← BACK
-              </Link>
-            </div>
           </div>
+          <Link href="/my-identities" className="btn-ghost px-4 py-2 text-sm flex items-center gap-2">
+            🎭 Identities
+          </Link>
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <main className="max-w-6xl mx-auto px-6 py-8">
+
+        {/* Error */}
         {error && (
-          <div className="mb-6 p-4 bg-red-100 dark:bg-red-900 border-2 border-red-600 text-red-900 dark:text-red-100 font-mono">
-            {error}
+          <div className="glass rounded-2xl p-4 mb-6 border border-red-400/30 bg-red-500/10 text-red-400 animate-fade-in">
+            ⚠️ {error}
           </div>
         )}
 
+        {/* Empty State */}
         {groups.length === 0 ? (
-          <div className="text-center py-12 border-4 border-neutral-900 dark:border-neutral-100 bg-white dark:bg-black">
-            <p className="text-neutral-500 dark:text-neutral-400 text-lg font-mono font-bold mb-4">
-              NO GROUPS YET
+          <div className="glass-strong rounded-3xl p-16 text-center animate-scale-in">
+            <div className="text-6xl mb-4">👥</div>
+            <h3 className="text-xl font-bold mb-2" style={{ color: 'var(--heading)' }}>No groups yet</h3>
+            <p className="text-sm mb-6" style={{ color: 'var(--muted)' }}>
+              Join or create groups from the dashboard
             </p>
-            <Link
-              href="/dashboard"
-              className="inline-block px-6 py-3 bg-neutral-900 dark:bg-neutral-100 text-neutral-100 dark:text-neutral-900 font-mono font-bold border-2 border-neutral-900 dark:border-neutral-100 hover:bg-neutral-700 dark:hover:bg-neutral-300 transition-colors"
-            >
-              BROWSE GROUPS
+            <Link href="/dashboard" className="btn-romance">
+              Browse Groups
             </Link>
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            {groups.map((group) => (
+            {groups.map((group, idx) => (
               <div
                 key={group.group_id}
-                className="bg-white dark:bg-black border-4 border-neutral-900 dark:border-neutral-100 p-6 hover:shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] dark:hover:shadow-[8px_8px_0px_0px_rgba(255,255,255,1)] transition-shadow"
+                className="glass-card rounded-3xl p-6 flex flex-col animate-fade-in"
+                style={{ animationDelay: `${idx * 60}ms` }}
               >
-                {group.group_dp_url && (
-                  <div className="mb-4">
-                    <Image
-                      src={group.group_dp_url}
-                      alt={group.group_name}
-                      width={128}
-                      height={128}
-                      className="object-cover border-2 border-neutral-900 dark:border-neutral-100"
-                    />
+                {/* Group image or fallback icon */}
+                <div className="flex items-start gap-4 mb-4">
+                  <div className="relative shrink-0">
+                    {group.group_dp_url ? (
+                      <Image
+                        src={group.group_dp_url}
+                        alt={group.group_name}
+                        width={56}
+                        height={56}
+                        className="w-14 h-14 rounded-2xl object-cover ring-2 ring-white/20"
+                      />
+                    ) : (
+                      <div className="w-14 h-14 rounded-2xl flex items-center justify-center text-2xl"
+                        style={{ background: 'var(--grad-ocean)' }}>
+                        👥
+                      </div>
+                    )}
                   </div>
-                )}
-                <div className="flex items-start justify-between mb-4">
-                  <h3 className="text-xl font-bold text-neutral-900 dark:text-neutral-100 font-mono">
-                    {group.group_name.toUpperCase()}
-                  </h3>
-                  <div className="flex flex-col gap-1">
-                    <span className={`px-2 py-1 text-xs font-mono font-bold border-2 border-neutral-900 dark:border-neutral-100 ${
-                      group.is_public 
-                        ? 'bg-green-200 dark:bg-green-800 text-green-900 dark:text-green-100'
-                        : 'bg-orange-200 dark:bg-orange-800 text-orange-900 dark:text-orange-100'
-                    }`}>
-                      {group.is_public ? 'PUBLIC' : 'PRIVATE'}
-                    </span>
-                    {group.is_owner && (
-                      <span className="px-2 py-1 bg-purple-200 dark:bg-purple-800 text-purple-900 dark:text-purple-100 text-xs font-mono font-bold border-2 border-neutral-900 dark:border-neutral-100">
-                        OWNER
+                  <div className="flex-1 min-w-0">
+                    <h3 className="font-bold text-base truncate mb-1" style={{ color: 'var(--heading)' }}>
+                      {group.group_name}
+                    </h3>
+                    <div className="flex flex-wrap gap-1">
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
+                        group.is_public ? 'bg-emerald-500/15 text-emerald-400' : 'bg-orange-500/15 text-orange-400'
+                      }`}>
+                        {group.is_public ? '🌐 Public' : '🔒 Private'}
                       </span>
-                    )}
-                    {group.is_admin && !group.is_owner && (
-                      <span className="px-2 py-1 bg-blue-200 dark:bg-blue-800 text-blue-900 dark:text-blue-100 text-xs font-mono font-bold border-2 border-neutral-900 dark:border-neutral-100">
-                        ADMIN
-                      </span>
-                    )}
-                    {group.is_anonymous && (
-                      <span className="px-2 py-1 bg-gray-200 dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-xs font-mono font-bold border-2 border-neutral-900 dark:border-neutral-100">
-                        ANON
-                      </span>
-                    )}
+                      {group.is_owner && (
+                        <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-purple-500/15 text-purple-400">
+                          👑 Owner
+                        </span>
+                      )}
+                      {group.is_admin && !group.is_owner && (
+                        <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-500/15 text-blue-400">
+                          🛡️ Admin
+                        </span>
+                      )}
+                      {group.is_anonymous && (
+                        <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-white/10 text-gray-400">
+                          🎭 Anon
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
-                
+
                 {group.group_desc && (
-                  <p className="text-sm text-neutral-600 dark:text-neutral-400 mb-4 font-mono line-clamp-3">
+                  <p className="text-sm mb-4 line-clamp-2" style={{ color: 'var(--muted)' }}>
                     {group.group_desc}
                   </p>
                 )}
 
-                <div className="flex items-center gap-4 mb-4 text-sm text-neutral-600 dark:text-neutral-400 font-mono">
-                  <span>{group.member_count} / {group.max_members} MEMBERS</span>
+                <div className="flex items-center justify-between text-xs mb-4 pt-3 border-t" style={{ borderColor: 'var(--border-light)', color: 'var(--muted)' }}>
+                  <span>👤 {group.member_count} / {group.max_members} members</span>
+                  <span>Joined {new Date(group.joined_at).toLocaleDateString()}</span>
                 </div>
 
-                <div className="text-xs text-neutral-500 dark:text-neutral-400 font-mono mb-4">
-                  Joined: {new Date(group.joined_at).toLocaleDateString()}
-                </div>
-
-                <div className="flex gap-2">
+                <div className="flex gap-2 mt-auto">
                   <Link
                     href={`/groups/${group.group_id}`}
-                    className="flex-1 px-4 py-2 bg-neutral-900 dark:bg-neutral-100 text-neutral-100 dark:text-neutral-900 font-mono font-bold border-2 border-neutral-900 dark:border-neutral-100 hover:bg-neutral-700 dark:hover:bg-neutral-300 transition-colors text-xs text-center"
+                    className="btn-romance flex-1 text-center text-sm py-2"
                   >
-                    VIEW
+                    View
                   </Link>
                   {(group.is_admin || group.is_owner) && (
                     <Link
                       href={`/groups/${group.group_id}/manage`}
-                      className="flex-1 px-4 py-2 bg-blue-600 dark:bg-blue-500 text-white font-mono font-bold border-2 border-neutral-900 dark:border-neutral-100 hover:bg-blue-700 dark:hover:bg-blue-600 transition-colors text-xs text-center"
+                      className="btn-ghost flex-1 text-center text-sm py-2"
                     >
-                      MANAGE
+                      Manage
                     </Link>
                   )}
                 </div>

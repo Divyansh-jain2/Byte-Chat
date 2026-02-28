@@ -74,9 +74,10 @@ export function BlockUserButton({ userId, userName, isBlocked, onBlockStatusChan
       <button
         onClick={handleUnblock}
         disabled={loading}
-        className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50"
+        className="w-full px-4 py-2 rounded-xl text-sm font-semibold glass transition-all hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
+        style={{ color: 'var(--body)' }}
       >
-        {loading ? 'Unblocking...' : 'Unblock User'}
+        {loading ? '⏳ Unblocking...' : '✓ Unblock User'}
       </button>
     );
   }
@@ -85,34 +86,37 @@ export function BlockUserButton({ userId, userName, isBlocked, onBlockStatusChan
     <>
       <button
         onClick={() => setShowReasonDialog(true)}
-        className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
+        className="w-full px-4 py-2 rounded-xl text-sm font-semibold glass transition-all hover:scale-105"
+        style={{ color: '#EF4444' }}
       >
-        Block User
+        🚫 Block User
       </button>
 
       {showReasonDialog && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white p-6 rounded-lg shadow-xl max-w-md w-full">
-            <h3 className="text-xl font-bold mb-4">Block {userName}</h3>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-5" style={{ background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(8px)' }}>
+          <div className="glass-strong rounded-3xl p-8 w-full max-w-md animate-scale-in">
+            <h3 className="text-xl font-extrabold mb-4" style={{ color: 'var(--heading)' }}>Block {userName}</h3>
             <textarea
               value={reason}
               onChange={(e) => setReason(e.target.value)}
               placeholder="Why are you blocking this user? (optional)"
-              className="w-full border rounded p-2 mb-4 h-24"
+              className="input-romance resize-none mb-4 h-24"
             />
-            <div className="flex gap-2 justify-end">
+            <div className="flex gap-3">
               <button
                 onClick={() => setShowReasonDialog(false)}
-                className="px-4 py-2 bg-gray-300 rounded hover:bg-gray-400"
+                className="flex-1 px-4 py-3 rounded-2xl text-sm font-semibold glass transition-all hover:scale-105"
+                style={{ color: 'var(--body)' }}
               >
                 Cancel
               </button>
               <button
                 onClick={handleBlock}
                 disabled={loading}
-                className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50"
+                className="flex-1 px-4 py-3 rounded-2xl text-sm font-semibold text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{ background: 'linear-gradient(135deg, #EF4444, #DC2626)' }}
               >
-                {loading ? 'Blocking...' : 'Block'}
+                {loading ? '⏳ Blocking...' : '🚫 Block'}
               </button>
             </div>
           </div>
@@ -372,55 +376,63 @@ export function ReportGroupButton({ groupId, groupName }: ReportGroupButtonProps
     <>
       <button
         onClick={() => setShowReportDialog(true)}
-        className="px-4 py-2 bg-yellow-600 text-white rounded hover:bg-yellow-700 font-mono font-bold border-2 border-neutral-900 dark:border-neutral-100"
+        className="px-6 py-3 rounded-2xl text-sm font-semibold glass transition-all hover:scale-105 flex items-center gap-2"
+        style={{ color: '#F59E0B' }}
       >
-        🚨 REPORT GROUP
+        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+        </svg>
+        Report Group
       </button>
 
       {showReportDialog && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl max-w-md w-full">
-            <h3 className="text-xl font-bold mb-4 text-gray-900 dark:text-white">Report {groupName}</h3>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-5" style={{ background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(8px)' }}>
+          <div className="glass-strong rounded-3xl p-7 w-full max-w-md animate-scale-in">
+            <h3 className="text-lg font-bold mb-5" style={{ color: 'var(--heading)' }}>Report {groupName} ⚠️</h3>
             
-            <div className="mb-4">
-              <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">Report Type</label>
-              <select
-                value={reportType}
-                onChange={(e) => setReportType(e.target.value)}
-                className="w-full border rounded p-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-              >
-                {REPORT_TYPES.map((type) => (
-                  <option key={type.value} value={type.value}>
-                    {type.label}
-                  </option>
-                ))}
-              </select>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-semibold mb-2" style={{ color: 'var(--heading)' }}>Report Type *</label>
+                <select
+                  value={reportType}
+                  onChange={(e) => setReportType(e.target.value)}
+                  className="select-romance w-full"
+                >
+                  {REPORT_TYPES.map((type) => (
+                    <option key={type.value} value={type.value}>
+                      {type.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold mb-2" style={{ color: 'var(--heading)' }}>Description *</label>
+                <textarea
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="Please provide details about why you're reporting this group..."
+                  className="input-romance resize-none h-32"
+                  required
+                />
+              </div>
             </div>
 
-            <div className="mb-4">
-              <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">Description *</label>
-              <textarea
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="Please provide details about why you're reporting this group..."
-                className="w-full border rounded p-2 h-32 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                required
-              />
-            </div>
-
-            <div className="flex gap-2 justify-end">
+            <div className="flex gap-3 mt-5">
               <button
                 onClick={() => setShowReportDialog(false)}
-                className="px-4 py-2 bg-gray-300 dark:bg-gray-600 rounded hover:bg-gray-400 dark:hover:bg-gray-500"
+                className="flex-1 py-3 rounded-2xl text-sm font-semibold glass transition-all hover:scale-105"
+                style={{ color: 'var(--body)' }}
               >
                 Cancel
               </button>
               <button
                 onClick={handleReport}
                 disabled={loading}
-                className="px-4 py-2 bg-yellow-600 text-white rounded hover:bg-yellow-700 disabled:opacity-50"
+                className="flex-1 py-3 rounded-2xl text-sm font-semibold text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{ background: 'linear-gradient(135deg, #F59E0B, #D97706)' }}
               >
-                {loading ? 'Submitting...' : 'Submit Report'}
+                {loading ? '⏳ Submitting...' : '🚨 Submit Report'}
               </button>
             </div>
           </div>

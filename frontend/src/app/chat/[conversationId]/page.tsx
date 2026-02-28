@@ -634,32 +634,16 @@ export default function ChatWindowPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600 dark:text-gray-400">Loading chat...</p>
+      <div className="min-h-screen bg-mesh-warm flex items-center justify-center">
+        <div className="text-center animate-fade-in">
+          <div className="w-14 h-14 rounded-full border-4 mx-auto mb-4 animate-spin" style={{ borderColor: 'var(--pink)', borderTopColor: 'transparent' }} />
+          <p className="text-sm" style={{ color: 'var(--muted)' }}>Loading chat…</p>
           {loadingTimeout && (
-            <div className="mt-4">
-              <p className="text-orange-600 dark:text-orange-400 mb-3">
-                Taking longer than expected...
-              </p>
+            <div className="mt-5 space-y-3">
+              <p className="text-sm" style={{ color: 'var(--coral)' }}>Taking longer than expected…</p>
               <div className="flex gap-3 justify-center">
-                <button
-                  onClick={() => {
-                    setLoading(true);
-                    setLoadingTimeout(false);
-                    fetchMessages();
-                  }}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-                >
-                  Try Again
-                </button>
-                <button
-                  onClick={() => router.push('/chat')}
-                  className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600"
-                >
-                  Back to Chats
-                </button>
+                <button onClick={() => { setLoading(true); setLoadingTimeout(false); fetchMessages(); }} className="btn-romance px-4 py-2 text-sm">Try Again</button>
+                <button onClick={() => router.push('/chat')} className="btn-ghost px-4 py-2 text-sm">← Back</button>
               </div>
             </div>
           )}
@@ -669,135 +653,76 @@ export default function ChatWindowPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-      {/* Header */}
-      <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-10">
-        <div className="max-w-4xl mx-auto px-4 py-4 flex items-center gap-3">
-          <button
-            onClick={() => router.push('/chat')}
-            className="text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
-          >
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-            </svg>
-          </button>
-          
-          <div className="flex items-center gap-3 flex-1">
-            {/* Profile Picture or Anonymous Icon */}
-            {isAnonymous || !otherUser?.dp_url ? (
-              <div className="w-10 h-10 rounded-full bg-linear-to-br from-purple-400 to-pink-500 flex items-center justify-center text-white font-semibold">
-                {isAnonymous ? '?' : (otherUser?.name?.[0]?.toUpperCase() || 'U')}
-              </div>
-            ) : (
-              <Image
-                src={otherUser.dp_url}
-                alt={otherUser.name}
-                width={32}
-                height={32}
-                className="rounded-full object-cover"
-              />
-            )}
-            <div>
-              <h2 className="font-semibold text-gray-900 dark:text-white flex items-center gap-2">
-                {otherUser?.name || 'Unknown User'}
-                {isAnonymous && (
-                  <span className="text-xs bg-purple-100 dark:bg-purple-900 text-purple-600 dark:text-purple-300 px-2 py-1 rounded">
-                    Anonymous
-                  </span>
-                )}
-              </h2>
-              {!isAnonymous && otherUser?.roll_no && (
-                <p className="text-sm text-gray-500">{otherUser.roll_no}</p>
-              )}
-              {isAnonymous && otherUser?.gender && (
-                <p className="text-sm text-gray-500">{otherUser.gender}</p>
-              )}
+    <div className="h-screen bg-mesh-warm antialiased flex flex-col">
+      <div className="fixed inset-0 pointer-events-none -z-10 overflow-hidden">
+        <div className="absolute top-[-10%] right-[-5%] w-80 h-80 bg-linear-to-br from-pink-300/10 to-transparent rounded-full blur-3xl" />
+      </div>
+
+      {/* Chat Header */}
+      <div className="glass-nav shrink-0 px-4 py-3 flex items-center gap-3 z-10">
+        <button onClick={() => router.push('/chat')} className="w-9 h-9 rounded-xl glass flex items-center justify-center shrink-0 transition-all hover:scale-105" style={{ color: 'var(--body)' }}>
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+        </button>
+
+        <div className="flex items-center gap-3 flex-1 min-w-0">
+          {(isAnonymous || !otherUser?.dp_url) ? (
+            <div className="w-10 h-10 rounded-full shrink-0 flex items-center justify-center text-white font-bold" style={{ background: isAnonymous ? 'var(--grad-mystery)' : 'var(--grad-romance)' }}>
+              {isAnonymous ? '?' : (otherUser?.name?.[0]?.toUpperCase() || 'U')}
             </div>
+          ) : (
+            <Image src={otherUser.dp_url} alt={otherUser.name} width={40} height={40} className="w-10 h-10 rounded-full object-cover ring-2 ring-white/40 shrink-0" />
+          )}
+          <div className="min-w-0">
+            <h2 className="font-bold truncate flex items-center gap-2" style={{ color: 'var(--heading)' }}>
+              {otherUser?.name || 'Unknown'}
+              {isAnonymous && <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: 'rgba(168,85,247,.15)', color: 'var(--purple)' }}>Anon</span>}
+            </h2>
+            {!isAnonymous && otherUser?.roll_no && <p className="text-xs" style={{ color: 'var(--muted)' }}>{otherUser.roll_no}</p>}
+            {isAnonymous && otherUser?.gender && <p className="text-xs" style={{ color: 'var(--muted)' }}>{otherUser.gender}</p>}
           </div>
+        </div>
 
-          {/* Action Menu */}
-          <div className="relative">
-            <button
-              onClick={() => setShowMenu(!showMenu)}
-              className="p-2 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
-            >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
-              </svg>
-            </button>
-
-            {showMenu && (
-              <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 py-1">
-                {isAnonymous && (
-                  <button
-                    onClick={handleRevealIdentity}
-                    className="w-full px-4 py-2 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2"
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                    </svg>
-                    Reveal Identity
-                  </button>
-                )}
-                {isViewingAnonymous && anonymousIdentityId && (
-                  <button
-                    onClick={() => {
-                      setShowEditNameDialog(true);
-                      setShowMenu(false);
-                    }}
-                    className="w-full px-4 py-2 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2"
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                    </svg>
-                    Edit Name
-                  </button>
-                )}
-                <button
-                  onClick={handleBlockUser}
-                  disabled={isBlocked}
-                  className="w-full px-4 py-2 text-left text-sm text-red-600 dark:text-red-400 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
-                  </svg>
-                  {isBlocked ? 'Blocked' : 'Block User'}
+        {/* Action menu */}
+        <div className="relative shrink-0">
+          <button onClick={() => setShowMenu(!showMenu)} className="w-9 h-9 rounded-xl glass flex items-center justify-center transition-all hover:scale-105" style={{ color: 'var(--body)' }}>
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" /></svg>
+          </button>
+          {showMenu && (
+            <div className="absolute right-0 mt-2 w-52 glass-strong rounded-2xl py-2 z-50 shadow-xl">
+              {isAnonymous && (
+                <button onClick={handleRevealIdentity} className="w-full px-4 py-2.5 text-left text-sm flex items-center gap-2 hover:opacity-70 transition-opacity" style={{ color: 'var(--body)' }}>
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                  Reveal Identity
                 </button>
-                <button
-                  onClick={() => {
-                    setShowReportDialog(true);
-                    setShowMenu(false);
-                  }}
-                  className="w-full px-4 py-2 text-left text-sm text-orange-600 dark:text-orange-400 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                  </svg>
-                  Report User
+              )}
+              {isViewingAnonymous && anonymousIdentityId && (
+                <button onClick={() => { setShowEditNameDialog(true); setShowMenu(false); }} className="w-full px-4 py-2.5 text-left text-sm flex items-center gap-2 hover:opacity-70" style={{ color: 'var(--body)' }}>
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                  Edit Name
                 </button>
-              </div>
-            )}
-          </div>
+              )}
+              <button onClick={handleBlockUser} disabled={isBlocked} className="w-full px-4 py-2.5 text-left text-sm flex items-center gap-2 hover:opacity-70 disabled:opacity-40" style={{ color: '#EF4444' }}>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" /></svg>
+                {isBlocked ? 'Blocked' : 'Block User'}
+              </button>
+              <button onClick={() => { setShowReportDialog(true); setShowMenu(false); }} className="w-full px-4 py-2.5 text-left text-sm flex items-center gap-2 hover:opacity-70" style={{ color: '#F97316' }}>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+                Report User
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
       {/* Report Dialog */}
       {showReportDialog && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-gray-800 rounded-lg max-w-md w-full p-6">
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Report User</h3>
-            
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-5" style={{ background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(8px)' }}>
+          <div className="glass-strong rounded-3xl p-7 w-full max-w-md animate-scale-in">
+            <h3 className="text-lg font-bold mb-5" style={{ color: 'var(--heading)' }}>Report User ⚠️</h3>
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Reason *
-                </label>
-                <select
-                  value={reportReason}
-                  onChange={(e) => setReportReason(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
-                >
+                <label className="block text-sm font-semibold mb-2" style={{ color: 'var(--heading)' }}>Reason *</label>
+                <select value={reportReason} onChange={(e) => setReportReason(e.target.value)} className="select-romance">
                   <option value="">Select a reason</option>
                   <option value="spam">Spam</option>
                   <option value="harassment">Harassment</option>
@@ -806,258 +731,112 @@ export default function ChatWindowPage() {
                   <option value="other">Other</option>
                 </select>
               </div>
-
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Additional Details (optional)
-                </label>
-                <textarea
-                  value={reportDescription}
-                  onChange={(e) => setReportDescription(e.target.value)}
-                  rows={3}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
-                  placeholder="Provide more details about the issue..."
-                />
+                <label className="block text-sm font-semibold mb-2" style={{ color: 'var(--heading)' }}>Additional details (optional)</label>
+                <textarea value={reportDescription} onChange={(e) => setReportDescription(e.target.value)} rows={3} className="input-romance resize-none" placeholder="Describe the issue…" />
               </div>
             </div>
-
-            <div className="flex gap-3 mt-6">
-              <button
-                onClick={() => {
-                  setShowReportDialog(false);
-                  setReportReason('');
-                  setReportDescription('');
-                }}
-                className="flex-1 px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleReportUser}
-                disabled={!reportReason}
-                className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                Submit Report
-              </button>
+            <div className="flex gap-3 mt-5">
+              <button onClick={() => { setShowReportDialog(false); setReportReason(''); setReportDescription(''); }} className="flex-1 py-2.5 rounded-2xl text-sm font-semibold glass" style={{ color: 'var(--body)' }}>Cancel</button>
+              <button onClick={handleReportUser} disabled={!reportReason} className="flex-1 py-2.5 rounded-2xl text-sm font-semibold text-white disabled:opacity-50" style={{ background: '#EF4444' }}>Submit Report</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Messages */}
-      <div className="max-w-4xl mx-auto px-4 py-6 pb-24">
+      {/* Messages area */}
+      <div className="flex-1 overflow-y-auto px-4 py-5 space-y-4">
         {messages.length === 0 ? (
-          <div className="text-center py-12">
-            <div className="text-gray-400 dark:text-gray-600 mb-2">
-              <svg className="w-16 h-16 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-              </svg>
+          <div className="h-full flex items-center justify-center">
+            <div className="text-center">
+              <p className="text-5xl mb-3">👋</p>
+              <p className="font-semibold" style={{ color: 'var(--heading)' }}>Say hello!</p>
+              <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>Start the conversation</p>
             </div>
-            <p className="text-gray-500 dark:text-gray-400">No messages yet. Start the conversation!</p>
           </div>
         ) : (
-          <div className="space-y-4">
+          <>
             {messages.map((message) => {
               const isMyMessage = message.is_my_message;
-              
               return (
-                <div
-                  key={message.message_id}
-                  className={`flex ${isMyMessage ? 'justify-end' : 'justify-start'}`}
-                >
-                  <div className={`max-w-[70%] ${isMyMessage ? 'order-2' : 'order-1'}`}>
-                    <div
-                      className={`rounded-lg px-4 py-2 ${
-                        isMyMessage
-                          ? 'bg-blue-600 text-white'
-                          : 'bg-white dark:bg-gray-800 text-gray-900 dark:text-white border border-gray-200 dark:border-gray-700'
-                      }`}
-                    >
-                      {!isMyMessage && message.sender && (
-                        <p className="text-xs font-semibold mb-1 opacity-75">
-                          {message.sender.is_anonymous
-                            ? `Anonymous (${message.sender.display_gender || 'Unknown'})`
-                            : message.sender.name}
-                        </p>
-                      )}
-                      
-                      {/* Display Image if message type is image */}
-                      {message.message_type === 'image' && message.media_url && (
-                        <div className="mb-2">
-                          <a href={message.media_url} target="_blank" rel="noopener noreferrer">
-                            <Image
-                              src={message.media_url}
-                              alt="Shared image"
-                              width={400} // Adjust as needed
-                              height={300} // Adjust as needed
-                              className="max-w-full rounded-lg cursor-pointer hover:opacity-90"
-                              style={{ objectFit: 'contain' }}
-                            />
-                          </a>
-                        </div>
-                      )}
-                      
-                      <p className="whitespace-pre-wrap wrap-break-word">{message.encrypted_content}</p>
-                      <p className={`text-xs mt-1 ${isMyMessage ? 'text-blue-100' : 'text-gray-500'}`}>
-                        {formatTime(message.created_at.toString())}
+                <div key={message.message_id} className={`flex ${isMyMessage ? 'justify-end' : 'justify-start'}`}>
+                  <div className={`max-w-[72%] ${isMyMessage ? 'bubble-sent' : 'bubble-received'}`}>
+                    {!isMyMessage && message.sender && (
+                      <p className="text-xs font-semibold mb-1.5 opacity-80">
+                        {message.sender.is_anonymous ? `Anonymous (${message.sender.display_gender || 'Unknown'})` : message.sender.name}
                       </p>
-                    </div>
+                    )}
+                    {message.message_type === 'image' && message.media_url && (
+                      <div className="mb-2 -mx-1">
+                        <a href={message.media_url} target="_blank" rel="noopener noreferrer">
+                          <Image src={message.media_url} alt="Shared image" width={300} height={200} className="max-w-full rounded-xl cursor-pointer hover:opacity-90 transition-opacity" style={{ objectFit: 'contain' }} />
+                        </a>
+                      </div>
+                    )}
+                    {message.encrypted_content && (
+                      <p className="whitespace-pre-wrap wrap-break-word leading-relaxed">{message.encrypted_content}</p>
+                    )}
+                    <p className={`text-[10px] mt-1.5 ${isMyMessage ? 'text-white/70' : 'opacity-60'}`}>{formatTime(message.created_at.toString())}</p>
                   </div>
                 </div>
               );
             })}
             <div ref={messagesEndRef} />
-          </div>
+          </>
         )}
       </div>
 
-      {/* Message Input */}
-      <div className="fixed bottom-0 left-0 right-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700">
-        <div className="max-w-4xl mx-auto px-4 py-4">
-          {isBlocked ? (
-            <div className="text-center py-3">
-              <p className="text-red-600 dark:text-red-400 font-medium">
-                🚫 This conversation is blocked. You cannot send messages.
-              </p>
-            </div>
-          ) : (
-            <>
-              {/* Image Preview */}
-              {imagePreview && (
-                <div className="mb-3 relative inline-block">
-                  <Image
-                    src={imagePreview}
-                    alt="Preview"
-                    width={256}
-                    height={128}
-                    className="max-h-32 rounded-lg border border-gray-300 dark:border-gray-600"
-                  />
-                  <button
-                    onClick={handleRemoveImage}
-                    className="absolute -top-2 -right-2 bg-red-600 text-white rounded-full p-1 hover:bg-red-700"
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
-                </div>
-              )}
-
-              {/* Emoji Picker */}
-              {showEmojiPicker && (
-                <div ref={emojiPickerRef} className="absolute bottom-20 left-4 z-50">
-                  <EmojiPicker
-                    onEmojiClick={handleEmojiSelect}
-                    autoFocusSearch={false}
-                    theme={typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches ? Theme.DARK : Theme.LIGHT}
-                  />
-                </div>
-              )}
-              
-              <form onSubmit={handleSendMessage} className="flex gap-3 items-end relative">
-                {/* Hidden file input */}
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/*"
-                  onChange={handleImageSelect}
-                  className="hidden"
-                />
-                
-                {/* Image upload button */}
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={sending || uploadingImage}
-                  className="p-3 text-gray-600 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  title="Attach image (max 5MB)"
-                >
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                  </svg>
-                </button>
-
-                {/* Emoji button */}
-                <button
-                  type="button"
-                  onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-                  disabled={sending || uploadingImage}
-                  className="p-3 text-gray-600 dark:text-gray-400 hover:text-yellow-500 dark:hover:text-yellow-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  title="Add emoji"
-                >
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                </button>
-                
-                <input
-                  ref={messageInputRef}
-                  type="text"
-                  value={newMessage}
-                  onChange={(e) => setNewMessage(e.target.value)}
-                  placeholder="Type a message..."
-                  className="flex-1 px-4 py-3 bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  disabled={sending || uploadingImage}
-                />
-                <button
-                  type="submit"
-                  disabled={(!newMessage.trim() && !selectedImage) || sending || uploadingImage}
-                  className="px-6 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                >
-                  {sending || uploadingImage ? (
-                    <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                    </svg>
-                  ) : (
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-                    </svg>
-                  )}
-                </button>
-              </form>
-            </>
-          )}
-        </div>
+      {/* Input bar */}
+      <div className="glass-nav shrink-0 px-4 py-3">
+        {isBlocked ? (
+          <div className="text-center py-3">
+            <p className="text-sm font-medium" style={{ color: '#EF4444' }}>🚫 This conversation is blocked. You cannot send messages.</p>
+          </div>
+        ) : (
+          <>
+            {imagePreview && (
+              <div className="mb-3 relative inline-block">
+                <Image src={imagePreview} alt="Preview" width={120} height={80} className="max-h-20 rounded-xl border" style={{ borderColor: 'var(--border-light)' }} />
+                <button onClick={handleRemoveImage} className="absolute -top-2 -right-2 w-6 h-6 rounded-full text-white flex items-center justify-center text-xs" style={{ background: '#EF4444' }}>✕</button>
+              </div>
+            )}
+            {showEmojiPicker && (
+              <div ref={emojiPickerRef} className="absolute bottom-20 left-4 z-50">
+                <EmojiPicker onEmojiClick={handleEmojiSelect} autoFocusSearch={false} theme={typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches ? Theme.DARK : Theme.LIGHT} />
+              </div>
+            )}
+            <form onSubmit={handleSendMessage} className="flex items-center gap-2">
+              <input ref={fileInputRef} type="file" accept="image/*" onChange={handleImageSelect} className="hidden" />
+              <button type="button" onClick={() => fileInputRef.current?.click()} disabled={sending || uploadingImage} className="w-9 h-9 rounded-xl glass flex items-center justify-center shrink-0 transition-all hover:scale-110 disabled:opacity-50" style={{ color: 'var(--muted)' }}>
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+              </button>
+              <button type="button" onClick={() => setShowEmojiPicker(!showEmojiPicker)} disabled={sending || uploadingImage} className="w-9 h-9 rounded-xl glass flex items-center justify-center shrink-0 transition-all hover:scale-110 disabled:opacity-50" style={{ color: 'var(--muted)' }}>
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+              </button>
+              <input ref={messageInputRef} type="text" value={newMessage} onChange={(e) => setNewMessage(e.target.value)} placeholder="Type a message…" className="input-romance flex-1 py-2.5" disabled={sending || uploadingImage} />
+              <button type="submit" disabled={(!newMessage.trim() && !selectedImage) || sending || uploadingImage} className="w-10 h-10 rounded-xl btn-romance flex items-center justify-center shrink-0 disabled:opacity-50">
+                {(sending || uploadingImage) ? (
+                  <svg className="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" /></svg>
+                ) : (
+                  <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
+                )}
+              </button>
+            </form>
+          </>
+        )}
       </div>
 
       {/* Edit Name Dialog */}
       {showEditNameDialog && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full p-6">
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-              Edit Custom Name
-            </h3>
-            <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-              Set a custom name to help you identify this anonymous sender.
-            </p>
-            <input
-              type="text"
-              value={customName}
-              onChange={(e) => setCustomName(e.target.value)}
-              placeholder={otherUser?.name || "Enter custom name"}
-              maxLength={50}
-              className="w-full px-4 py-3 bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 mb-4"
-            />
-            <div className="text-xs text-gray-500 dark:text-gray-400 mb-4">
-              {customName.length}/50 characters
-            </div>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-5" style={{ background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(8px)' }}>
+          <div className="glass-strong rounded-3xl p-7 w-full max-w-sm animate-scale-in">
+            <h3 className="text-lg font-bold mb-2" style={{ color: 'var(--heading)' }}>Edit Custom Name ✏️</h3>
+            <p className="text-sm mb-4" style={{ color: 'var(--muted)' }}>Set a nickname for this anonymous sender.</p>
+            <input type="text" value={customName} onChange={(e) => setCustomName(e.target.value)} placeholder={otherUser?.name || 'Custom name'} maxLength={50} className="input-romance mb-1" />
+            <p className="text-xs mb-5 text-right" style={{ color: 'var(--muted)' }}>{customName.length}/50</p>
             <div className="flex gap-3">
-              <button
-                onClick={() => {
-                  setShowEditNameDialog(false);
-                  setCustomName(otherUser?.name || '');
-                }}
-                className="flex-1 px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleUpdateCustomName}
-                className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-              >
-                Save
-              </button>
+              <button onClick={() => { setShowEditNameDialog(false); setCustomName(otherUser?.name || ''); }} className="flex-1 py-2.5 rounded-2xl text-sm font-semibold glass" style={{ color: 'var(--body)' }}>Cancel</button>
+              <button onClick={handleUpdateCustomName} className="flex-1 py-2.5 rounded-2xl text-sm font-semibold btn-romance">Save</button>
             </div>
           </div>
         </div>

@@ -26,15 +26,15 @@ export default function AvatarSelector({
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+        <h3 className="text-lg font-semibold" style={{ color: 'var(--heading)' }}>
           Choose a Preset Avatar
         </h3>
-        <p className="text-sm text-gray-500 dark:text-gray-400">
+        <p className="text-sm" style={{ color: 'var(--muted)' }}>
           {AVATAR_OPTIONS.length} options
         </p>
       </div>
 
-      <div className="max-h-96 overflow-y-auto border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-gray-50 dark:bg-gray-900">
+      <div className="max-h-96 overflow-y-auto rounded-2xl p-4 glass">
         <div className="grid grid-cols-5 sm:grid-cols-6 md:grid-cols-7 lg:grid-cols-8 gap-3">
           {AVATAR_OPTIONS.map((avatarId) => {
             const isSelected = selectedId === avatarId;
@@ -47,26 +47,36 @@ export default function AvatarSelector({
                 onClick={() => handleSelect(avatarId)}
                 disabled={isLoading}
                 className={`
-                  relative aspect-square rounded-lg overflow-hidden
+                  relative aspect-square rounded-xl overflow-hidden
                   transition-all duration-200 
                   ${isSelected 
-                    ? 'ring-4 ring-blue-500 scale-105' 
-                    : 'ring-2 ring-gray-200 dark:ring-gray-700 hover:ring-blue-300 dark:hover:ring-blue-600'
+                    ? 'ring-4 scale-105' 
+                    : 'ring-2 hover:scale-105'
                   }
-                  ${isLoading ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:scale-105'}
-                  focus:outline-none focus:ring-4 focus:ring-blue-500
+                  ${isLoading ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
+                  focus:outline-none focus:ring-4
                 `}
+                style={isSelected 
+                  ? { 
+                      borderColor: 'var(--pink)',
+                      boxShadow: '0 0 0 4px rgba(236, 72, 153, 0.3)'
+                    } 
+                  : { 
+                      borderColor: 'var(--border-light)',
+                      boxShadow: '0 0 0 2px rgba(0, 0, 0, 0.1)'
+                    }
+                }
                 title={avatarId}
               >
               <Image
                 src={avatarUrl}
                 alt={`Avatar ${avatarId}`}
-                width={48}
-                height={48}
-                className="rounded-lg object-cover"
+                width={80}
+                height={80}
+                className="w-full h-full rounded-xl object-cover"
               />
                 {isSelected && (
-                  <div className="absolute inset-0 bg-blue-500 bg-opacity-20 flex items-center justify-center">
+                  <div className="absolute inset-0 flex items-center justify-center" style={{ background: 'rgba(236, 72, 153, 0.2)' }}>
                     <svg 
                       className="w-6 h-6 text-white drop-shadow-lg" 
                       fill="currentColor" 
@@ -86,7 +96,7 @@ export default function AvatarSelector({
         </div>
       </div>
 
-      <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+      <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--muted)' }}>
         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path 
             strokeLinecap="round" 
