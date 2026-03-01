@@ -791,7 +791,34 @@ export const getGroupMessages = async (req: Request, res: Response) => {
           'display_gender', u.gender,
           'dp_url', u.dp_url,
           'is_anonymous', false
-        ) as sender
+        ) as sender,
+        COALESCE(
+          (
+            SELECT json_agg(
+              json_build_object(
+                'emoji', r.emoji,
+                'count', r.count,
+                'users', r.users
+              )
+            )
+            FROM (
+              SELECT 
+                mr.emoji,
+                COUNT(*)::int as count,
+                json_agg(
+                  json_build_object(
+                    'user_id', ru.user_id,
+                    'name', ru.name
+                  ) ORDER BY mr.created_at
+                ) as users
+              FROM message_reactions mr
+              JOIN users ru ON mr.user_id = ru.user_id
+              WHERE mr.message_id = cm.message_id
+              GROUP BY mr.emoji
+            ) r
+          ),
+          '[]'::json
+        ) as reactions
       FROM chat_messages cm
       LEFT JOIN users u ON cm.sender_id = u.user_id
       WHERE cm.group_id = $1

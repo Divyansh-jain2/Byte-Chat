@@ -10,6 +10,8 @@ import { useToast } from '@/contexts/ToastContext';
 import type { Message, User } from '@/types/chat.types';
 import { Theme } from 'emoji-picker-react';
 import Image from 'next/image';
+import MessageBubble from '@/components/MessageBubble';
+import { messageManagementService } from '@/services/message-management.service';
 
 // Dynamic import for emoji picker (client-side only)
 const EmojiPicker = dynamic(() => import('emoji-picker-react'), { ssr: false });
@@ -43,6 +45,7 @@ export default function ChatWindowPage() {
   const [isViewingAnonymous, setIsViewingAnonymous] = useState(false);
   const [anonymousIdentityId, setAnonymousIdentityId] = useState<string | null>(null);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [replyingTo, setReplyingTo] = useState<Message | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messageInputRef = useRef<HTMLInputElement>(null);
@@ -209,6 +212,47 @@ export default function ChatWindowPage() {
     }
   }, [conversationId, fetchMessages, joinConversation, isConnected, leaveConversation, loading]);
 
+  // Socket event listeners for message management
+  useEffect(() => {
+    if (!socket || !conversationId) return;
+
+    const handleMessageReaction = (data: { messageId: string }) => {
+      // Refresh messages to show updated reactions
+      fetchMessages();
+    };
+
+    const handleMessageEdited = (data: { messageId: string; newContent: string }) => {
+      // Update message in local state
+      setMessages(prev => 
+        prev.map(msg => 
+          msg.message_id === data.messageId 
+            ? { ...msg, encrypted_content: data.newContent, is_edited: true, edited_at: new Date() }
+            : msg
+        )
+      );
+    };
+
+    const handleMessageDeleted = (data: { messageId: string; deletedForEveryone: boolean }) => {
+      if (data.deletedForEveryone) {
+        // Remove message from UI
+        setMessages(prev => prev.filter(msg => msg.message_id !== data.messageId));
+      } else {
+        // Just refresh to show updated deletion status
+        fetchMessages();
+      }
+    };
+
+    socket.on('message:reaction', handleMessageReaction);
+    socket.on('message:edited', handleMessageEdited);
+    socket.on('message:deleted', handleMessageDeleted);
+
+    return () => {
+      socket.off('message:reaction', handleMessageReaction);
+      socket.off('message:edited', handleMessageEdited);
+      socket.off('message:deleted', handleMessageDeleted);
+    };
+  }, [socket, conversationId, fetchMessages]);
+
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -265,6 +309,9 @@ export default function ChatWindowPage() {
           mediaSize,
           mediaMimeType,
         }),
+        ...(replyingTo && {
+          parentMessageId: replyingTo.message_id,
+        }),
       };
       
       // Use the correct service based on conversation type
@@ -278,6 +325,7 @@ export default function ChatWindowPage() {
       setNewMessage('');
       setSelectedImage(null);
       setImagePreview(null);
+      setReplyingTo(null);
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
@@ -386,6 +434,52 @@ export default function ChatWindowPage() {
     if (days < 7) return `${days}d ago`;
     return date.toLocaleDateString();
   };
+
+  // Message management handlers
+  const handleReply = useCallback((message: Message | { message_id: string; encrypted_content?: string; sender?: { name: string } }) => {
+    // Convert to replyable message
+    const replyMessage: Message = message as Message;
+    setReplyingTo(replyMessage);
+    messageInputRef.current?.focus();
+  }, []);
+
+  const handleEdit = useCallback(async (messageId: string, newContent: string) => {
+    try {
+      const token = localStorage.getItem('accessToken');
+      if (!token) {
+        toast.error('Authentication required');
+        return;
+      }
+      await messageManagementService.editMessage(
+        messageId,
+        newContent,
+        'dummy_iv',
+        'dummy_tag',
+        token
+      );
+      toast.success('Message edited');
+      fetchMessages();
+    } catch (error: unknown) {
+      console.error('Failed to edit message:', error);
+      toast.error('Failed to edit message');
+    }
+  }, [fetchMessages, toast]);
+
+  const handleDelete = useCallback(async (messageId: string, deleteForEveryone: boolean) => {
+    try {
+      const token = localStorage.getItem('accessToken');
+      if (!token) {
+        toast.error('Authentication required');
+        return;
+      }
+      await messageManagementService.deleteMessage(messageId, deleteForEveryone, token);
+      toast.success(deleteForEveryone ? 'Message deleted for everyone' : 'Message deleted for you');
+      fetchMessages();
+    } catch (error: unknown) {
+      console.error('Failed to delete message:', error);
+      toast.error('Failed to delete message');
+    }
+  }, [fetchMessages, toast]);
 
   const handleRevealIdentity = async () => {
     if (!confirm('Are you sure you want to reveal your identity? This cannot be undone.')) {
@@ -759,26 +853,15 @@ export default function ChatWindowPage() {
             {messages.map((message) => {
               const isMyMessage = message.is_my_message;
               return (
-                <div key={message.message_id} className={`flex ${isMyMessage ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`max-w-[72%] ${isMyMessage ? 'bubble-sent' : 'bubble-received'}`}>
-                    {!isMyMessage && message.sender && (
-                      <p className="text-xs font-semibold mb-1.5 opacity-80">
-                        {message.sender.is_anonymous ? `Anonymous (${message.sender.display_gender || 'Unknown'})` : message.sender.name}
-                      </p>
-                    )}
-                    {message.message_type === 'image' && message.media_url && (
-                      <div className="mb-2 -mx-1">
-                        <a href={message.media_url} target="_blank" rel="noopener noreferrer">
-                          <Image src={message.media_url} alt="Shared image" width={300} height={200} className="max-w-full rounded-xl cursor-pointer hover:opacity-90 transition-opacity" style={{ objectFit: 'contain' }} />
-                        </a>
-                      </div>
-                    )}
-                    {message.encrypted_content && (
-                      <p className="whitespace-pre-wrap wrap-break-word leading-relaxed">{message.encrypted_content}</p>
-                    )}
-                    <p className={`text-[10px] mt-1.5 ${isMyMessage ? 'text-white/70' : 'opacity-60'}`}>{formatTime(message.created_at.toString())}</p>
-                  </div>
-                </div>
+                <MessageBubble
+                  key={message.message_id}
+                  message={message}
+                  isMyMessage={isMyMessage}
+                  onReply={handleReply}
+                  onEdit={handleEdit}
+                  onDelete={handleDelete}
+                  formatTime={formatTime}
+                />
               );
             })}
             <div ref={messagesEndRef} />
@@ -794,6 +877,26 @@ export default function ChatWindowPage() {
           </div>
         ) : (
           <>
+            {/* Reply preview */}
+            {replyingTo && (
+              <div className="mb-3 flex items-start gap-2 p-3 rounded-xl glass" style={{ borderLeft: '3px solid var(--pink)' }}>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-semibold mb-1" style={{ color: 'var(--pink)' }}>
+                    Replying to {replyingTo.sender?.name || 'Unknown'}
+                  </p>
+                  <p className="text-sm truncate" style={{ color: 'var(--muted)' }}>
+                    {replyingTo.encrypted_content || 'Image'}
+                  </p>
+                </div>
+                <button
+                  onClick={() => setReplyingTo(null)}
+                  className="w-6 h-6 rounded-full glass flex items-center justify-center shrink-0 hover:opacity-70"
+                  style={{ color: 'var(--muted)' }}
+                >
+                  ✕
+                </button>
+              </div>
+            )}
             {imagePreview && (
               <div className="mb-3 relative inline-block">
                 <Image src={imagePreview} alt="Preview" width={120} height={80} className="max-h-20 rounded-xl border" style={{ borderColor: 'var(--border-light)' }} />

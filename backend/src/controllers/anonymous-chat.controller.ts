@@ -335,7 +335,7 @@ export async function getAnonymousMessages(req: Request, res: Response) {
       }
     }
 
-    // Get messages with sender info (respect anonymity)
+    // Get messages with sender info (respect anonymity) and reactions
     const result = await pool.query(
       `SELECT 
         cm.*,
@@ -364,7 +364,34 @@ export async function getAnonymousMessages(req: Request, res: Response) {
               )
             END
           ELSE null
-        END as sender
+        END as sender,
+        COALESCE(
+          (
+            SELECT json_agg(
+              json_build_object(
+                'emoji', r.emoji,
+                'count', r.count,
+                'users', r.users
+              )
+            )
+            FROM (
+              SELECT 
+                mr.emoji,
+                COUNT(*)::int as count,
+                json_agg(
+                  json_build_object(
+                    'user_id', ru.user_id,
+                    'name', ru.name
+                  ) ORDER BY mr.created_at
+                ) as users
+              FROM message_reactions mr
+              JOIN users ru ON mr.user_id = ru.user_id
+              WHERE mr.message_id = cm.message_id
+              GROUP BY mr.emoji
+            ) r
+          ),
+          '[]'::json
+        ) as reactions
       FROM chat_messages cm
       LEFT JOIN users u ON cm.sender_id = u.user_id
       LEFT JOIN chat_conversations cc ON cm.conversation_id = cc.conversation_id
