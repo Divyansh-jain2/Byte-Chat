@@ -8,12 +8,6 @@
 - **Auto-execution**: Automatic member removal based on poll results
 - **Poll Expiry**: 6-hour voting window with automatic closure
 
-## Message Management
-- **Message Editing**: Edit sent messages with edit history
-- **Message Deletion**: Delete messages for self or everyone
-- **Message Reactions**: React to messages with emojis (👍, ❤️, 😂, etc.)
-- **Reply/Quote**: Reply to specific messages with threading
-
 ## Group Administration
 - **Invite Links/Codes**: Generate shareable invite links with expiry
 

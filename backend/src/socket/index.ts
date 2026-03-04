@@ -13,13 +13,15 @@ interface JwtPayload {
   rollNo: string;
 }
 
+let _io: SocketServer | null = null; // module-level singleton
+
 const userSockets = new Map<string, Set<string>>(); // userId -> Set of socketIds
 const socketUsers = new Map<string, string>(); // socketId -> userId
 
 export function initializeSocket(httpServer: HTTPServer) {
   const io = new SocketServer(httpServer, {
     cors: {
-      origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+      origin: process.env.FRONTEND_URL,
       credentials: true,
     },
   });
@@ -113,7 +115,7 @@ export function initializeSocket(httpServer: HTTPServer) {
     // Handle disconnection
     socket.on('disconnect', () => {
       // console.log(`User ${userId} disconnected from socket ${socket.id}`);
-      
+
       // Remove socket from tracking
       const userSocketSet = userSockets.get(userId);
       if (userSocketSet) {
@@ -126,22 +128,43 @@ export function initializeSocket(httpServer: HTTPServer) {
     });
   });
 
+  _io = io;
   return io;
 }
 
 // Helper function to emit to specific user
-export function emitToUser(io: SocketServer, userId: string, event: string, data: any) {
-  io.to(`user:${userId}`).emit(event, data);
+export function emitToUser(io: SocketServer | null, userId: string, event: string, data: any): void;
+export function emitToUser(userId: string, event: string, data: any): void;
+export function emitToUser(ioOrUserId: SocketServer | null | string, userIdOrEvent: string, eventOrData: string | any, data?: any): void {
+  if (typeof ioOrUserId === 'string') {
+    // Called as emitToUser(userId, event, data)
+    _io?.to(`user:${ioOrUserId}`).emit(userIdOrEvent, eventOrData);
+  } else {
+    // Called as emitToUser(io, userId, event, data)
+    (ioOrUserId || _io)?.to(`user:${userIdOrEvent}`).emit(eventOrData, data);
+  }
 }
 
 // Helper function to emit to conversation
-export function emitToConversation(io: SocketServer, conversationId: string, event: string, data: any) {
-  io.to(`conversation:${conversationId}`).emit(event, data);
+export function emitToConversation(io: SocketServer | null, conversationId: string, event: string, data: any): void;
+export function emitToConversation(conversationId: string, event: string, data: any): void;
+export function emitToConversation(ioOrConvId: SocketServer | null | string, convIdOrEvent: string, eventOrData: string | any, data?: any): void {
+  if (typeof ioOrConvId === 'string') {
+    _io?.to(`conversation:${ioOrConvId}`).emit(convIdOrEvent, eventOrData);
+  } else {
+    (ioOrConvId || _io)?.to(`conversation:${convIdOrEvent}`).emit(eventOrData, data);
+  }
 }
 
 // Helper function to emit to group
-export function emitToGroup(io: SocketServer, groupId: string, event: string, data: any) {
-  io.to(`group:${groupId}`).emit(event, data);
+export function emitToGroup(io: SocketServer | null, groupId: string, event: string, data: any): void;
+export function emitToGroup(groupId: string, event: string, data: any): void;
+export function emitToGroup(ioOrGroupId: SocketServer | null | string, groupIdOrEvent: string, eventOrData: string | any, data?: any): void {
+  if (typeof ioOrGroupId === 'string') {
+    _io?.to(`group:${ioOrGroupId}`).emit(groupIdOrEvent, eventOrData);
+  } else {
+    (ioOrGroupId || _io)?.to(`group:${groupIdOrEvent}`).emit(eventOrData, data);
+  }
 }
 
 // Check if user is online

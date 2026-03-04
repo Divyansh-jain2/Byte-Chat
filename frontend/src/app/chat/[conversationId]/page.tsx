@@ -78,24 +78,24 @@ export default function ChatWindowPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  const fetchMessages = useCallback( async () => {
+  const fetchMessages = useCallback(async () => {
     // Prevent duplicate fetches (debounce 500ms)
     const now = Date.now();
     if (fetchingRef.current || now - lastFetchRef.current < 500) {
       return;
     }
-    
+
     fetchingRef.current = true;
     lastFetchRef.current = now;
-    
+
     try {
       // First, try to fetch from regular chat
       let response;
       let conversationType: 'regular' | 'anonymous' = 'regular';
-      
+
       try {
         response = await chatService.getMessages(conversationId);
-      } 
+      }
       catch (regularError: unknown) {
         // If 403/404, try anonymous chat
         let status: number | undefined;
@@ -121,13 +121,13 @@ export default function ChatWindowPage() {
           throw regularError;
         }
       }
-      
+
       setMessages(response.messages || []);
-      
+
       // Use otherUser from API response
       if (response.otherUser) {
         setOtherUser(response.otherUser);
-        
+
         // If anonymous conversation and viewing as receiver
         if (conversationType === 'anonymous' && response.otherUser.is_anonymous) {
           setIsViewingAnonymous(true);
@@ -139,22 +139,22 @@ export default function ChatWindowPage() {
           setCustomName('');
         }
       }
-      
+
       // Set isAnonymous based on conversation type (not otherUser.is_anonymous)
       // because sender sees real profile but conversation is still anonymous
       setIsAnonymous(conversationType === 'anonymous');
-      
+
       // Check if conversation is blocked from conversation data
       if (response.conversation) {
         setIsBlocked(response.conversation.is_blocked || false);
       }
-      
+
       // console.log(`📱 Loaded ${conversationType} conversation:`, conversationId);
-    } 
+    }
     catch (error: unknown) {
       // Only log errors that aren't rate limiting (429)
       let status: number | undefined;
-    
+
       if (
         typeof error === 'object' &&
         error !== null &&
@@ -163,10 +163,10 @@ export default function ChatWindowPage() {
       ) {
         const response = (error as { response: { status?: number } }).response;
         status = response.status;
-    
+
         if (status !== 429) {
           console.error('[ERROR] Failed to fetch messages:', error);
-    
+
           // Handle specific errors
           if (status === 403) {
             toast.error('You do not have access to this conversation.');
@@ -219,26 +219,31 @@ export default function ChatWindowPage() {
     const handleMessageReaction = (data: { messageId: string }) => {
       // Refresh messages to show updated reactions
       fetchMessages();
+      console.log(data);
     };
 
     const handleMessageEdited = (data: { messageId: string; newContent: string }) => {
       // Update message in local state
-      setMessages(prev => 
-        prev.map(msg => 
-          msg.message_id === data.messageId 
+      setMessages(prev =>
+        prev.map(msg =>
+          msg.message_id === data.messageId
             ? { ...msg, encrypted_content: data.newContent, is_edited: true, edited_at: new Date() }
             : msg
         )
       );
     };
 
-    const handleMessageDeleted = (data: { messageId: string; deletedForEveryone: boolean }) => {
-      if (data.deletedForEveryone) {
-        // Remove message from UI
+    const handleMessageDeleted = (data: { messageId: string; deleteForEveryone: boolean; deletedForUserId?: string }) => {
+      if (data.deleteForEveryone) {
+        // Remove for everyone
         setMessages(prev => prev.filter(msg => msg.message_id !== data.messageId));
-      } else {
-        // Just refresh to show updated deletion status
-        fetchMessages();
+      } else if (data.deletedForUserId) {
+        // Remove only for the user who deleted it
+        const userStr = localStorage.getItem('user');
+        const currentUserId = userStr ? JSON.parse(userStr).user_id : null;
+        if (currentUserId === data.deletedForUserId) {
+          setMessages(prev => prev.filter(msg => msg.message_id !== data.messageId));
+        }
       }
     };
 
@@ -255,12 +260,12 @@ export default function ChatWindowPage() {
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if ((!newMessage.trim() && !selectedImage) || sending || isBlocked) return;
 
     try {
       setSending(true);
-      
+
       let mediaUrl = '';
       let mediaSize = 0;
       let mediaMimeType = '';
@@ -272,11 +277,11 @@ export default function ChatWindowPage() {
           const uploadResult = isAnonymous
             ? await anonymousChatService.uploadAnonymousImage(selectedImage)
             : await chatService.uploadImage(selectedImage);
-          
+
           mediaUrl = uploadResult.data.url;
           mediaSize = uploadResult.data.size;
           mediaMimeType = uploadResult.data.mimeType;
-        } 
+        }
         catch (uploadError: unknown) {
           let errorMsg = 'Failed to upload image';
           if (
@@ -297,7 +302,7 @@ export default function ChatWindowPage() {
           setUploadingImage(false);
         }
       }
-      
+
       const messageData = {
         conversationId: conversationId,
         encryptedContent: newMessage.trim() || 'Image',
@@ -313,7 +318,7 @@ export default function ChatWindowPage() {
           parentMessageId: replyingTo.message_id,
         }),
       };
-      
+
       // Use the correct service based on conversation type
       if (isAnonymous) {
         await anonymousChatService.sendAnonymousMessage(messageData);
@@ -330,12 +335,12 @@ export default function ChatWindowPage() {
         fileInputRef.current.value = '';
       }
       fetchMessages(); // Refresh messages
-    } 
+    }
     catch (error: unknown) {
       console.error('[ERROR] Failed to send message:', error);
       let errorMessage = 'Failed to send message';
       let status: number | undefined;
-    
+
       if (
         typeof error === 'object' &&
         error !== null &&
@@ -346,7 +351,7 @@ export default function ChatWindowPage() {
         errorMessage = response.data?.message || errorMessage;
         status = response.status;
       }
-    
+
       // Check if it's a blocking error
       if (errorMessage.includes('blocked') || status === 403) {
         toast.error('Cannot send message - this user is blocked or has blocked you.');
@@ -377,7 +382,7 @@ export default function ChatWindowPage() {
     }
 
     setSelectedImage(file);
-    
+
     // Create preview
     const reader = new FileReader();
     reader.onloadend = () => {
@@ -397,16 +402,16 @@ export default function ChatWindowPage() {
   const handleEmojiSelect = (emojiData: EmojiData) => {
     const emoji = emojiData.emoji;
     const input = messageInputRef.current;
-    
+
     if (input) {
       const start = input.selectionStart || 0;
       const end = input.selectionEnd || 0;
       const currentMessage = newMessage;
-      
+
       // Insert emoji at cursor position
       const newText = currentMessage.substring(0, start) + emoji + currentMessage.substring(end);
       setNewMessage(newText);
-      
+
       // Set cursor position after emoji
       setTimeout(() => {
         input.focus();
@@ -416,7 +421,7 @@ export default function ChatWindowPage() {
       // If no cursor position, append to end
       setNewMessage(prev => prev + emoji);
     }
-    
+
     setShowEmojiPicker(false);
   };
 
@@ -491,9 +496,9 @@ export default function ChatWindowPage() {
       setIsAnonymous(false);
       toast.success('Your identity has been revealed!');
       fetchMessages();
-    } 
+    }
     catch (error: unknown) {
-      let errorMsg =  'Failed to reveal Identity';
+      let errorMsg = 'Failed to reveal Identity';
       if (
         typeof error === 'object' &&
         error !== null &&
@@ -514,7 +519,7 @@ export default function ChatWindowPage() {
     }
 
     const trimmedName = customName.trim();
-    
+
     // Validate name
     if (trimmedName.length === 0) {
       toast.warning('Custom name cannot be empty');
@@ -530,16 +535,16 @@ export default function ChatWindowPage() {
         anonymousIdentityId,
         trimmedName
       );
-      
+
       // Reload messages to get the updated name with random suffix
       await fetchMessages();
-      
+
       setShowEditNameDialog(false);
       setShowMenu(false);
       toast.success('Custom name updated successfully');
-    } 
+    }
     catch (error: unknown) {
-      let errorMsg =  'Failed to update custom name';
+      let errorMsg = 'Failed to update custom name';
       if (
         typeof error === 'object' &&
         error !== null &&
@@ -553,7 +558,7 @@ export default function ChatWindowPage() {
     }
   };
 
-    // Listen for new messages via socket
+  // Listen for new messages via socket
   useEffect(() => {
     if (!socket) return;
 
@@ -561,7 +566,7 @@ export default function ChatWindowPage() {
       // Add is_my_message flag
       const userStr = localStorage.getItem('user');
       const currentUserId = userStr ? JSON.parse(userStr).user_id : null;
-      
+
       setMessages((prev) => [...prev, {
         ...message,
         is_my_message: message.sender_id === currentUserId,
@@ -625,7 +630,7 @@ export default function ChatWindowPage() {
       setIsBlocked(true);
       setShowMenu(false);
       toast.success('User blocked successfully');
-    } 
+    }
     catch (error: unknown) {
       let errorMsg = 'Failed to block user';
       if (
@@ -650,7 +655,7 @@ export default function ChatWindowPage() {
     try {
       // For anonymous users, we need to get the actual user_id from conversations
       let actualReportedUserId = otherUser?.user_id;
-      
+
       // If other user is anonymous (user_id is null), we need to report via conversation
       if (isAnonymous && !actualReportedUserId) {
         // console.log('🎭 Reporting anonymous user - using conversation ID to identify');
@@ -710,7 +715,7 @@ export default function ChatWindowPage() {
       setReportReason('');
       setReportDescription('');
       toast.success('Report submitted successfully. Our team will review it.');
-    } 
+    }
     catch (error: unknown) {
       let errorMsg = 'Failed to submit report';
       if (

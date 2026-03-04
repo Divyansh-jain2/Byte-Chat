@@ -54,6 +54,7 @@ export const sendAnonymousMessage = async (data: {
   mediaMimeType?: string;
   thumbnailUrl?: string;
   keyId?: string;
+  parentMessageId?: string;
 }) => {
   const response = await api.post('/send', data);
   return response.data.data;
@@ -79,13 +80,13 @@ export const reportAnonymousUser = async (data: {
     baseURL: `${API_URL}/api/chat`,
     withCredentials: true,
   });
-  
+
   // Add auth token
   const token = localStorage.getItem('accessToken');
   if (token) {
     chatApi.defaults.headers.common['Authorization'] = `Bearer ${token}`;
   }
-  
+
   const response = await chatApi.post('/report', data);
   return response.data;
 };

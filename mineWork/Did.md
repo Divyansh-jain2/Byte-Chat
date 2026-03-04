@@ -153,4 +153,9 @@
 - **User Profiles**: Rich user profiles with more information
 - **QR Code Profile**: Share profile via QR code
 
+## Message Management
+- **Message Editing**: Edit sent messages with edit history [Done]
+- **Message Deletion**: Delete messages for self or everyone [little complex]
+- **Message Reactions**: React to messages with emojis (👍, ❤️, 😂, etc.) [Done]
+- **Reply/Quote**: Reply to specific messages with threading [Done]
 

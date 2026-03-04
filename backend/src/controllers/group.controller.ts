@@ -149,7 +149,7 @@ export const getMyGroups = async (req: Request, res: Response) => {
       success: true,
       data: { groups: result.rows }
     });
-  } 
+  }
   catch (error: any) {
     console.error('Error fetching user groups:', error);
     throw new ApiError(500, error.message || 'Failed to fetch groups');
@@ -306,12 +306,12 @@ export const joinGroup = async (req: Request, res: Response) => {
       success: true,
       message: 'Joined group successfully'
     });
-  } 
+  }
   catch (error: any) {
     await client.query('ROLLBACK');
     console.error('Error joining group:', error);
     throw error;
-  } 
+  }
   finally {
     client.release();
   }
@@ -624,7 +624,7 @@ export const leaveGroup = async (req: Request, res: Response) => {
         `UPDATE groups SET is_active = false WHERE group_id = $1`,
         [groupId]
       );
-    } 
+    }
     // If member was admin and no admins left, promote oldest member to admin
     else if (member.is_admin && adminCount === 0) {
       await client.query(
@@ -824,6 +824,8 @@ export const getGroupMessages = async (req: Request, res: Response) => {
       WHERE cm.group_id = $1
       ${before ? 'AND cm.created_at < $4' : ''}
       AND cm.is_deleted = false
+      AND cm.deleted_for_everyone = false
+      AND NOT ($2::uuid = ANY(COALESCE(cm.deleted_for_user_ids, ARRAY[]::uuid[])))
       ORDER BY cm.created_at DESC
       LIMIT $3`,
       before ? [groupId, userId, limit, before] : [groupId, userId, limit]
@@ -1507,7 +1509,7 @@ export const selectGroupPresetAvatar = async (req: Request, res: Response) => {
 
     // Validate avatar ID if provided, otherwise use random
     let selectedAvatarId = avatarId;
-    
+
     if (avatarId) {
       if (!isValidPresetAvatar(avatarId)) {
         throw new ApiError(400, 'Invalid avatar ID');

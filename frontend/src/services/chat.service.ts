@@ -65,6 +65,7 @@ export const chatService = {
     mediaMimeType?: string;
     thumbnailUrl?: string;
     keyId?: string;
+    parentMessageId?: string;
   }) {
     const response = await api.post('/send', data);
     return response.data;
@@ -112,7 +113,7 @@ export const chatService = {
       reportType: data.reportType || data.reason,  // Use reportType if available, fallback to reason
       description: data.description || data.reason || 'No description provided'
     };
-    
+
     const response = await api.post('/report', reportData);
     return response.data;
   },

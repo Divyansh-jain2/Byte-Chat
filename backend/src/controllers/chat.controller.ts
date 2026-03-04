@@ -49,7 +49,7 @@ export async function getOrCreateConversation(req: Request, res: Response) {
     const user2Id = userId < otherUserId ? otherUserId : userId;
 
     // console.log(`💬 Creating/finding regular conversation between User ${userId} and User ${otherUserId}`);
-    
+
     // Check for existing regular conversation (no anonymous initiator)
     let conversation = await pool.query(
       `SELECT * FROM chat_conversations 
@@ -60,7 +60,7 @@ export async function getOrCreateConversation(req: Request, res: Response) {
     // If conversation doesn't exist, create it
     if (!conversation || conversation.rows.length === 0) {
       // console.log(`📝 Creating NEW regular conversation`);
-      
+
       try {
         // Create new regular conversation
         conversation = await pool.query(
@@ -71,27 +71,27 @@ export async function getOrCreateConversation(req: Request, res: Response) {
         );
 
         // console.log(`✅ NEW regular conversation created: ${conversation.rows[0].conversation_id}`);
-      } 
+      }
       catch (insertError: any) {
         // Handle race condition - another request created it first
         if (insertError.code === '23505') {
           // console.log(`⚠️ Race condition detected - fetching existing regular conversation`);
-          
+
           // Fetch the conversation that was just created by the other request
           conversation = await pool.query(
             `SELECT * FROM chat_conversations 
              WHERE user1_id = $1 AND user2_id = $2 AND anonymous_initiator_id IS NULL`,
             [user1Id, user2Id]
           );
-          
+
           // console.log(`✓ Fetched conversation after race condition: ${conversation.rows[0]?.conversation_id}`);
-        } 
+        }
         else {
           // Re-throw if it's not a duplicate key error
           throw insertError;
         }
       }
-    } 
+    }
     else {
       // console.log(`✓ Found existing regular conversation: ${conversation.rows[0].conversation_id}`);
     }
@@ -114,10 +114,10 @@ export async function getOrCreateConversation(req: Request, res: Response) {
       message: error.message,
       code: error.code,
       detail: error.detail,
-       userId: req.user?.userId,
-        otherUserId: req.body?.otherUserId
+      userId: req.user?.userId,
+      otherUserId: req.body?.otherUserId
     });
-    
+
     if (error instanceof ApiError) throw error;
     throw new ApiError(500, 'Failed to create regular conversation');
   }
@@ -168,7 +168,7 @@ export async function getChatRequests(req: Request, res: Response) {
       success: true,
       data: result.rows
     });
-  } 
+  }
   catch (error) {
     console.error('[ERROR] Get chat requests error:', error);
     if (error instanceof ApiError) throw error;
@@ -264,7 +264,7 @@ export async function respondToChatRequest(req: Request, res: Response) {
         conversation: conversation
       }
     });
-  } 
+  }
   catch (error) {
     console.error('[ERROR] Respond to chat request error:', error);
     if (error instanceof ApiError) throw error;
@@ -332,7 +332,7 @@ export async function getConversations(req: Request, res: Response) {
       success: true,
       data: result.rows
     });
-  } 
+  }
   catch (error) {
     console.error('[ERROR] Get regular conversations error:', error);
     if (error instanceof ApiError) throw error;
@@ -369,17 +369,17 @@ export async function getMessages(req: Request, res: Response) {
 
     // Get other user info (always show real profile in regular chats)
     const otherUserId = conversation.user1_id === userId ? conversation.user2_id : conversation.user1_id;
-    
+
     const otherUserInfo = await pool.query(
       `SELECT user_id, name, roll_no, gender, dp_url FROM users WHERE user_id = $1`,
       [otherUserId]
     );
-    
+
     const otherUserData = {
       ...otherUserInfo.rows[0],
       is_anonymous: false
     };
-    
+
     // console.log(`💬 Regular chat - both see real profiles:`, {
     //   name: otherUserInfo.rows[0].name,
     //   roll_no: otherUserInfo.rows[0].roll_no
@@ -401,6 +401,15 @@ export async function getMessages(req: Request, res: Response) {
           )
           ELSE null
         END as sender,
+        CASE
+          WHEN cm.parent_message_id IS NOT NULL THEN jsonb_build_object(
+            'encrypted_content', pm.encrypted_content,
+            'sender', jsonb_build_object(
+              'name', pu.name
+            )
+          )
+          ELSE null
+        END as parent_message,
         COALESCE(
           (
             SELECT json_agg(
@@ -430,9 +439,13 @@ export async function getMessages(req: Request, res: Response) {
         ) as reactions
       FROM chat_messages cm
       LEFT JOIN users u ON cm.sender_id = u.user_id
+      LEFT JOIN chat_messages pm ON cm.parent_message_id = pm.message_id
+      LEFT JOIN users pu ON pm.sender_id = pu.user_id
       WHERE cm.conversation_id = $1
       ${before ? 'AND cm.created_at < $4' : ''}
       AND cm.is_deleted = false
+      AND cm.deleted_for_everyone = false
+      AND NOT ($2::uuid = ANY(COALESCE(cm.deleted_for_user_ids, ARRAY[]::uuid[])))
       ORDER BY cm.created_at DESC
       LIMIT $3`,
       before ? [conversationId, userId, limit, before] : [conversationId, userId, limit]
@@ -472,7 +485,8 @@ export async function sendMessage(req: Request, res: Response) {
       mediaSize,
       mediaMimeType,
       thumbnailUrl,
-      keyId
+      keyId,
+      parentMessageId
     } = req.body;
 
     if (!userId) {
@@ -501,7 +515,7 @@ export async function sendMessage(req: Request, res: Response) {
     // Get other user ID and check blocking status
     const conv = convCheck.rows[0];
     const otherUserId = conv.user1_id === userId ? conv.user2_id : conv.user1_id;
-    
+
     const blockCheck = await pool.query(
       `SELECT EXISTS(
         SELECT 1 FROM user_blocks 
@@ -530,8 +544,9 @@ export async function sendMessage(req: Request, res: Response) {
         thumbnail_url,
         is_anonymous,
         anonymous_identity_id,
-        key_id
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, false, NULL, $11)
+        key_id,
+        parent_message_id
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, false, NULL, $11, $12)
       RETURNING *`,
       [
         conversationId,
@@ -544,7 +559,8 @@ export async function sendMessage(req: Request, res: Response) {
         mediaSize,
         mediaMimeType,
         thumbnailUrl,
-        keyId
+        keyId,
+        parentMessageId || null
       ]
     );
 
@@ -562,7 +578,7 @@ export async function sendMessage(req: Request, res: Response) {
         'SELECT name, gender, dp_url FROM users WHERE user_id = $1',
         [userId]
       );
-      
+
       const senderInfo = {
         user_id: userId,
         name: userInfo.rows[0].name,
@@ -585,7 +601,7 @@ export async function sendMessage(req: Request, res: Response) {
       message: 'Message sent successfully',
       data: message
     });
-  } 
+  }
   catch (error) {
     console.error('[MSGES] Send regular message error:', error);
     if (error instanceof ApiError) throw error;
@@ -627,7 +643,7 @@ export async function updateMessageStatus(req: Request, res: Response) {
       message: 'Message status updated',
       data: result.rows[0]
     });
-  } 
+  }
   catch (error) {
     console.error('[ERROR] Update message status error:', error);
     if (error instanceof ApiError) throw error;
@@ -682,7 +698,7 @@ export async function deleteMessage(req: Request, res: Response) {
       success: true,
       message: 'Message deleted successfully'
     });
-  } 
+  }
   catch (error) {
     console.error('[ERROR] Delete message error:', error);
     if (error instanceof ApiError) throw error;
@@ -755,7 +771,7 @@ export async function blockUser(req: Request, res: Response) {
       success: true,
       message: 'User blocked successfully'
     });
-  } 
+  }
   catch (error) {
     console.error('[ERROR] Block user error:', error);
     if (error instanceof ApiError) throw error;
@@ -807,7 +823,7 @@ export async function unblockUser(req: Request, res: Response) {
       success: true,
       message: 'User unblocked successfully'
     });
-  } 
+  }
   catch (error) {
     console.error('[ERROR] Unblock user error:', error);
     if (error instanceof ApiError) throw error;
@@ -819,16 +835,16 @@ export async function unblockUser(req: Request, res: Response) {
 export async function reportUser(req: Request, res: Response) {
   try {
     const userId = req.user?.userId;
-    
+
     // Support both new format (reportType, description) and old format (reason, description optional)
-    const { 
-      reportedUserId, 
-      messageId, 
+    const {
+      reportedUserId,
+      messageId,
       conversationId,
-      reportType, 
+      reportType,
       reason,
-      description, 
-      evidenceUrls 
+      description,
+      evidenceUrls
     } = req.body;
 
     if (!userId) {
@@ -857,7 +873,7 @@ export async function reportUser(req: Request, res: Response) {
     let actualReportedUserId = reportedUserId;
     if (reportedUserId === 'ANONYMOUS' && conversationId) {
       // console.log('🎭 Resolving anonymous user ID from conversation:', conversationId);
-      
+
       const convResult = await pool.query(
         `SELECT 
           cc.user1_id, cc.user2_id, cc.anonymous_initiator_id,
@@ -867,18 +883,18 @@ export async function reportUser(req: Request, res: Response) {
          WHERE cc.conversation_id = $1 AND (cc.user1_id = $2 OR cc.user2_id = $2)`,
         [conversationId, userId]
       );
-      
+
       if (convResult.rows.length === 0) {
         throw new ApiError(404, 'Conversation not found');
       }
-      
+
       const conv = convResult.rows[0];
-      
+
       // The reported user is the anonymous initiator (the one who started anonymously)
       if (conv.initiator_actual_user_id) {
         actualReportedUserId = conv.initiator_actual_user_id;
         // console.log('Resolved anonymous user ID:', actualReportedUserId);
-      } 
+      }
       else {
         // If no anonymous initiator, report the other user in conversation
         actualReportedUserId = conv.user1_id === userId ? conv.user2_id : conv.user1_id;
@@ -898,7 +914,7 @@ export async function reportUser(req: Request, res: Response) {
     // console.log('🔍 Checking self-report:', {
     //   reporterUserId: userId,
     //   reporterType: typeof userId,
-      // reportedUserId: actualReportedUserId,
+    // reportedUserId: actualReportedUserId,
     //   reportedType: typeof actualReportedUserId,
     //   areEqual: userId === actualReportedUserId,
     //   strictEqual: userId === actualReportedUserId,
@@ -908,18 +924,18 @@ export async function reportUser(req: Request, res: Response) {
     // Prevent self-reporting (ensure both are strings for comparison)
     const reporterIdStr = String(userId);
     const reportedIdStr = String(actualReportedUserId);
-    
+
     if (reporterIdStr === reportedIdStr) {
       console.log('[ERROR] Self-report detected!');
       throw new ApiError(400, 'Cannot report yourself');
     }
-    
+
     // console.log('✅ Different users - report allowed');
 
     // Validate and normalize report type
     const validTypes = ['spam', 'harassment', 'inappropriate_content', 'impersonating', 'fake_profile', 'other'];
     const normalizedType = finalReportType.toLowerCase().replace(/\s+/g, '_');
-    
+
     if (!validTypes.includes(normalizedType)) {
       // Try to map common variations
       const typeMap: Record<string, string> = {
@@ -930,7 +946,7 @@ export async function reportUser(req: Request, res: Response) {
         'inappropriate': 'inappropriate_content',
         'offensive': 'inappropriate_content'
       };
-      
+
       const mappedType = typeMap[normalizedType];
       if (!mappedType) {
         throw new ApiError(400, `Invalid report type. Must be one of: ${validTypes.join(', ')}`);
@@ -958,7 +974,7 @@ export async function reportUser(req: Request, res: Response) {
       'SELECT user_id, name, roll_no, branch, dp_url FROM users WHERE user_id = $1',
       [userId]
     );
-    
+
     const reportedInfo = await pool.query(
       'SELECT user_id, name, roll_no, gender, branch, dp_url, bio FROM users WHERE user_id = $1',
       [actualReportedUserId]
@@ -1040,7 +1056,7 @@ export async function reportUser(req: Request, res: Response) {
       }
     });
 
-  } 
+  }
 
   catch (error) {
     console.error('[ERROR] Report user error:', error);

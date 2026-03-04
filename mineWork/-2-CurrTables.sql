@@ -4571,6 +4571,865 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 
+-- ================================================
+
+
+-- -- Show foreign key relationships between tables
+SELECT
+    tc.table_schema || '.' || tc.table_name as from_table,
+    kcu.column_name as from_column,
+    ccu.table_schema || '.' || ccu.table_name as to_table,
+    ccu.column_name as to_column
+FROM information_schema.table_constraints tc
+JOIN information_schema.key_column_usage kcu
+    ON tc.constraint_name = kcu.constraint_name
+    AND tc.table_schema = kcu.table_schema
+JOIN information_schema.constraint_column_usage ccu
+    ON ccu.constraint_name = tc.constraint_name
+    AND ccu.table_schema = tc.table_schema
+WHERE tc.constraint_type = 'FOREIGN KEY'
+    AND tc.table_schema = 'public'
+ORDER BY tc.table_name;
+
+
+TRUNCATE TABLE
+  public.message_status,
+  public.chat_messages,
+  public.media_uploads,
+  public.chat_session_keys,
+  public.chat_requests,
+  public.chat_conversations,
+  public.anonymous_identities,
+  public.group_members,
+  public.group_invites,
+  public.group_bans,
+  public.votes,
+  public.polls,
+  public.reports,
+  public.system_notifications,
+  public.audit_logs,
+  public.user_encryption_keys,
+  public.user_verifications,
+  public.user_sessions,
+  public.user_settings,
+  public.user_password_resets,
+  public.groups,
+  public.users
+RESTART IDENTITY CASCADE;
+
+SELECT
+  column_name,
+  data_type,
+  is_nullable,
+  column_default
+FROM information_schema.columns
+WHERE table_schema = 'public'
+  AND table_name   = 'user_settings'
+ORDER BY ordinal_position;
+
+SELECT table_schema, table_name
+FROM information_schema.tables
+WHERE table_schema = 'public'
+  AND table_type = 'BASE TABLE'
+ORDER BY table_name;
+
+SELECT
+  table_schema,
+  table_name,
+  ordinal_position,
+  column_name,
+  data_type,
+  udt_name,
+  is_nullable,
+  column_default,
+  character_maximum_length,
+  numeric_precision,
+  numeric_scale
+FROM information_schema.columns
+WHERE table_schema = 'public'
+ORDER BY table_name, ordinal_position;
+
+SELECT
+  tc.constraint_name,
+  tc.table_schema || '.' || tc.table_name AS from_table,
+  kcu.column_name AS from_column,
+  ccu.table_schema || '.' || ccu.table_name AS to_table,
+  ccu.column_name AS to_column
+FROM information_schema.table_constraints tc
+JOIN information_schema.key_column_usage kcu
+  ON tc.constraint_name = kcu.constraint_name
+  AND tc.table_schema = kcu.table_schema
+JOIN information_schema.constraint_column_usage ccu
+  ON ccu.constraint_name = tc.constraint_name
+  AND ccu.table_schema = tc.table_schema
+WHERE tc.constraint_type = 'FOREIGN KEY'
+  AND tc.table_schema = 'public'
+ORDER BY tc.table_name, tc.constraint_name;
+
+
+-- ========================================
+-- Migration: Allow 3 conversations between same users
+-- 1. Normal (both know each other)
+-- 2. A→B anonymous (A knows B, B doesn't know A)
+-- 3. B→A anonymous (B knows A, A doesn't know B)
+-- Date: 2026-02-02
+-- ========================================
+
+-- -- Step 1: Drop the existing unique constraint
+ALTER TABLE chat_conversations 
+DROP CONSTRAINT IF EXISTS chat_conversations_user1_id_user2_id_key;
+
+-- Also drop if the previous migration constraint exists
+ALTER TABLE chat_conversations 
+DROP CONSTRAINT IF EXISTS chat_conversations_user1_user2_anonymous_key;
+
+-- Step 2: Add new composite unique constraint including anonymous_initiator_id
+-- This allows multiple anonymous conversations with different initiators
+-- COALESCE converts NULL to a UUID so it's included in uniqueness
+ALTER TABLE chat_conversations 
+ADD CONSTRAINT chat_conversations_users_initiator_key 
+UNIQUE (user1_id, user2_id, COALESCE(anonymous_initiator_id, '00000000-0000-0000-0000-000000000000'));
+
+CREATE UNIQUE INDEX 
+CONCURRENTLY IF NOT EXISTS chat_conversations_users_initiator_unique_idx 
+ON public.chat_conversations (user1_id, user2_id, COALESCE(anonymous_initiator_id, '00000000-0000-0000-0000-000000000000'::uuid));
+
+
+-- Step 3: Create index for better query performance
+CREATE INDEX IF NOT EXISTS idx_conversations_users_initiator 
+ON chat_conversations(user1_id, user2_id, anonymous_initiator_id);
+
+-- Step 4: Update existing conversations to set is_accepted = true (remove request concept)
+UPDATE chat_conversations 
+SET is_accepted = true 
+WHERE is_accepted = false;
+
+-- ===========================================================
+--          3rd feb 5AM
+-- ===========================================================
+
+-- -- Fix Foreign Key Constraint
+ALTER TABLE chat_conversations 
+DROP CONSTRAINT IF EXISTS chat_conversations_anonymous_initiator_id_fkey;
+
+ALTER TABLE chat_conversations 
+ADD CONSTRAINT chat_conversations_anonymous_initiator_id_fkey 
+FOREIGN KEY (anonymous_initiator_id) 
+REFERENCES anonymous_identities(identity_id) 
+ON DELETE SET NULL;
+
+-- -- Verify the constraint
+SELECT 
+    conname as constraint_name,
+    conrelid::regclass as table_name,
+    confrelid::regclass as foreign_table,
+    pg_get_constraintdef(oid) as constraint_definition
+FROM pg_constraint
+WHERE conname = 'chat_conversations_anonymous_initiator_id_fkey';
+
+
+-- ===========================================================
+--          10th feb 5PM
+-- ===========================================================
+
+UPDATE users 
+SET dp_url = 'https://res.cloudinary.com/dboibrtkv/image/upload/v1/defaults/m0.jpg'
+WHERE dp_url IS NULL AND LOWER(gender) = 'male';
+
+UPDATE users 
+SET dp_url = 'https://res.cloudinary.com/dboibrtkv/image/upload/v1/defaults/f0.jpg'
+WHERE dp_url IS NULL AND LOWER(gender) = 'female';
+
+UPDATE "users"
+SET dp_url = CASE
+  WHEN LOWER(COALESCE(gender, '')) = 'female' THEN 'https://res.cloudinary.com/dboibrtkv/image/upload/v1770722710/ahvxgdh0shutx72okak0.jpg'
+  WHEN LOWER(COALESCE(gender, '')) = 'male' THEN 'https://res.cloudinary.com/dboibrtkv/image/upload/v1770722710/syqrnws7rzkjxxvullsa.jpg'
+  ELSE 'https://res.cloudinary.com/dboibrtkv/image/upload/v1770722710/syqrnws7rzkjxxvullsa.jpg' -- default for other/NULL genders
+END;
+
+SELECT 
+    gender,
+    COUNT(*) as count,
+    COUNT(CASE WHEN dp_url LIKE '%m0%' THEN 1 END) as default_male,
+    COUNT(CASE WHEN dp_url LIKE '%f0%' THEN 1 END) as default_female,
+    COUNT(CASE WHEN dp_url NOT LIKE '%d0%' AND dp_url IS NOT NULL THEN 1 END) as custom_images
+FROM users
+GROUP BY gender;
+
+
+-- ==============================================================================
+--                    14th FEB, 12 PM
+-- ==============================================================================
+
+-- -- Add field to mark messages that came from anonymous chat
+ALTER TABLE chat_messages 
+ADD COLUMN IF NOT EXISTS was_anonymous_message BOOLEAN DEFAULT FALSE;
+
+
+-- ==============================================================================
+--                    15th FEB, 3 PM
+-- ==============================================================================
+
+-- Function to unblock a user
+CREATE OR REPLACE FUNCTION unblock_user(
+    p_blocker_id UUID,
+    p_blocked_id UUID
+)
+RETURNS TABLE (
+    success BOOLEAN,
+    can_message_now BOOLEAN,
+    remaining_blocker_id UUID
+) AS $$
+DECLARE
+    v_deleted_count INTEGER;
+    v_remaining_blocks INTEGER;
+    v_remaining_blocker_id UUID;
+BEGIN
+    -- Delete the block
+    DELETE FROM user_blocks 
+    WHERE blocker_id = p_blocker_id 
+    AND blocked_id = p_blocked_id;
+    
+    GET DIAGNOSTICS v_deleted_count = ROW_COUNT;
+    
+    IF v_deleted_count = 0 THEN
+        RAISE EXCEPTION 'Block not found';
+    END IF;
+    
+    -- Check if ANY blocks remain between these two users (in either direction)
+    SELECT COUNT(*), MAX(blocker_id)
+    INTO v_remaining_blocks, v_remaining_blocker_id
+    FROM user_blocks 
+    WHERE (blocker_id = p_blocker_id AND blocked_id = p_blocked_id)
+       OR (blocker_id = p_blocked_id AND blocked_id = p_blocker_id);
+    
+    IF v_remaining_blocks = 0 THEN
+        -- No blocks remain - fully unblock the conversation
+        UPDATE chat_conversations 
+        SET is_blocked = FALSE, 
+            blocked_by_user_id = NULL,
+            updated_at = NOW()
+        WHERE (user1_id = p_blocker_id AND user2_id = p_blocked_id) 
+           OR (user1_id = p_blocked_id AND user2_id = p_blocker_id)
+           OR (user1_id = LEAST(p_blocker_id, p_blocked_id) AND user2_id = GREATEST(p_blocker_id, p_blocked_id));
+        
+        RETURN QUERY SELECT TRUE, TRUE, NULL::UUID;
+    ELSE
+        -- Blocks still exist - update who is blocking
+        UPDATE chat_conversations 
+        SET is_blocked = TRUE,
+            blocked_by_user_id = v_remaining_blocker_id,
+            updated_at = NOW()
+        WHERE (user1_id = p_blocker_id AND user2_id = p_blocked_id) 
+           OR (user1_id = p_blocked_id AND user2_id = p_blocker_id)
+           OR (user1_id = LEAST(p_blocker_id, p_blocked_id) AND user2_id = GREATEST(p_blocker_id, p_blocked_id));
+        
+        RETURN QUERY SELECT TRUE, FALSE, v_remaining_blocker_id;
+    END IF;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+
+CREATE OR REPLACE FUNCTION after_unblock_sync()
+RETURNS TRIGGER AS $$
+BEGIN
+  UPDATE chat_conversations
+  SET is_blocked = FALSE,
+      blocked_by_user_id = NULL,
+      updated_at = NOW()
+  WHERE user1_id = LEAST(OLD.blocker_id, OLD.blocked_id)
+    AND user2_id = GREATEST(OLD.blocker_id, OLD.blocked_id);
+
+  RETURN OLD;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trigger_unblock_sync
+AFTER DELETE ON user_blocks
+FOR EACH ROW
+EXECUTE FUNCTION after_unblock_sync();
+
+
+-- ==============================================================================
+--                    16th FEB, 5:20 PM
+-- ==============================================================================
+
+Update the poll lifecycle management function
+CREATE OR REPLACE FUNCTION manage_poll_lifecycle()
+RETURNS TRIGGER AS $$
+DECLARE
+    v_system_notifications_exists BOOLEAN;
+    v_group_bans_exists BOOLEAN;
+BEGIN
+    -- Check for expired polls
+    IF NEW.status = 'active' AND NEW.expires_at <= NOW() THEN
+        NEW.status := 'expired';
+        NEW.updated_at := NOW();
+    END IF;
+    
+    -- Execute passed polls
+    IF NEW.status = 'passed' AND OLD.status != 'passed' AND NEW.is_executed = FALSE THEN
+        -- Execute based on poll type
+        CASE NEW.poll_type
+            WHEN 'remove_user' THEN
+                -- Remove user from group (without banning)
+                DELETE FROM group_members 
+                WHERE group_id = NEW.group_id 
+                AND user_id = NEW.target_user_id;
+            
+            WHEN 'kick_member' THEN
+                -- Remove user from group
+                DELETE FROM group_members 
+                WHERE group_id = NEW.group_id 
+                AND user_id = NEW.target_user_id;
+                
+                -- Add to bans table if exists
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE table_schema = 'public' 
+                    AND table_name = 'group_bans'
+                ) INTO v_group_bans_exists;
+                
+                IF v_group_bans_exists THEN
+                    INSERT INTO group_bans (group_id, user_id, banned_by, reason)
+                    VALUES (NEW.group_id, NEW.target_user_id, NEW.created_by, 
+                           'Removed by poll vote: ' || COALESCE(NEW.description, 'No reason provided'));
+                END IF;
+            
+            WHEN 'make_admin' THEN
+                -- Make user admin
+                UPDATE group_members 
+                SET is_admin = TRUE,
+                    can_add_members = TRUE,
+                    can_remove_members = TRUE,
+                    can_edit_group = TRUE
+                WHERE group_id = NEW.group_id 
+                AND user_id = NEW.target_user_id;
+            
+            WHEN 'remove_admin' THEN
+                -- Remove admin privileges
+                UPDATE group_members 
+                SET is_admin = FALSE,
+                    can_add_members = FALSE,
+                    can_remove_members = FALSE,
+                    can_edit_group = FALSE
+                WHERE group_id = NEW.group_id 
+                AND user_id = NEW.target_user_id;
+            
+            WHEN 'object_removal' THEN
+                -- Re-add user if they were removed
+                INSERT INTO group_members (group_id, user_id, joined_at)
+                VALUES (NEW.group_id, NEW.target_user_id, NOW())
+                ON CONFLICT (group_id, user_id) 
+                DO UPDATE SET 
+                    is_admin = FALSE,
+                    joined_at = NOW();
+            
+            -- Add more cases as needed
+        END CASE;
+        
+        -- Mark as executed
+        NEW.is_executed := TRUE;
+        NEW.executed_at := NOW();
+        
+        -- Check if system_notifications exists
+        SELECT EXISTS (
+            SELECT FROM information_schema.tables 
+            WHERE table_schema = 'public' 
+            AND table_name = 'system_notifications'
+        ) INTO v_system_notifications_exists;
+        
+        IF v_system_notifications_exists AND NEW.target_user_id IS NOT NULL THEN
+            -- Create notification for affected user
+            INSERT INTO system_notifications (user_id, notification_type, title, body, data)
+            VALUES (
+                NEW.target_user_id,
+                'vote_result',
+                'Poll Result: ' || NEW.title,
+                CASE NEW.poll_type
+                    WHEN 'remove_user' THEN 'You have been removed from the group by poll vote.'
+                    WHEN 'kick_member' THEN 'You have been removed and banned from the group by poll vote.'
+                    WHEN 'make_admin' THEN 'You have been promoted to admin by poll vote.'
+                    WHEN 'remove_admin' THEN 'Your admin privileges have been removed by poll vote.'
+                    WHEN 'object_removal' THEN 'Your objection was successful. You have been re-added to the group.'
+                    ELSE 'A poll affecting you has been completed.'
+                END,
+                jsonb_build_object(
+                    'poll_id', NEW.poll_id,
+                    'group_id', NEW.group_id,
+                    'poll_type', NEW.poll_type,
+                    'result', 'passed',
+                    'executed_at', NOW()
+                )
+            );
+        END IF;
+    END IF;
+    
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+
+-- 1. Admin creates poll with poll_type = 'remove_user' and target_user_id set
+-- 2. Users vote on the poll
+-- 3. When votes_for >= votes_required, poll status changes to 'passed'
+-- 4. This trigger automatically:
+--    - Deletes user from group_members table
+--    - Marks poll as executed
+--    - Sends notification to removed user
+-- 5. User is removed from group immediately after poll passes
+
+-- ==============================================================================
+--                    16th FEB, 6:40 PM
+-- ==============================================================================
+
+SELECT column_name, data_type, is_nullable, column_default 
+FROM information_schema.columns
+WHERE table_schema = 'public' 
+AND table_name = 'votes'
+ORDER BY ordinal_position;
+
+-- Drop the old constraint
+ALTER TABLE polls DROP CONSTRAINT IF EXISTS polls_poll_type_check;
+
+-- Add the new constraint with 'remove_user' included
+ALTER TABLE polls 
+ADD CONSTRAINT polls_poll_type_check 
+CHECK (poll_type IN (
+    'remove_user',      -- Remove member (no ban, can rejoin)
+    'kick_member',      -- Kick member (with ban, cannot rejoin easily)
+    'make_admin',       -- Promote to admin
+    'remove_admin',     -- Demote from admin
+    'change_group_name', -- Change group name
+    'object_removal'    -- Appeal/object to a removal poll
+));
+
+-- ==============================================================================
+--                    16th FEB, 7 PM
+-- ==============================================================================
+
+-- UPDATE POLL VOTING LOGIC
+-- Drop the old function
+DROP FUNCTION IF EXISTS manage_poll_lifecycle() CASCADE;
+
+-- Create new function with updated voting logic
+CREATE OR REPLACE FUNCTION manage_poll_lifecycle()
+RETURNS TRIGGER AS $$
+DECLARE
+    v_system_notifications_exists BOOLEAN;
+    v_group_bans_exists BOOLEAN;
+    v_random_value INTEGER;
+    v_decision TEXT;
+BEGIN
+    -- ====================================================================
+    -- HANDLE EXPIRED POLLS - Decide winner based on vote counts
+    -- ====================================================================
+    IF NEW.status = 'active' AND NEW.expires_at <= NOW() THEN
+        -- Check vote counts and decide
+        IF NEW.votes_for > NEW.votes_against THEN
+            -- More FOR votes - Poll passes
+            NEW.status := 'passed';
+            v_decision := 'majority_for';
+        ELSIF NEW.votes_for < NEW.votes_against THEN
+            -- More AGAINST votes - Poll fails
+            NEW.status := 'failed';
+            v_decision := 'majority_against';
+        ELSE
+            -- Tie - Coin flip (random 0 or 1)
+            v_random_value := floor(random() * 2)::INTEGER; -- 0 or 1
+            
+            IF v_random_value = 0 THEN
+                -- Coin flip says REMOVE
+                NEW.status := 'passed';
+                v_decision := 'tie_coinflip_remove';
+                
+                -- Add a note to description about coin flip
+                IF NEW.description IS NULL THEN
+                    NEW.description := '[TIE BROKEN BY COIN FLIP - REMOVE]';
+                ELSE
+                    NEW.description := NEW.description || ' [TIE BROKEN BY COIN FLIP - REMOVE]';
+                END IF;
+            ELSE
+                -- Coin flip says KEEP
+                NEW.status := 'failed';
+                v_decision := 'tie_coinflip_keep';
+                
+                -- Add a note to description about coin flip
+                IF NEW.description IS NULL THEN
+                    NEW.description := '[TIE BROKEN BY COIN FLIP - KEEP]';
+                ELSE
+                    NEW.description := NEW.description || ' [TIE BROKEN BY COIN FLIP - KEEP]';
+                END IF;
+            END IF;
+        END IF;
+        
+        NEW.updated_at := NOW();
+    END IF;
+    
+--     -- ====================================================================
+--     -- EXECUTE PASSED POLLS - Take action based on poll type
+--     -- ====================================================================
+    IF NEW.status = 'passed' AND OLD.status != 'passed' AND NEW.is_executed = FALSE THEN
+        -- Execute based on poll type
+        CASE NEW.poll_type
+            WHEN 'remove_user' THEN
+                -- Remove user from group (NO BAN - they can rejoin if invited)
+                DELETE FROM group_members 
+                WHERE group_id = NEW.group_id 
+                AND user_id = NEW.target_user_id;
+                
+                -- NO ban added - this is soft removal
+            
+            WHEN 'kick_member' THEN
+                -- Remove user from group AND ban them
+                DELETE FROM group_members 
+                WHERE group_id = NEW.group_id 
+                AND user_id = NEW.target_user_id;
+                
+                -- Add to bans table if exists
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE table_schema = 'public' 
+                    AND table_name = 'group_bans'
+                ) INTO v_group_bans_exists;
+                
+                IF v_group_bans_exists THEN
+                    INSERT INTO group_bans (group_id, user_id, banned_by, reason)
+                    VALUES (NEW.group_id, NEW.target_user_id, NEW.created_by, 
+                           'Kicked by poll vote: ' || COALESCE(NEW.description, 'No reason provided'))
+                    ON CONFLICT (group_id, user_id) DO NOTHING;
+                END IF;
+            
+            WHEN 'make_admin' THEN
+                -- Promote user to admin
+                UPDATE group_members 
+                SET is_admin = TRUE,
+                    can_add_members = TRUE,
+                    can_remove_members = TRUE,
+                    can_edit_group = TRUE
+                WHERE group_id = NEW.group_id 
+                AND user_id = NEW.target_user_id;
+            
+            WHEN 'remove_admin' THEN
+                -- Demote user from admin
+                UPDATE group_members 
+                SET is_admin = FALSE,
+                    can_add_members = FALSE,
+                    can_remove_members = FALSE,
+                    can_edit_group = FALSE
+                WHERE group_id = NEW.group_id 
+                AND user_id = NEW.target_user_id
+                AND is_owner = FALSE; -- Cannot demote owner
+            
+            WHEN 'change_group_name' THEN
+                -- Change group name (title contains new name)
+                UPDATE groups 
+                SET group_name = NEW.title,
+                    updated_at = NOW()
+                WHERE group_id = NEW.group_id;
+            
+            WHEN 'object_removal' THEN
+                -- Re-add user if objection to removal passes
+                INSERT INTO group_members (group_id, user_id, joined_at)
+                VALUES (NEW.group_id, NEW.target_user_id, NOW())
+                ON CONFLICT (group_id, user_id) 
+                DO UPDATE SET 
+                    is_admin = FALSE,
+                    joined_at = NOW();
+                
+                -- Remove ban if it exists
+                DELETE FROM group_bans
+                WHERE group_id = NEW.group_id 
+                AND user_id = NEW.target_user_id;
+        END CASE;
+        
+        -- Mark as executed
+        NEW.is_executed := TRUE;
+        NEW.executed_at := NOW();
+        
+        -- Check if system_notifications exists
+        SELECT EXISTS (
+            SELECT FROM information_schema.tables 
+            WHERE table_schema = 'public' 
+            AND table_name = 'system_notifications'
+        ) INTO v_system_notifications_exists;
+        
+        IF v_system_notifications_exists AND NEW.target_user_id IS NOT NULL THEN
+            -- Create notification for affected user
+            INSERT INTO system_notifications (user_id, notification_type, title, body, data)
+            VALUES (
+                NEW.target_user_id,
+                'vote_result',
+                'Poll Result: ' || NEW.title,
+                CASE NEW.poll_type
+                    WHEN 'remove_user' THEN 'You have been removed from the group by poll vote (soft removal).'
+                    WHEN 'kick_member' THEN 'You have been kicked from the group by poll vote.'
+                    WHEN 'make_admin' THEN 'You have been promoted to admin by poll vote!'
+                    WHEN 'remove_admin' THEN 'Your admin privileges have been removed by poll vote.'
+                    WHEN 'change_group_name' THEN 'The group name has been changed by poll vote.'
+                    WHEN 'object_removal' THEN 'Your objection was successful! You have been re-added to the group.'
+                    ELSE 'A poll affecting you has been completed.'
+                END,
+                jsonb_build_object(
+                    'poll_id', NEW.poll_id,
+                    'group_id', NEW.group_id,
+                    'poll_type', NEW.poll_type,
+                    'result', 'passed',
+                    'decision_method', v_decision,
+                    'votes_for', NEW.votes_for,
+                    'votes_against', NEW.votes_against,
+                    'executed_at', NOW()
+                )
+            );
+        END IF;
+    END IF;
+    
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- -- Recreate the trigger
+DROP TRIGGER IF EXISTS trigger_manage_poll_lifecycle ON polls;
+
+CREATE TRIGGER trigger_manage_poll_lifecycle 
+BEFORE UPDATE ON polls 
+FOR EACH ROW 
+EXECUTE FUNCTION manage_poll_lifecycle();
+
+-- ==================================================================================
+-- SUMMARY OF CHANGES
+-- ==================================================================================
+-- 1. Removed 50% majority requirement during voting
+-- 2. When poll expires:
+--    - If votes_for > votes_against: Poll PASSES
+--    - If votes_for < votes_against: Poll FAILS  
+--    - If votes_for = votes_against: COIN FLIP (random 0 or 1)
+--      * 0 = Remove (poll passes)
+--      * 1 = Keep (poll fails)
+-- 3. Coin flip result is noted in poll description
+-- 4. Added support for 'remove_user' poll type (soft removal, no ban)
+-- ==================================================================================
+
+-- ==================================================================================
+-- HELPER FUNCTION: Check and expire polls
+-- ==================================================================================
+-- Call this function periodically (e.g., every minute) to auto-expire polls
+-- Or call it when fetching polls to ensure up-to-date status
+
+CREATE OR REPLACE FUNCTION check_and_expire_polls()
+RETURNS TABLE (
+    poll_id UUID,
+    old_status VARCHAR(20),
+    new_status VARCHAR(20),
+    decision_method TEXT
+) AS $$
+BEGIN
+    RETURN QUERY
+    UPDATE polls
+    SET updated_at = NOW() -- This triggers the manage_poll_lifecycle function
+    WHERE status = 'active' 
+    AND expires_at <= NOW()
+    RETURNING 
+        polls.poll_id,
+        'active'::VARCHAR(20) as old_status,
+        polls.status as new_status,
+        CASE 
+            WHEN votes_for > votes_against THEN 'majority_for'
+            WHEN votes_for < votes_against THEN 'majority_against'
+            ELSE 'coin_flip'
+        END as decision_method;
+END;
+$$ LANGUAGE plpgsql;
+
+
+SELECT 'Poll voting logic updated successfully!' as status;
+
+
+-- ==============================================================================
+--                    16th FEB, 7 PM
+-- ==============================================================================
+
+
+-- 1) Find tables named 'polls' or like
+SELECT table_schema, table_name, table_type
+FROM information_schema.tables
+WHERE table_name ILIKE 'polls' OR table_name ILIKE '%polls%';
+
+-- 2) List triggers referencing 'polls'
+SELECT event_object_schema, event_object_table, trigger_name, action_timing, event_manipulation, action_statement
+FROM information_schema.triggers
+WHERE event_object_table ILIKE 'polls' OR event_object_table ILIKE '%polls%';
+
+-- 3) List row-level security policies on 'polls'
+SELECT pol.policyname, pol.tablename, pol.schemaname, pol.policytype, pg_get_ruledef(pol.oid) as definition
+FROM (SELECT oid, polname as policyname, tablename, schemaname, policytype FROM pg_policies WHERE tablename ILIKE 'polls' OR tablename ILIKE '%polls%') pol;
+
+-- 4) Find functions that reference 'polls' in their source
+SELECT n.nspname as schema, p.proname as function_name, pg_get_functiondef(p.oid) as definition
+FROM pg_proc p
+JOIN pg_namespace n ON p.pronamespace = n.oid
+WHERE pg_get_functiondef(p.oid) ILIKE '%polls%';
+
+-- 5) Check for foreign keys referencing polls
+SELECT tc.constraint_name, tc.table_schema, tc.table_name, kcu.column_name, ccu.table_schema AS foreign_table_schema,
+       ccu.table_name AS foreign_table_name, ccu.column_name AS foreign_column_name
+FROM information_schema.table_constraints AS tc
+JOIN information_schema.key_column_usage AS kcu
+  ON tc.constraint_name = kcu.constraint_name
+JOIN information_schema.constraint_column_usage AS ccu
+  ON ccu.constraint_name = tc.constraint_name
+WHERE tc.constraint_type = 'FOREIGN KEY' AND (ccu.table_name ILIKE 'polls' OR ccu.table_name ILIKE '%polls%');
+
+-- 6) Check for indexes on polls
+SELECT schemaname, tablename, indexname, indexdef
+FROM pg_indexes
+WHERE tablename ILIKE 'polls' OR tablename ILIKE '%polls%';
+
+
+-- ==============================================================================
+--                    18th FEB, 12 PM
+-- ==============================================================================
+
+CREATE EXTENSION IF NOT EXISTS pg_cron;
+
+CREATE OR REPLACE FUNCTION manage_poll_lifecycle()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- Auto-expire if time crossed
+    IF NEW.status = 'active'
+       AND NEW.expires_at <= NOW() THEN
+        NEW.status := 'expired';
+    END IF;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trigger_manage_poll_lifecycle ON polls;
+
+CREATE TRIGGER trigger_manage_poll_lifecycle
+BEFORE UPDATE ON polls
+FOR EACH ROW
+EXECUTE FUNCTION manage_poll_lifecycle();
+
+SELECT cron.schedule(
+  'expire_polls_every_10_minute',
+  '*/10 * * * *',
+  $$
+  UPDATE polls
+  SET status = 'expired'
+  WHERE status = 'active'
+    AND expires_at <= NOW();
+  $$
+);
+
+SELECT * FROM cron.job;
+
+
+-- ==============================================================================
+--                    28th Feb, 10:50PM
+-- ==============================================================================
+
+ALTER TABLE users
+ADD COLUMN instagram_url TEXT,
+ADD COLUMN twitter_url TEXT,
+ADD COLUMN linkedin_url TEXT;
+COMMENT ON COLUMN users.instagram_url IS 'Instagram profile URL';
+COMMENT ON COLUMN users.twitter_url IS 'Twitter/X profile URL';
+COMMENT ON COLUMN users.linkedin_url IS 'LinkedIn profile URL';
+
+
+-- ==============================================================================
+--                    28th Feb, 11:30PM
+-- ==============================================================================
+
+-- -- -- ========== MESSAGE_REACTIONS TABLE ==========
+CREATE TABLE IF NOT EXISTS message_reactions (
+    reaction_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    message_id UUID NOT NULL REFERENCES chat_messages(message_id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    emoji VARCHAR(10) NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(message_id, user_id, emoji)
+);
+CREATE INDEX IF NOT EXISTS idx_message_reactions_message ON public.message_reactions (message_id);
+CREATE INDEX IF NOT EXISTS idx_message_reactions_user ON public.message_reactions (user_id);
+
+
+-- -- ========== MESSAGE_EDIT_HISTORY TABLE ==========
+CREATE TABLE IF NOT EXISTS message_edit_history (
+    edit_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    message_id UUID NOT NULL REFERENCES chat_messages(message_id) ON DELETE CASCADE,
+    previous_encrypted_content TEXT NOT NULL,
+    previous_content_iv VARCHAR(50) NOT NULL,
+    previous_content_auth_tag VARCHAR(50) NOT NULL,
+    previous_media_url TEXT,
+    edited_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_edit_history_message ON message_edit_history(message_id, edited_at DESC);
 
 
 
+-- -- ========== UPDATE CHAT_MESSAGES TABLE ==========
+ALTER TABLE chat_messages 
+ADD COLUMN IF NOT EXISTS deleted_for_everyone BOOLEAN DEFAULT FALSE,
+ADD COLUMN IF NOT EXISTS edited_at TIMESTAMPTZ;
+
+-- Add comment to clarify deletion types
+COMMENT ON COLUMN chat_messages.is_deleted IS 'Message deleted for self (soft delete)';
+COMMENT ON COLUMN chat_messages.deleted_for_everyone IS 'Message deleted for everyone (hard delete)';
+COMMENT ON COLUMN chat_messages.edited_at IS 'Last edit timestamp';
+
+-- Update index for better query performance
+CREATE INDEX IF NOT EXISTS idx_messages_deleted_for_everyone ON chat_messages(deleted_for_everyone);
+
+-- ========== FUNCTION: Get Reaction Counts ==========
+CREATE OR REPLACE FUNCTION get_message_reaction_counts(msg_id UUID)
+RETURNS TABLE(emoji VARCHAR, count BIGINT) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT mr.emoji, COUNT(*)::BIGINT as count
+    FROM message_reactions mr
+    WHERE mr.message_id = msg_id
+    GROUP BY mr.emoji
+    ORDER BY count DESC, mr.emoji;
+END;
+$$ LANGUAGE plpgsql;
+
+-- -- ========== FUNCTION: Check User Reaction ==========
+CREATE OR REPLACE FUNCTION has_user_reacted(msg_id UUID, usr_id UUID, reaction_emoji VARCHAR)
+RETURNS BOOLEAN AS $$
+BEGIN
+    RETURN EXISTS (
+        SELECT 1 FROM message_reactions
+        WHERE message_id = msg_id 
+        AND user_id = usr_id 
+        AND emoji = reaction_emoji
+    );
+END;
+$$ LANGUAGE plpgsql;
+
+-- -- ========== TRIGGER: Update edited_at on message edit ==========
+CREATE OR REPLACE FUNCTION update_message_edited_at()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.is_edited = TRUE AND OLD.is_edited = FALSE THEN
+        NEW.edited_at = NOW();
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trigger_update_message_edited_at
+BEFORE UPDATE ON chat_messages
+FOR EACH ROW
+EXECUTE FUNCTION update_message_edited_at();
+
+
+-- ==============================================================================
+--                    2nd March, 7:15PM
+-- ==============================================================================
+
+-- Add per-user soft-delete tracking column
+ALTER TABLE chat_messages
+ADD COLUMN IF NOT EXISTS deleted_for_user_ids UUID[] DEFAULT '{}';

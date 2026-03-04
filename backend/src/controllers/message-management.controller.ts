@@ -1,15 +1,13 @@
 import type { Request, Response } from 'express';
 import { pool } from '../lib/db.js';
 import { ApiError } from '../utils/error.util.js';
-import { emitToConversation } from '../socket/index.js';
-import { Server as SocketServer } from 'socket.io';
+import { emitToConversation, emitToGroup } from '../socket/index.js';
+
 
 /**
  * MESSAGE MANAGEMENT CONTROLLER
  * Handles message reactions, editing, deletion, and threading
  */
-
-const io = new SocketServer();
 
 
 // ========== MESSAGE REACTIONS ==========
@@ -29,13 +27,11 @@ export async function addReaction(req: Request, res: Response) {
       throw new ApiError(400, 'Emoji is required');
     }
 
-    // Verify message exists and user has access
+    // Fetch the message — use minimal columns that always exist
     const messageCheck = await pool.query(
-      `SELECT m.*, c.user1_id, c.user2_id, g.group_id
-       FROM chat_messages m
-       LEFT JOIN chat_conversations c ON m.conversation_id = c.conversation_id
-       LEFT JOIN groups g ON m.group_id = g.group_id
-       WHERE m.message_id = $1 AND m.is_deleted = FALSE AND m.deleted_for_everyone = FALSE`,
+      `SELECT message_id, conversation_id, group_id
+       FROM chat_messages
+       WHERE message_id = $1 AND is_deleted = FALSE`,
       [messageId]
     );
 
@@ -45,10 +41,14 @@ export async function addReaction(req: Request, res: Response) {
 
     const message = messageCheck.rows[0];
 
-    // Check if user has access (part of conversation or group)
+    // Verify the user has access to this message
     let hasAccess = false;
     if (message.conversation_id) {
-      hasAccess = message.user1_id === userId || message.user2_id === userId;
+      const convCheck = await pool.query(
+        `SELECT 1 FROM chat_conversations WHERE conversation_id = $1 AND (user1_id = $2 OR user2_id = $2)`,
+        [message.conversation_id, userId]
+      );
+      hasAccess = convCheck.rows.length > 0;
     } else if (message.group_id) {
       const memberCheck = await pool.query(
         `SELECT 1 FROM group_members WHERE group_id = $1 AND user_id = $2`,
@@ -61,16 +61,15 @@ export async function addReaction(req: Request, res: Response) {
       throw new ApiError(403, 'No access to this message');
     }
 
-    // Add or toggle reaction
-    const result = await pool.query(
+    // Insert reaction — ON CONFLICT DO NOTHING (idempotent)
+    await pool.query(
       `INSERT INTO message_reactions (message_id, user_id, emoji)
        VALUES ($1, $2, $3)
-       ON CONFLICT (message_id, user_id, emoji) DO NOTHING
-       RETURNING reaction_id`,
+       ON CONFLICT (message_id, user_id, emoji) DO NOTHING`,
       [messageId, userId, emoji]
     );
 
-    // Get reaction counts
+    // Get updated reaction counts
     const reactions = await pool.query(
       `SELECT emoji, COUNT(*)::int as count
        FROM message_reactions
@@ -79,11 +78,14 @@ export async function addReaction(req: Request, res: Response) {
       [messageId]
     );
 
-    // Emit socket event
+    // Broadcast via socket
     if (message.conversation_id) {
-      emitToConversation(io, message.conversation_id, 'message:reaction', {
-        messageId, userId, emoji, reactions: reactions.rows,
-        action: result.rows.length > 0 ? 'add' : 'exists'
+      emitToConversation(message.conversation_id, 'message:reaction', {
+        messageId, userId, emoji, reactions: reactions.rows, action: 'add'
+      });
+    } else if (message.group_id) {
+      emitToGroup(message.group_id, 'message:reaction', {
+        messageId, userId, emoji, reactions: reactions.rows, action: 'add'
       });
     }
 
@@ -134,14 +136,22 @@ export async function removeReaction(req: Request, res: Response) {
       [messageId]
     );
 
-    // Get conversation_id for socket emit
+    // Get conversation_id and group_id for socket emit
     const messageData = await pool.query(
-      `SELECT conversation_id FROM chat_messages WHERE message_id = $1`,
+      `SELECT conversation_id, group_id FROM chat_messages WHERE message_id = $1`,
       [messageId]
     );
 
     if (messageData.rows[0]?.conversation_id) {
-      emitToConversation(io, messageData.rows[0].conversation_id, 'message:reaction', {
+      emitToConversation(messageData.rows[0].conversation_id, 'message:reaction', {
+        messageId,
+        userId,
+        emoji,
+        reactions: reactions.rows,
+        action: 'remove'
+      });
+    } else if (messageData.rows[0]?.group_id) {
+      emitToGroup(messageData.rows[0].group_id, 'message:reaction', {
         messageId,
         userId,
         emoji,
@@ -256,7 +266,12 @@ export async function editMessage(req: Request, res: Response) {
 
     // Emit socket event
     if (message.conversation_id) {
-      emitToConversation(io, message.conversation_id, 'message:edited', {
+      emitToConversation(message.conversation_id, 'message:edited', {
+        messageId, encryptedContent, contentIv, contentAuthTag,
+        isEdited: true, editedAt: updated.rows[0].edited_at
+      });
+    } else if (message.group_id) {
+      emitToGroup(message.group_id, 'message:edited', {
         messageId, encryptedContent, contentIv, contentAuthTag,
         isEdited: true, editedAt: updated.rows[0].edited_at
       });
@@ -382,7 +397,11 @@ export async function deleteMessageEnhanced(req: Request, res: Response) {
 
       // Emit socket event
       if (message.conversation_id) {
-        emitToConversation(io, message.conversation_id, 'message:deleted', {
+        emitToConversation(message.conversation_id, 'message:deleted', {
+          messageId, deleteForEveryone: true
+        });
+      } else if (message.group_id) {
+        emitToGroup(message.group_id, 'message:deleted', {
           messageId, deleteForEveryone: true
         });
       }
@@ -392,18 +411,25 @@ export async function deleteMessageEnhanced(req: Request, res: Response) {
         message: 'Message deleted for everyone'
       });
     } else {
-      // Delete for self only
+      // Delete for self only — add user_id to the deleted_for_user_ids array
       await pool.query(
         `UPDATE chat_messages 
-         SET is_deleted = TRUE, deleted_at = NOW(), updated_at = NOW()
+         SET deleted_for_user_ids = array_append(
+               COALESCE(deleted_for_user_ids, ARRAY[]::uuid[]), $2::uuid
+             ),
+             updated_at = NOW()
          WHERE message_id = $1`,
-        [messageId]
+        [messageId, userId]
       );
 
-      // Emit socket event
+      // Emit socket only to the requesting user (others keep seeing the message)
       if (message.conversation_id) {
-        emitToConversation(io, message.conversation_id, 'message:deleted', {
-          messageId, deleteForEveryone: false
+        emitToConversation(message.conversation_id, 'message:deleted', {
+          messageId, deleteForEveryone: false, deletedForUserId: userId
+        });
+      } else if (message.group_id) {
+        emitToGroup(message.group_id, 'message:deleted', {
+          messageId, deleteForEveryone: false, deletedForUserId: userId
         });
       }
 

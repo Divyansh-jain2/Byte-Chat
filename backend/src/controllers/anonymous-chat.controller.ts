@@ -49,7 +49,7 @@ export async function createAnonymousConversation(req: Request, res: Response) {
     const user2Id = userId < otherUserId ? otherUserId : userId;
 
     // console.log(`🎭 Creating/finding anonymous conversation: User ${userId} → User ${otherUserId}`);
-    
+
     // Get user's gender
     const userInfo = await pool.query(
       'SELECT gender FROM users WHERE user_id = $1',
@@ -97,7 +97,7 @@ export async function createAnonymousConversation(req: Request, res: Response) {
     // If conversation doesn't exist, create it
     if (!conversation || conversation.rows.length === 0) {
       // console.log(`📝 Creating NEW anonymous conversation`);
-      
+
       try {
         // Create new conversation
         conversation = await pool.query(
@@ -120,13 +120,13 @@ export async function createAnonymousConversation(req: Request, res: Response) {
         // Handle race condition - another request created it first
         if (insertError.code === '23505') {
           // console.log(`⚠️ Race condition detected - fetching existing anonymous conversation`);
-          
+
           conversation = await pool.query(
             `SELECT * FROM chat_conversations 
              WHERE user1_id = $1 AND user2_id = $2 AND anonymous_initiator_id = $3`,
             [user1Id, user2Id, anonymousIdentityId]
           );
-          
+
           // console.log(`✓ Fetched conversation after race condition: ${conversation.rows[0]?.conversation_id}`);
         } else {
           throw insertError;
@@ -150,7 +150,7 @@ export async function createAnonymousConversation(req: Request, res: Response) {
         anonymousIdentityId
       }
     });
-  } 
+  }
   catch (error: any) {
     console.error('[ERROR] Create anonymous conversation error:', {
       message: error.message,
@@ -159,7 +159,7 @@ export async function createAnonymousConversation(req: Request, res: Response) {
       userId: req.user?.userId,
       otherUserId: req.body?.otherUserId
     });
-    
+
     if (error instanceof ApiError) throw error;
     throw new ApiError(500, 'Failed to create anonymous conversation');
   }
@@ -254,7 +254,7 @@ export async function getAnonymousConversations(req: Request, res: Response) {
       success: true,
       data: result.rows
     });
-  } 
+  }
   catch (error) {
     console.error('[ERROR] Get anonymous conversations error:', error);
     if (error instanceof ApiError) throw error;
@@ -288,19 +288,19 @@ export async function getAnonymousMessages(req: Request, res: Response) {
 
     const conversation = convCheck.rows[0];
     const otherUserId = conversation.user1_id === userId ? conversation.user2_id : conversation.user1_id;
-    
+
     let otherUserData;
-    
+
     // Get the anonymous identity to check who initiated
     const anonIdentity = await pool.query(
       `SELECT user_id, random_string, display_gender, identity_id FROM anonymous_identities 
        WHERE identity_id = $1`,
       [conversation.anonymous_initiator_id]
     );
-    
+
     if (anonIdentity.rows.length > 0) {
       const initiatorId = anonIdentity.rows[0].user_id;
-      
+
       // If current user is NOT the initiator, they are the receiver
       if (initiatorId !== userId) {
         // Receiver sees anonymous info (random_string which can be customized)
@@ -365,6 +365,15 @@ export async function getAnonymousMessages(req: Request, res: Response) {
             END
           ELSE null
         END as sender,
+        CASE
+          WHEN cm.parent_message_id IS NOT NULL THEN jsonb_build_object(
+            'encrypted_content', pm.encrypted_content,
+            'sender', jsonb_build_object(
+              'name', pu.name
+            )
+          )
+          ELSE null
+        END as parent_message,
         COALESCE(
           (
             SELECT json_agg(
@@ -396,9 +405,13 @@ export async function getAnonymousMessages(req: Request, res: Response) {
       LEFT JOIN users u ON cm.sender_id = u.user_id
       LEFT JOIN chat_conversations cc ON cm.conversation_id = cc.conversation_id
       LEFT JOIN anonymous_identities ai ON cc.anonymous_initiator_id = ai.identity_id
+      LEFT JOIN chat_messages pm ON cm.parent_message_id = pm.message_id
+      LEFT JOIN users pu ON pm.sender_id = pu.user_id
       WHERE cm.conversation_id = $1
       ${before ? 'AND cm.created_at < $3' : ''}
       AND cm.is_deleted = false
+      AND cm.deleted_for_everyone = false
+      AND NOT ($2::uuid = ANY(COALESCE(cm.deleted_for_user_ids, ARRAY[]::uuid[])))
       ORDER BY cm.created_at DESC
       LIMIT $${before ? '4' : '3'}`,
       before ? [conversationId, userId, before, limit] : [conversationId, userId, limit]
@@ -412,7 +425,7 @@ export async function getAnonymousMessages(req: Request, res: Response) {
         otherUser: otherUserData
       }
     });
-  } 
+  }
   catch (error) {
     console.error('[ERROR] Get anonymous messages error:', error);
     if (error instanceof ApiError) throw error;
@@ -434,7 +447,8 @@ export async function sendAnonymousMessage(req: Request, res: Response) {
       mediaSize,
       mediaMimeType,
       thumbnailUrl,
-      keyId
+      keyId,
+      parentMessageId
     } = req.body;
 
     if (!userId) {
@@ -468,14 +482,14 @@ export async function sendAnonymousMessage(req: Request, res: Response) {
          FROM chat_conversations WHERE conversation_id = $1`,
         [conversationId]
       );
-      
+
       console.error('🎭 Anonymous message failed:', {
         conversationId,
         userId,
         conversationExists: debugCheck.rows.length > 0,
         conversationData: debugCheck.rows[0] || null
       });
-      
+
       throw new ApiError(403, 'Access denied or conversation blocked/not anonymous');
     }
 
@@ -485,7 +499,7 @@ export async function sendAnonymousMessage(req: Request, res: Response) {
     if (conversation.existing_identity_id) {
       // Identity already exists
       anonymousIdentityId = conversation.existing_identity_id;
-      
+
       // Update last_used_at timestamp
       await pool.query(
         'UPDATE anonymous_identities SET last_used_at = NOW() WHERE identity_id = $1',
@@ -507,7 +521,7 @@ export async function sendAnonymousMessage(req: Request, res: Response) {
           conversationId
         ]
       );
-      
+
       anonymousIdentityId = newIdentity.rows[0].identity_id;
     }
 
@@ -526,8 +540,9 @@ export async function sendAnonymousMessage(req: Request, res: Response) {
         thumbnail_url,
         is_anonymous,
         anonymous_identity_id,
-        key_id
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, true, $11, $12)
+        key_id,
+        parent_message_id
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, true, $11, $12, $13)
       RETURNING *`,
       [
         conversationId,
@@ -541,7 +556,8 @@ export async function sendAnonymousMessage(req: Request, res: Response) {
         mediaMimeType,
         thumbnailUrl,
         anonymousIdentityId,
-        keyId
+        keyId,
+        parentMessageId || null
       ]
     );
 
@@ -553,14 +569,14 @@ export async function sendAnonymousMessage(req: Request, res: Response) {
         'SELECT random_string, display_gender FROM anonymous_identities WHERE identity_id = $1',
         [anonymousIdentityId]
       );
-      
+
       const senderInfo = {
         name: anonInfo.rows[0].random_string,
         display_gender: anonInfo.rows[0].display_gender,
         is_anonymous: true,
       };
 
-      emitToConversation(io, conversationId, 'new-message', {
+      emitToConversation(conversationId, 'new-message', {
         ...message,
         sender: senderInfo,
         is_my_message: false,
@@ -572,7 +588,7 @@ export async function sendAnonymousMessage(req: Request, res: Response) {
       message: 'Anonymous message sent successfully',
       data: message
     });
-  } 
+  }
   catch (error) {
     console.error('[ERROR] Send anonymous message error:', error);
     if (error instanceof ApiError) throw error;
@@ -668,7 +684,7 @@ export async function revealAnonymousIdentity(req: Request, res: Response) {
         `UPDATE chat_conversations SET is_blocked = true WHERE conversation_id = $1`,
         [conversationId]
       );
-    } 
+    }
     else {
       // No regular conversation exists - convert this one
       targetConversationId = conversationId;
@@ -702,7 +718,7 @@ export async function revealAnonymousIdentity(req: Request, res: Response) {
     );
 
     // Emit reveal event to both users
-    emitToConversation(io, targetConversationId, 'identity-revealed', {
+    emitToConversation(targetConversationId, 'identity-revealed', {
       userId,
       conversationId: targetConversationId,
       wasMerged: shouldMerge,
@@ -711,15 +727,15 @@ export async function revealAnonymousIdentity(req: Request, res: Response) {
 
     res.json({
       success: true,
-      message: shouldMerge 
+      message: shouldMerge
         ? 'Identity revealed and messages merged into existing conversation'
         : 'Identity revealed and conversation converted to normal chat',
-      data: { 
+      data: {
         conversationId: targetConversationId,
         wasMerged: shouldMerge
       }
     });
-  } 
+  }
   catch (error) {
     console.error('[ERROR] Reveal identity error:', error);
     if (error instanceof ApiError) throw error;
@@ -746,7 +762,7 @@ export async function updateAnonymousName(req: Request, res: Response) {
     if (!customName || typeof customName !== 'string') {
       throw new ApiError(400, 'Custom name is required and must be a string');
     }
-    
+
     const trimmedName = customName.trim();
     if (trimmedName.length === 0) {
       throw new ApiError(400, 'Custom name cannot be empty');
