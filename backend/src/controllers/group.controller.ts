@@ -1,3 +1,48 @@
+// ============================================================
+// Get poll results (for General polls: aggregate votes per option)
+// ============================================================
+export const getPollResults = async (req: Request, res: Response) => {
+  const { groupId, pollId } = req.params;
+  const userId = req.user?.userId;
+  if (!userId) throw new ApiError(401, 'Unauthorized');
+
+  // Confirm user is a group member
+  const memberCheck = await query(
+    `SELECT 1 FROM group_members WHERE group_id = $1 AND user_id = $2`,
+    [groupId, userId]
+  );
+  if (memberCheck.rows.length === 0) throw new ApiError(403, 'You are not a member of this group');
+
+  // Get poll
+  const pollRes = await query(`SELECT * FROM polls WHERE poll_id = $1 AND group_id = $2`, [pollId, groupId]);
+  if (pollRes.rows.length === 0) throw new ApiError(404, 'Poll not found');
+  const poll = pollRes.rows[0];
+
+  if (poll.poll_type === 'General') {
+    // Get options
+    const optionsRes = await query(`SELECT * FROM poll_options WHERE poll_id = $1 ORDER BY option_order`, [pollId]);
+    const options = optionsRes.rows;
+    // Get vote counts per option
+    const votesRes = await query(
+      `SELECT option_id, COUNT(*) as votes FROM votes WHERE poll_id = $1 GROUP BY option_id`,
+      [pollId]
+    );
+    const voteCounts: Record<string, number> = {};
+    for (const v of votesRes.rows) voteCounts[v.option_id] = Number(v.votes);
+    // Attach vote counts to options
+    const optionsWithVotes = options.map(opt => ({ ...opt, votes: voteCounts[opt.option_id] || 0 }));
+    res.json({ success: true, data: { poll, options: optionsWithVotes } });
+  } else {
+    // For non-General polls, return yes/no counts
+    const votesRes = await query(
+      `SELECT vote_value, COUNT(*) as votes FROM votes WHERE poll_id = $1 GROUP BY vote_value`,
+      [pollId]
+    );
+    const counts: Record<string, number> = {};
+    for (const v of votesRes.rows) counts[String(v.vote_value)] = Number(v.votes);
+    res.json({ success: true, data: { poll, votes: counts } });
+  }
+};
 import type { Request, Response } from 'express';
 import { pool, query } from '../lib/db.js';
 import { ApiError } from '../utils/error.util.js';
@@ -1006,7 +1051,7 @@ export const promoteMemberToAdmin = async (req: Request, res: Response) => {
 // ============================================================
 export const createPoll = async (req: Request, res: Response) => {
   const { groupId } = req.params;
-  const { poll_type, title, description, target_user_id, expires_in_hours = 6 } = req.body;
+  const { poll_type, title, description, target_user_id, expires_in_hours = 6, options } = req.body;
   const userId = req.user?.userId;
 
   if (!userId) {
@@ -1014,7 +1059,7 @@ export const createPoll = async (req: Request, res: Response) => {
   }
 
   // Validate poll type
-  const validPollTypes = ['kick_member', 'make_admin', 'remove_admin'];
+  const validPollTypes = ['kick_member', 'make_admin', 'remove_admin', 'General'];
   if (!validPollTypes.includes(poll_type)) {
     throw new ApiError(400, 'Invalid poll type');
   }
@@ -1025,6 +1070,18 @@ export const createPoll = async (req: Request, res: Response) => {
 
   // expires_in_hours: min 1, max 24, default 6
   const hoursNum = Math.min(24, Math.max(1, Number(expires_in_hours) || 6));
+
+  // For General poll, validate options
+  if (poll_type === 'General') {
+    if (!Array.isArray(options) || options.length < 2) {
+      throw new ApiError(400, 'General polls require at least 2 options');
+    }
+    for (const opt of options) {
+      if (typeof opt !== 'string' || !opt.trim()) {
+        throw new ApiError(400, 'Each option must be a non-empty string');
+      }
+    }
+  }
 
   // Polls that affect a specific member must have a target
   const memberPollTypes = ['kick_member', 'make_admin', 'remove_admin'];
@@ -1112,17 +1169,33 @@ export const createPoll = async (req: Request, res: Response) => {
       ]
     );
 
-    await client.query('COMMIT');
-
     const poll = pollResult.rows[0];
 
-    // Emit to correct room  (group: not group-)
-    io.to(`group:${groupId}`).emit('new-poll', poll);
+    // If General poll, insert options
+    if (poll_type === 'General') {
+      for (let i = 0; i < options.length; i++) {
+        await client.query(
+          `INSERT INTO poll_options (poll_id, option_text, option_order) VALUES ($1, $2, $3)`,
+          [poll.poll_id, options[i], i]
+        );
+      }
+    }
+
+    await client.query('COMMIT');
+
+    // Fetch options for response if General
+    let pollWithOptions = poll;
+    if (poll_type === 'General') {
+      const optsRes = await client.query(`SELECT * FROM poll_options WHERE poll_id = $1 ORDER BY option_order`, [poll.poll_id]);
+      pollWithOptions = { ...poll, options: optsRes.rows };
+    }
+
+    io.to(`group:${groupId}`).emit('new-poll', pollWithOptions);
 
     res.status(201).json({
       success: true,
       message: 'Poll created successfully',
-      data: poll,
+      data: pollWithOptions,
     });
   } catch (error: any) {
     await client.query('ROLLBACK');
@@ -1190,11 +1263,39 @@ export const getGroupPolls = async (req: Request, res: Response) => {
 
     const result = await query(queryText, params);
 
+    // For General polls, fetch options
+    const polls = result.rows;
+    const pollIds = polls.filter(p => p.poll_type === 'General').map(p => p.poll_id);
+    let optionsMap: Record<string, any[]> = {};
+    if (pollIds.length > 0) {
+      const optsRes = await query(
+        `SELECT * FROM poll_options WHERE poll_id = ANY($1) ORDER BY option_order`,
+        [pollIds]
+      );
+      // for (const opt of optsRes.rows) {
+      //   if (opt.poll_id !== undefined) {
+      //     if (!optionsMap[opt.poll_id]) optionsMap[opt.poll_id] = [];
+      //     optionsMap[opt.poll_id].push(opt);
+      //   }
+      // }
+      for (const opt of optsRes.rows) {
+        const pollId = opt.poll_id;
+        if (pollId !== undefined && pollId !== null) {
+          if (!optionsMap[pollId]) optionsMap[pollId] = [];
+          optionsMap[pollId].push(opt);
+        }
+      }
+    }
+    const pollsWithOptions = polls.map(p =>
+      p.poll_type === 'General' ? { ...p, options: optionsMap[p.poll_id] || [] } : p
+    );
+
     res.json({
       success: true,
-      data: result.rows
+      data: pollsWithOptions
     });
-  } catch (error: any) {
+  } 
+  catch (error: any) {
     console.error('Error fetching group polls:', error);
     throw error;
   }
@@ -1205,13 +1306,10 @@ export const getGroupPolls = async (req: Request, res: Response) => {
 // ============================================================
 export const voteOnPoll = async (req: Request, res: Response) => {
   const { groupId, pollId } = req.params;
-  const { vote_value } = req.body; // true = for, false = against
+  const { vote_value, option_id } = req.body; // For General: option_id, for others: vote_value
   const userId = req.user?.userId;
 
   if (!userId) throw new ApiError(401, 'Unauthorized');
-  if (typeof vote_value !== 'boolean') {
-    throw new ApiError(400, 'vote_value must be a boolean (true = yes, false = no)');
-  }
 
   const client = await pool.connect();
 
@@ -1236,6 +1334,7 @@ export const voteOnPoll = async (req: Request, res: Response) => {
     if (pollResult.rows.length === 0) throw new ApiError(404, 'Poll not found in this group');
     const poll = pollResult.rows[0];
 
+
     // 3. Guards
     if (poll.status !== 'active') {
       throw new ApiError(400, `Cannot vote on a ${poll.status} poll`);
@@ -1255,16 +1354,38 @@ export const voteOnPoll = async (req: Request, res: Response) => {
       throw new ApiError(403, 'You cannot vote on a poll targeting you for removal');
     }
 
-    const upsertResult = await client.query(
-      `INSERT INTO votes (poll_id, user_id, vote_value)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (poll_id, user_id)
-         WHERE user_id IS NOT NULL
-       DO UPDATE SET vote_value = EXCLUDED.vote_value, voted_at = NOW()
-       RETURNING (xmax = 0) AS inserted`,
-      [pollId, userId, vote_value]
-    );
-    const voteWasNew: boolean = upsertResult.rows[0]?.inserted ?? true;
+    let upsertResult, voteWasNew;
+    if (poll.poll_type === 'General') {
+      // Validate option_id
+      if (!option_id) throw new ApiError(400, 'option_id is required for General polls');
+      // Check option exists for this poll
+      const optRes = await client.query(`SELECT 1 FROM poll_options WHERE poll_id = $1 AND option_id = $2`, [pollId, option_id]);
+      if (optRes.rows.length === 0) throw new ApiError(400, 'Invalid option_id');
+      upsertResult = await client.query(
+        `INSERT INTO votes (poll_id, user_id, option_id)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (poll_id, user_id)
+           WHERE user_id IS NOT NULL
+         DO UPDATE SET option_id = EXCLUDED.option_id, voted_at = NOW()
+         RETURNING (xmax = 0) AS inserted`,
+        [pollId, userId, option_id]
+      );
+      voteWasNew = upsertResult.rows[0]?.inserted ?? true;
+    } else {
+      if (typeof vote_value !== 'boolean') {
+        throw new ApiError(400, 'vote_value must be a boolean (true = yes, false = no)');
+      }
+      upsertResult = await client.query(
+        `INSERT INTO votes (poll_id, user_id, vote_value)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (poll_id, user_id)
+           WHERE user_id IS NOT NULL
+         DO UPDATE SET vote_value = EXCLUDED.vote_value, voted_at = NOW()
+         RETURNING (xmax = 0) AS inserted`,
+        [pollId, userId, vote_value]
+      );
+      voteWasNew = upsertResult.rows[0]?.inserted ?? true;
+    }
 
     // 5. Commit — stats trigger updates counters only. Status resolution happens at expiry.
     await client.query('COMMIT');

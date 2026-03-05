@@ -165,3 +165,10 @@
 - **Vote Tracking**: Real-time vote counting and status updates
 - **Auto-execution**: Automatic member removal based on poll results
 - **Poll Expiry**: 6-hour voting window with automatic closure
+
+## Enhanced Polling
+- **Multiple Choice Polls**: More than binary yes/no options
+- **Anonymous Voting**: Hide voter identities
+- **Poll Results Visibility**: Control when results are shown
+- **Poll Scheduling**: Schedule polls to open/close at specific times
+- **Survey Forms**: Create detailed surveys with multiple questions

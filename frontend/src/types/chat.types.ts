@@ -103,7 +103,7 @@ export interface Poll {
   target_user_id?: string;
   target_name?: string;
   target_roll_no?: string;
-  poll_type: 'kick_member' | 'make_admin' | 'remove_admin' | 'change_group_name' | 'object_removal';
+  poll_type: 'kick_member' | 'make_admin' | 'remove_admin' | 'General';
   title: string;
   description?: string;
   votes_for: number;
@@ -120,7 +120,8 @@ export interface Poll {
   cancellation_reason?: string;
   cancelled_by?: string;
   has_voted?: boolean;
-  user_vote?: boolean; // true = for, false = against
+  user_vote?: boolean | string; // true = for, false = against, string = option_id for General
+  options?: PollOption[]; // Only for General polls
 }
 
 export interface CreatePollData {
@@ -133,4 +134,10 @@ export interface CreatePollData {
 
 export interface VoteData {
   vote_value: boolean; // true = for/yes, false = against/no
+}
+
+export interface PollOption {
+  option_id: string;
+  option_text: string;
+  votes?: number;
 }

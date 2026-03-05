@@ -7,7 +7,7 @@ import dynamic from 'next/dynamic';
 import { groupService } from '@/services/group.service';
 import { useSocket } from '@/contexts/SocketContext';
 import { useToast } from '@/contexts/ToastContext';
-import type { Message, Poll, Group } from '@/types/chat.types';
+import type { Message, Poll, Group, PollOption } from '@/types/chat.types';
 import { Theme } from 'emoji-picker-react';
 import Image from 'next/image';
 import MessageBubble from '@/components/MessageBubble';
@@ -42,6 +42,8 @@ export default function GroupChatPage() {
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [showCreatePoll, setShowCreatePoll] = useState(false);
+  const [selectedPollType, setSelectedPollType] = useState<string | null>(null);
+  const [showPollTypeMenu, setShowPollTypeMenu] = useState(false);
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [uploadingImage, setUploadingImage] = useState(false);
@@ -51,6 +53,7 @@ export default function GroupChatPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messageInputRef = useRef<HTMLInputElement>(null);
   const emojiPickerRef = useRef<HTMLDivElement>(null);
+  const pollMenuRef = useRef<HTMLDivElement>(null);
   const userStr = typeof window !== 'undefined' ? localStorage.getItem('user') : null;
   const currentUser = userStr ? JSON.parse(userStr) : null;
   const currentUserId = currentUser?.user_id || currentUser?.userId;
@@ -61,7 +64,7 @@ export default function GroupChatPage() {
       setMessages(response.data.messages || []);
     }
     catch (error: unknown) {
-      console.error('Failed to fetch group messages:', error);
+      // console.error('Failed to fetch group messages:', error);
       let message = '';
       if (
         typeof error === 'object' &&
@@ -172,7 +175,7 @@ export default function GroupChatPage() {
       socket.off('message:edited', handleMessageEdited);
       socket.off('message:deleted', handleMessageDeleted);
     };
-  }, [socket, fetchMessages]);
+  }, [socket, fetchMessages, router, toast]);
 
   const fetchGroup = useCallback(async () => {
     try {
@@ -207,6 +210,23 @@ export default function GroupChatPage() {
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, [showEmojiPicker]);
+
+  // Close poll menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (pollMenuRef.current && !pollMenuRef.current.contains(event.target as Node)) {
+        setShowPollTypeMenu(false);
+      }
+    };
+
+    if (showPollTypeMenu) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showPollTypeMenu]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -274,7 +294,7 @@ export default function GroupChatPage() {
         }
       };
     }
-  }, [groupId, isConnected, fetchMessages, fetchPolls, joinGroup, leaveGroup]);
+  }, [groupId, isConnected, fetchMessages, fetchPolls, joinGroup, leaveGroup, fetchGroup]);
 
 
   const handleSendMessage = async (e: React.FormEvent) => {
@@ -511,175 +531,249 @@ export default function GroupChatPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => setShowCreatePoll(!showCreatePoll)}
-            className={`btn-ghost px-3 py-1.5 text-xs font-semibold flex items-center gap-1.5 ${showCreatePoll ? 'text-blue-400' : ''}`}
-          >
-            📊 {showCreatePoll ? 'Hide Poll' : 'Poll'}
-          </button>
           <Link href="/dashboard" className="btn-ghost px-3 py-1.5 text-xs">Dashboard</Link>
         </div>
       </header>
 
-      {/* Poll Panel (collapsible) */}
-      {showCreatePoll && (
-        <div className="shrink-0 px-4 pt-3">
-          <QuickPollForm groupId={groupId} onSuccess={() => {
-            setShowCreatePoll(false);
-            fetchPolls();
-            fetchGroup();
-          }} />
-        </div>
-      )}
+      {/* Messages area with floating overlays */}
+      <div className="flex-1 overflow-y-auto relative custom-scrollbar">
+        {/* Active Polls - Compact Floating Cards */}
+        {polls.length > 0 && (
+          <div className="absolute top-4 left-4 right-4 z-40 space-y-3 pointer-events-none">
+            {polls.map((poll) => (
+              <div key={poll.poll_id} className="glass rounded-2xl p-4 shadow-xl border border-white/20 backdrop-blur-2xl pointer-events-auto max-w-sm mx-auto animate-fade-in translate-y-0">
+                <div className="flex items-start justify-between gap-3 mb-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-lg">📊</span>
+                    <p className="text-sm font-bold tracking-tight" style={{ color: 'var(--heading)' }}>{poll.title}</p>
+                  </div>
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] uppercase tracking-wider font-bold shrink-0 ${poll.status === 'active' ? 'bg-emerald-500/15 text-emerald-400' :
+                    poll.status === 'passed' ? 'bg-blue-500/15 text-blue-400' :
+                      'bg-red-500/15 text-red-400'
+                    }`}>{poll.status}</span>
+                </div>
 
-      {/* Active Polls */}
-      {polls.length > 0 && (
-        <div className="shrink-0 px-4 pt-2 space-y-2 max-h-48 overflow-y-auto">
-          {polls.map((poll) => (
-            <div key={poll.poll_id} className="glass rounded-2xl p-3">
-              <div className="flex items-start justify-between gap-2 mb-2">
+                {/* General poll voting/results */}
+                {poll.poll_type === 'General' ? (
+                  <>
+                    {poll.status === 'active' ? (
+                      <GeneralPollVoting poll={poll} groupId={groupId} onVoted={fetchPolls} />
+                    ) : (
+                      <GeneralPollResults poll={poll} />
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <div className="h-2 rounded-full overflow-hidden my-3 flex shadow-inner" style={{ background: 'rgba(0,0,0,0.2)' }}>
+                      <div className="h-full bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)] transition-all duration-500"
+                        style={{ width: `${(poll.votes_for / Math.max(poll.votes_for + poll.votes_against, 1)) * 100}%` }} />
+                      <div className="h-full bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)] transition-all duration-500"
+                        style={{ width: `${(poll.votes_against / Math.max(poll.votes_for + poll.votes_against, 1)) * 100}%` }} />
+                    </div>
+                    <div className="flex justify-between text-[11px] mb-3 px-1 font-medium" style={{ color: 'var(--muted)' }}>
+                      <span className="text-emerald-400">{poll.votes_for} For</span>
+                      <span className="text-[10px] opacity-60">
+                        {poll.status === 'active'
+                          ? `Ends ${new Date(poll.expires_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+                          : `Ended ${new Date(poll.expires_at).toLocaleDateString()}`
+                        }
+                      </span>
+                      <span className="text-red-400">{poll.votes_against} Against</span>
+                    </div>
+                    {poll.status === 'active' && (
+                      <div className="flex gap-2">
+                        <button onClick={() => handleVote(poll.poll_id, true)} disabled={poll.has_voted && poll.user_vote === true}
+                          className={`flex-1 py-1.5 rounded-xl text-xs font-bold transition-all ${poll.has_voted && poll.user_vote === true ? 'bg-emerald-500 text-white shadow-lg' : 'bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25'
+                            }`}>✓ For</button>
+                        <button onClick={() => handleVote(poll.poll_id, false)} disabled={poll.has_voted && poll.user_vote === false}
+                          className={`flex-1 py-1.5 rounded-xl text-xs font-bold transition-all ${poll.has_voted && poll.user_vote === false ? 'bg-red-500 text-white shadow-lg' : 'bg-red-500/15 text-red-400 hover:bg-red-500/25'
+                            }`}>✗ Against</button>
+                        {(group?.user_is_admin || group?.user_is_owner || poll.created_by === currentUserId) && (
+                          <button
+                            onClick={() => handleCancelPoll(poll.poll_id)}
+                            className="w-9 h-9 rounded-xl flex items-center justify-center bg-red-500/10 text-red-400 hover:bg-red-500/20 border border-red-500/20 transition-all shrink-0"
+                            title="Cancel Poll"
+                          >
+                            <span>🗑️</span>
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Poll Creation Form - Overlay */}
+        {showCreatePoll && (
+          <div className="absolute inset-x-4 bottom-4 z-50 animate-slide-up pointer-events-auto">
+            <div className="glass shadow-2xl rounded-3xl p-5 border border-white/20 backdrop-blur-3xl max-w-lg mx-auto overflow-hidden relative">
+              <div className="absolute top-0 left-0 w-full h-1 bg-linear-to-r from-pink-500 to-violet-500" />
+              <div className="flex justify-between items-center mb-5">
                 <div className="flex items-center gap-2">
-                  <span className="text-base">📊</span>
-                  <p className="text-sm font-semibold" style={{ color: 'var(--heading)' }}>{poll.title}</p>
+                  <span className="text-xl">📊</span>
+                  <h3 className="text-base font-bold tracking-tight" style={{ color: 'var(--heading)' }}>
+                    New {selectedPollType?.replace('_', ' ')} Poll
+                  </h3>
                 </div>
-                <span className={`px-2 py-0.5 rounded-full text-xs font-semibold shrink-0 ${poll.status === 'active' ? 'bg-emerald-500/15 text-emerald-400' :
-                  poll.status === 'passed' ? 'bg-blue-500/15 text-blue-400' :
-                    'bg-red-500/15 text-red-400'
-                  }`}>{poll.status}</span>
+                <button
+                  onClick={() => setShowCreatePoll(false)}
+                  className="w-8 h-8 rounded-full glass flex items-center justify-center hover:bg-black/10 transition-colors text-lg"
+                >
+                  ✕
+                </button>
               </div>
-              {/* Balanced Progress Bar (For vs Against) */}
-              <div className="h-2 rounded-full overflow-hidden my-2 flex" style={{ background: 'var(--glass-bg)' }}>
-                <div className="h-full bg-emerald-500"
-                  style={{ width: `${(poll.votes_for / Math.max(poll.votes_for + poll.votes_against, 1)) * 100}%` }} />
-                <div className="h-full bg-red-500"
-                  style={{ width: `${(poll.votes_against / Math.max(poll.votes_for + poll.votes_against, 1)) * 100}%` }} />
+              <div className="max-h-[60vh] overflow-y-auto custom-scrollbar pr-1">
+                <QuickPollForm
+                  groupId={groupId}
+                  initialType={selectedPollType || 'General'}
+                  onSuccess={() => {
+                    setShowCreatePoll(false);
+                    fetchPolls();
+                    fetchGroup();
+                  }}
+                />
               </div>
-
-              <div className="flex justify-between text-xs mb-2 px-1" style={{ color: 'var(--muted)' }}>
-                <span className="text-emerald-400 font-bold">{poll.votes_for} For</span>
-                <span className="text-[10px] opacity-70">
-                  {poll.status === 'active'
-                    ? `Ends ${new Date(poll.expires_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
-                    : `Ended ${new Date(poll.expires_at).toLocaleDateString()}`
-                  }
-                </span>
-                <span className="text-red-400 font-bold">{poll.votes_against} Against</span>
-              </div>
-              {poll.status === 'active' && (
-                <div className="flex gap-2">
-                  <button onClick={() => handleVote(poll.poll_id, true)} disabled={poll.has_voted && poll.user_vote === true}
-                    className={`flex-1 py-1 rounded-xl text-xs font-semibold transition-all ${poll.has_voted && poll.user_vote === true ? 'bg-emerald-500 text-white' : 'bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25'
-                      }`}>✓ For</button>
-                  <button onClick={() => handleVote(poll.poll_id, false)} disabled={poll.has_voted && poll.user_vote === false}
-                    className={`flex-1 py-1 rounded-xl text-xs font-semibold transition-all ${poll.has_voted && poll.user_vote === false ? 'bg-red-500 text-white' : 'bg-red-500/15 text-red-400 hover:bg-red-500/25'
-                      }`}>✗ Against</button>
-
-                  {/* Cancel button for admins or creators */}
-                  {(group?.user_is_admin || group?.user_is_owner || poll.created_by === currentUserId) && (
-                    <button
-                      onClick={() => handleCancelPoll(poll.poll_id)}
-                      className="px-3 py-1 rounded-xl text-[10px] font-bold bg-red-500/10 text-red-400 hover:bg-red-500/20 border border-red-500/20 transition-all flex items-center gap-1"
-                      title="Cancel Poll"
-                    >
-                      <span>🗑️</span>
-                      <span>Cancel</span>
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-2 custom-scrollbar">
-        {messages.length === 0 ? (
-          <div className="h-full flex items-center justify-center">
-            <div className="text-center animate-fade-in">
-              <div className="text-4xl mb-3">💬</div>
-              <p className="text-sm" style={{ color: 'var(--muted)' }}>No messages yet. Start the conversation!</p>
             </div>
           </div>
-        ) : (
-          messages.map((msg) => {
-            const isMyMessage = !!msg.is_my_message;
-            return (
-              <MessageBubble
-                key={msg.message_id}
-                message={msg as any}
-                isMyMessage={isMyMessage}
-                onReply={handleReply}
-                onEdit={handleEdit}
-                onDelete={handleDelete}
-                formatTime={formatTime}
-              />
-            );
-          })
         )}
-        <div ref={messagesEndRef} />
+
+        {/* Scrollable Message List */}
+        <div className="px-4 py-6 space-y-3 min-h-full flex flex-col justify-end">
+          {messages.length === 0 ? (
+            <div className="flex-1 flex items-center justify-center opacity-50 py-20">
+              <div className="text-center">
+                <div className="text-5xl mb-4">💬</div>
+                <p className="text-sm font-medium" style={{ color: 'var(--muted)' }}>No messages yet. Start the conversation!</p>
+              </div>
+            </div>
+          ) : (
+            messages.map((msg) => {
+              const isMyMessage = !!msg.is_my_message;
+              return (
+                <MessageBubble
+                  key={msg.message_id}
+                  message={msg}
+                  isMyMessage={isMyMessage}
+                  onReply={handleReply}
+                  onEdit={handleEdit}
+                  onDelete={handleDelete}
+                  formatTime={formatTime}
+                />
+              );
+            })
+          )}
+          <div ref={messagesEndRef} />
+        </div>
       </div>
 
-      {/* Reply preview */}
-      {replyingTo && (
-        <div className="shrink-0 px-4 pt-2">
-          <div className="flex items-start gap-2 p-3 rounded-xl glass" style={{ borderLeft: '3px solid var(--coral)' }}>
-            <div className="flex-1 min-w-0">
-              <p className="text-xs font-semibold mb-1" style={{ color: 'var(--coral)' }}>
-                Replying to {replyingTo.sender?.name || 'Unknown'}
-              </p>
-              <p className="text-sm truncate" style={{ color: 'var(--muted)' }}>
-                {replyingTo.encrypted_content || 'Image'}
-              </p>
+      {/* Action Previews (Reply / Image) */}
+      <div className="px-4 space-y-2">
+        {replyingTo && (
+          <div className="animate-slide-up">
+            <div className="flex items-start gap-3 p-3 rounded-2xl glass border-l-4 border-coral shadow-lg">
+              <div className="flex-1 min-w-0">
+                <p className="text-[10px] font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--coral)' }}>
+                  Replying to {replyingTo?.sender?.name || 'Unknown'}
+                </p>
+                <p className="text-sm truncate opacity-80" style={{ color: 'var(--heading)' }}>
+                  {replyingTo?.encrypted_content || 'Image content'}
+                </p>
+              </div>
+              <button
+                onClick={() => setReplyingTo(null)}
+                className="w-6 h-6 rounded-full glass flex items-center justify-center shrink-0 hover:bg-black/10"
+              >
+                ✕
+              </button>
             </div>
-            <button
-              onClick={() => setReplyingTo(null)}
-              className="w-6 h-6 rounded-full glass flex items-center justify-center shrink-0 hover:opacity-70"
-              style={{ color: 'var(--muted)' }}
-            >
-              ✕
-            </button>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Image preview */}
-      {imagePreview && (
-        <div className="shrink-0 px-4 pb-2">
-          <div className="glass rounded-2xl p-3 flex items-center gap-3">
-            <Image src={imagePreview} alt="Preview" width={80} height={60}
-              className="rounded-xl object-contain shrink-0" />
-            <div className="flex-1 min-w-0">
-              <p className="text-xs" style={{ color: 'var(--muted)' }}>Image ready to send</p>
+        {imagePreview && (
+          <div className="animate-slide-up">
+            <div className="glass rounded-2xl p-3 flex items-center gap-4 shadow-lg border border-white/20">
+              <div className="relative w-16 h-12 rounded-lg overflow-hidden shrink-0 border border-white/10">
+                <Image src={imagePreview as string} alt="Preview" fill className="object-cover" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-bold" style={{ color: 'var(--heading)' }}>Attachment</p>
+                <p className="text-[10px]" style={{ color: 'var(--muted)' }}>Ready to upload</p>
+              </div>
+              <button onClick={handleRemoveImage} className="w-8 h-8 rounded-full glass flex items-center justify-center text-red-400 hover:bg-red-500/10">✕</button>
             </div>
-            <button onClick={handleRemoveImage} className="btn-ghost w-8 h-8 rounded-full flex items-center justify-center text-red-400">✕</button>
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
-      {/* Emoji Picker */}
+      {/* Emoji Picker Overlay */}
       {showEmojiPicker && (
-        <div ref={emojiPickerRef} className="absolute bottom-20 left-4 z-50">
-          <EmojiPicker onEmojiClick={handleEmojiSelect} autoFocusSearch={false}
-            theme={typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches ? Theme.DARK : Theme.LIGHT} />
+        <div ref={emojiPickerRef} className="absolute bottom-24 left-4 z-50 animate-fade-in">
+          <div className="shadow-2xl rounded-2xl overflow-hidden border border-white/20">
+            <EmojiPicker onEmojiClick={handleEmojiSelect} autoFocusSearch={false}
+              theme={typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches ? Theme.DARK : Theme.LIGHT} />
+          </div>
         </div>
       )}
 
       {/* Input Bar */}
-      <div className="glass-nav shrink-0 px-4 py-3 z-10">
+      <div className="glass-nav shrink-0 px-4 py-4 z-30">
         <input ref={fileInputRef} type="file" accept="image/*" onChange={handleImageSelect} className="hidden" />
-        <form onSubmit={handleSendMessage} className="flex items-center gap-2">
-          <button type="button" onClick={() => fileInputRef.current?.click()} disabled={sending || uploadingImage}
-            className="btn-ghost w-10 h-10 rounded-full flex items-center justify-center text-lg shrink-0" title="Upload image">
-            📎
-          </button>
-          <button type="button" onClick={() => setShowEmojiPicker(!showEmojiPicker)} disabled={sending || uploadingImage}
-            className="btn-ghost w-10 h-10 rounded-full flex items-center justify-center text-lg shrink-0" title="Emoji">
-            😊
-          </button>
+        <form onSubmit={handleSendMessage} className="flex items-center gap-2 max-w-5xl mx-auto relative">
+
+          {/* Poll Type Menu Popover */}
+          {showPollTypeMenu && (
+            <div ref={pollMenuRef} className="absolute bottom-16 left-0 glass-nav rounded-2xl p-2 w-52 shadow-[0_20px_50px_rgba(0,0,0,0.3)] border border-white/20 animate-slide-up z-50">
+              <p className="text-[10px] font-bold px-3 py-2 opacity-50 uppercase tracking-widest">Create Poll</p>
+              {[
+                { value: 'kick_member', label: '🚫 Kick Member', desc: 'Vote to remove someone' },
+                { value: 'make_admin', label: '⭐ Make Admin', desc: 'Promote a member' },
+                { value: 'remove_admin', label: '🔻 Remove Admin', desc: 'Demote an admin' },
+                { value: 'General', label: '🗳️ General Poll', desc: 'Ask anything' },
+              ].map(opt => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => {
+                    setSelectedPollType(opt.value);
+                    setShowPollTypeMenu(false);
+                    setShowCreatePoll(true);
+                  }}
+                  className="w-full text-left px-3 py-2.5 rounded-xl transition-all hover:bg-white/10 flex flex-col gap-0.5"
+                >
+                  <span className="text-xs font-bold" style={{ color: 'var(--heading)' }}>{opt.label}</span>
+                  <span className="text-[9px] opacity-60" style={{ color: 'var(--muted)' }}>{opt.desc}</span>
+                </button>
+              ))}
+            </div>
+          )}
+
+          <div className="flex items-center gap-1">
+            <button type="button" onClick={() => fileInputRef.current?.click()} disabled={sending || uploadingImage}
+              className="w-11 h-11 rounded-2xl glass flex items-center justify-center text-xl transition-all hover:scale-105 active:scale-95" title="Upload image">
+              📎
+            </button>
+            <button type="button" onClick={() => setShowEmojiPicker(!showEmojiPicker)} disabled={sending || uploadingImage}
+              className="w-11 h-11 rounded-2xl glass flex items-center justify-center text-xl transition-all hover:scale-105 active:scale-95" title="Emoji">
+              😊
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowPollTypeMenu(!showPollTypeMenu)}
+              className={`w-11 h-11 rounded-2xl glass flex items-center justify-center text-xl transition-all hover:scale-105 active:scale-95 ${showPollTypeMenu ? 'bg-blue-500/20 shadow-inner scale-95' : ''}`}
+              title="Polls"
+            >
+              📊
+            </button>
+          </div>
+
           <input ref={messageInputRef} type="text" value={newMessage} onChange={(e) => setNewMessage(e.target.value)}
-            placeholder="Type a message…" className="input-romance flex-1 py-2.5" />
-          <button type="submit" disabled={sending || uploadingImage} className="btn-romance shrink-0 px-5 py-2.5">
+            placeholder="Type a message…" className="input-romance flex-1 py-3 px-5 rounded-2xl shadow-inner text-sm" />
+
+          <button type="submit" disabled={sending || uploadingImage || (!newMessage.trim() && !selectedImage)}
+            className="btn-romance px-6 h-11 rounded-2xl font-bold transition-all hover:shadow-[0_0_20px_rgba(255,107,107,0.3)] disabled:opacity-50">
             {uploadingImage ? '↑' : sending ? '…' : 'Send'}
           </button>
         </form>
@@ -688,10 +782,87 @@ export default function GroupChatPage() {
   );
 }
 
-// ─── Poll Creation Form ────────────────────────────────────────────────────────
-// Shown when admin clicks the Poll button in the chat header.
-// For member-targeted poll types (kick, make_admin, remove_admin) it
-// automatically fetches and displays a member picker before posting the poll.
+// ─── Poll Sub-components ────────────────────────────────────────────────────────
+
+function GeneralPollVoting({ poll, groupId, onVoted }: { poll: Poll, groupId: string, onVoted: () => void }) {
+  const [selected, setSelected] = useState<string>('');
+  const [submitting, setSubmitting] = useState(false);
+  const toast = useToast();
+
+  const handleVote = async () => {
+    if (!selected) { toast.error('Select an option'); return; }
+    setSubmitting(true);
+    try {
+      await groupService.voteOnPoll(groupId, poll.poll_id, undefined, selected);
+      toast.success('Vote cast!');
+      onVoted();
+    } catch (err: unknown) {
+      toast.error((err as { message?: string })?.message || 'Failed to vote');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-col gap-1.5">
+        {poll.options?.map((opt: PollOption) => (
+          <button
+            key={opt.option_id}
+            type="button"
+            disabled={submitting || poll.has_voted}
+            onClick={() => setSelected(opt.option_id)}
+            className={`flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl border transition-all text-sm font-medium ${selected === opt.option_id
+              ? 'bg-pink-500/10 border-pink-500/40 text-pink-400'
+              : 'bg-white/5 border-transparent hover:bg-white/10'
+              }`}
+          >
+            <span>{opt.option_text}</span>
+            {selected === opt.option_id && <span className="text-[10px] animate-fade-in">●</span>}
+            {poll.has_voted && poll.user_vote === opt.option_id && <span className="text-[10px] font-bold text-pink-400">YOUR VOTE</span>}
+          </button>
+        ))}
+      </div>
+      {!poll.has_voted && (
+        <button onClick={handleVote} disabled={submitting || !selected}
+          className="w-full py-2.5 rounded-xl bg-linear-to-r from-pink-500 to-violet-500 text-white text-xs font-bold shadow-lg shadow-pink-500/20 active:scale-95 transition-all disabled:opacity-40">
+          {submitting ? 'Casting Vote…' : 'Cast Vote'}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function GeneralPollResults({ poll }: { poll: Poll }) {
+  const options: PollOption[] = poll.options ?? [];
+  const totalVotes = options.reduce((sum, o) => sum + (o.votes || 0), 0);
+  return (
+    <div className="space-y-3 mt-1">
+      {options.map((opt) => {
+        const percentage = totalVotes ? ((opt.votes || 0) / totalVotes) * 100 : 0;
+        return (
+          <div key={opt.option_id} className="space-y-1">
+            <div className="flex justify-between text-xs font-bold mb-1">
+              <span style={{ color: 'var(--heading)' }}>{opt.option_text}</span>
+              <span className="text-pink-400">{opt.votes || 0} ({Math.round(percentage)}%)</span>
+            </div>
+            <div className="h-2 rounded-full bg-white/10 overflow-hidden shadow-inner">
+              <div
+                className="h-full bg-linear-to-r from-pink-500/80 to-violet-500/80 rounded-full transition-all duration-1000"
+                style={{ width: `${percentage}%` }}
+              />
+            </div>
+          </div>
+        );
+      })}
+      <div className="text-[10px] text-center font-bold tracking-widest uppercase opacity-40 mt-4" style={{ color: 'var(--muted)' }}>
+        Total Votes: {totalVotes}
+      </div>
+    </div>
+  );
+}
+
+// ─── Poll Creation Form Component ───────────────────────────────────────────────
 
 interface GroupMember {
   user_id: string;
@@ -703,12 +874,12 @@ interface GroupMember {
   is_anonymous: boolean;
 }
 
-const MEMBER_POLL_TYPES = ['kick_member', 'make_admin', 'remove_admin', 'object_removal'];
+const MEMBER_POLL_TYPES = ['kick_member', 'make_admin', 'remove_admin'];
 
-function QuickPollForm({ groupId, onSuccess }: { groupId: string; onSuccess: () => void }) {
+function QuickPollForm({ groupId, initialType = 'General', onSuccess }: { groupId: string; initialType?: string; onSuccess: () => void }) {
   const toast = useToast();
 
-  const [pollType, setPollType] = useState('kick_member');
+  const [pollType, setPollType] = useState(initialType);
   const [title, setTitle] = useState('');
   const [desc, setDesc] = useState('');
   const [hours, setHours] = useState(6);
@@ -716,18 +887,22 @@ function QuickPollForm({ groupId, onSuccess }: { groupId: string; onSuccess: () 
   const [members, setMembers] = useState<GroupMember[]>([]);
   const [loadingMembers, setLoadingMembers] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [options, setOptions] = useState<string[]>(['', '']);
 
   const needsTarget = MEMBER_POLL_TYPES.includes(pollType);
 
-  // Fetch members whenever a target-required type is selected
+  useEffect(() => {
+    if (initialType) setPollType(initialType);
+  }, [initialType]);
+
   useEffect(() => {
     if (!needsTarget) { setTargetId(''); return; }
     setLoadingMembers(true);
     groupService.getGroupMembers(groupId)
       .then(res => {
         const list: GroupMember[] = res.data?.members ?? res.data ?? [];
-        // Filter out current user so you can't kick yourself
-        const me = JSON.parse(localStorage.getItem('user') || '{}').user_id;
+        const userStr = localStorage.getItem('user');
+        const me = userStr ? JSON.parse(userStr).user_id : null;
         setMembers(list.filter(m => m.user_id !== me));
       })
       .catch(() => toast.error('Could not load members'))
@@ -737,25 +912,32 @@ function QuickPollForm({ groupId, onSuccess }: { groupId: string; onSuccess: () 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (needsTarget && !targetId) {
-      toast.error('Please select a member to target');
+      toast.error('Please select a member');
       return;
     }
+    if (pollType === 'General') {
+      const filtered = options.map(o => o.trim()).filter(Boolean);
+      if (filtered.length < 2) {
+        toast.error('Need at least 2 options');
+        return;
+      }
+    }
+
     setSubmitting(true);
     try {
       await groupService.createPoll(groupId, {
         poll_type: pollType,
-        title: title.trim(),
+        title: title.trim() || (needsTarget ? `Action: ${pollType.replace('_', ' ')}` : 'Unnamed Poll'),
         description: desc.trim() || undefined,
         target_user_id: needsTarget ? targetId : undefined,
         expires_in_hours: hours,
+        ...(pollType === 'General' ? { options: options.map(o => o.trim()).filter(Boolean) } : {})
       });
-      toast.success('Poll created!');
+      toast.success('Poll live!');
       onSuccess();
-      // reset
-      setTitle(''); setDesc(''); setTargetId(''); setHours(6);
+      setTitle(''); setDesc(''); setTargetId(''); setHours(6); setOptions(['', '']);
     } catch (err: unknown) {
-      const msg = (err as { message?: string })?.message ?? 'Failed to create poll';
-      toast.error(msg);
+      toast.error((err as { message?: string })?.message ?? 'Failed to create poll');
     } finally {
       setSubmitting(false);
     }
@@ -764,134 +946,110 @@ function QuickPollForm({ groupId, onSuccess }: { groupId: string; onSuccess: () 
   const selectedMember = members.find(m => m.user_id === targetId);
 
   return (
-    <form onSubmit={handleSubmit} className="glass rounded-2xl p-4 mb-2 space-y-3">
-      <h3 className="text-sm font-bold" style={{ color: 'var(--heading)' }}>📊 Create Poll</h3>
-
-      {/* Poll type */}
-      <div className="flex gap-2 flex-wrap">
-        {[
-          { value: 'kick_member', label: '🚫 Kick Member' },
-          { value: 'make_admin', label: '⭐ Make Admin' },
-          { value: 'remove_admin', label: '🔻 Remove Admin' },
-          { value: 'change_group_name', label: '✏️ Rename Group' },
-          { value: 'object_removal', label: '🛡️ Object Removal' },
-        ].map(opt => (
-          <button
-            key={opt.value}
-            type="button"
-            onClick={() => { setPollType(opt.value); setTargetId(''); }}
-            className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all border ${pollType === opt.value
-              ? 'border-pink-500/60 text-pink-400'
-              : 'border-transparent btn-ghost'
-              }`}
-            style={pollType === opt.value ? { background: 'rgba(236,72,153,0.12)' } : {}}
-          >
-            {opt.label}
-          </button>
-        ))}
-      </div>
-
-      {/* Member picker — only for member-targeted poll types */}
+    <form onSubmit={handleSubmit} className="space-y-4">
+      {/* Member Selection for specific polls */}
       {needsTarget && (
-        <div>
-          <p className="text-xs font-semibold mb-1.5" style={{ color: 'var(--muted)' }}>
-            Select member to {pollType === 'kick_member' ? 'remove' : pollType === 'make_admin' ? 'promote' : 'demote'}
-          </p>
+        <div className="space-y-2">
+          <p className="text-[10px] font-bold uppercase tracking-wider opacity-60">Select Target Member</p>
           {loadingMembers ? (
-            <p className="text-xs" style={{ color: 'var(--muted)' }}>Loading members…</p>
-          ) : members.length === 0 ? (
-            <p className="text-xs" style={{ color: 'var(--muted)' }}>No eligible members found.</p>
+            <div className="h-32 flex items-center justify-center bg-white/5 rounded-2xl animate-pulse">
+              <span className="text-xs opacity-50">Loading directory…</span>
+            </div>
           ) : (
-            <div className="grid grid-cols-2 gap-1.5 max-h-36 overflow-y-auto custom-scrollbar pr-1">
+            <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto custom-scrollbar pr-1">
               {members.map(member => (
                 <button
                   key={member.user_id}
                   type="button"
                   onClick={() => setTargetId(member.user_id)}
-                  className={`flex items-center gap-2 px-2.5 py-2 rounded-xl text-left transition-all border ${targetId === member.user_id
-                    ? 'border-pink-500/60'
-                    : 'border-transparent btn-ghost'
+                  className={`flex items-center gap-2 p-2 rounded-xl text-left border transition-all ${targetId === member.user_id ? 'bg-pink-500/20 border-pink-500/40' : 'bg-white/5 border-transparent hover:bg-white/10'
                     }`}
-                  style={targetId === member.user_id ? { background: 'rgba(236,72,153,0.12)' } : {}}
                 >
-                  {/* Avatar */}
-                  <div
-                    className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-white text-xs font-bold"
-                    style={{ background: 'var(--grad-ocean)' }}
-                  >
-                    {member.is_anonymous ? '?' : member.name?.[0]?.toUpperCase() ?? '?'}
+                  <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-linear-to-br from-indigo-500 to-cyan-500 text-white text-[10px] font-bold shadow-lg">
+                    {member.name?.[0].toUpperCase()}
                   </div>
                   <div className="min-w-0">
-                    <p className="text-xs font-semibold truncate" style={{ color: 'var(--heading)' }}>
-                      {member.is_anonymous ? 'Anonymous' : member.name}
-                    </p>
-                    <p className="text-[10px] truncate" style={{ color: 'var(--muted)' }}>
-                      {member.is_admin ? '⭐ Admin' : member.roll_no}
-                    </p>
+                    <p className="text-[11px] font-bold truncate tracking-tight">{member.name}</p>
+                    <p className="text-[9px] opacity-60 truncate">{member.is_admin ? '🛡️ Admin' : 'Member'}</p>
                   </div>
-                  {targetId === member.user_id && (
-                    <span className="ml-auto text-pink-400 text-xs shrink-0">✓</span>
-                  )}
                 </button>
               ))}
-            </div>
-          )}
-
-          {/* Selected member chip */}
-          {selectedMember && (
-            <div className="mt-2 flex items-center gap-2 px-2.5 py-1.5 rounded-lg"
-              style={{ background: 'rgba(236,72,153,0.08)', border: '1px solid rgba(236,72,153,0.3)' }}
-            >
-              <span className="text-xs text-pink-400">Target:</span>
-              <span className="text-xs font-semibold" style={{ color: 'var(--heading)' }}>
-                {selectedMember.name}
-              </span>
-              <button type="button" onClick={() => setTargetId('')}
-                className="ml-auto text-xs text-pink-400 hover:text-pink-300"
-              >✕</button>
             </div>
           )}
         </div>
       )}
 
-      {/* Title */}
-      <input
-        type="text" required value={title}
-        onChange={e => setTitle(e.target.value)}
-        placeholder={pollType === 'kick_member'
-          ? `Reason to remove ${selectedMember?.name ?? 'member'}…`
-          : 'Poll question…'}
-        className="input-romance w-full text-sm"
-      />
-
-      {/* Description (optional) */}
-      <input
-        type="text" value={desc}
-        onChange={e => setDesc(e.target.value)}
-        placeholder="Additional context (optional)…"
-        className="input-romance w-full text-sm"
-      />
-
-      {/* Expiry + Submit */}
-      <div className="flex items-center gap-2">
-        <div className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--muted)' }}>
-          <span>⏱</span>
+      {/* General Options UI */}
+      {pollType === 'General' && (
+        <div className="space-y-2">
+          <p className="text-[10px] font-bold uppercase tracking-wider opacity-60">Poll Question & Options</p>
           <input
-            type="number" min={1} max={24} value={hours}
-            onChange={e => setHours(Math.min(24, Math.max(1, Number(e.target.value))))}
-            className="input-romance w-14 text-sm text-center"
+            type="text" required value={title}
+            onChange={e => setTitle(e.target.value)}
+            placeholder="What's on your mind?"
+            className="input-romance w-full text-sm py-3 px-4 rounded-xl"
           />
-          <span>hrs</span>
+          <div className="space-y-2 mt-2">
+            {options.map((opt, idx) => (
+              <div key={idx} className="flex gap-2">
+                <input
+                  type="text" required value={opt}
+                  onChange={e => {
+                    const arr = [...options];
+                    arr[idx] = e.target.value;
+                    setOptions(arr);
+                  }}
+                  placeholder={`Choice ${idx + 1}`}
+                  className="input-romance flex-1 text-sm py-2 px-4 rounded-xl"
+                />
+                {options.length > 2 && (
+                  <button type="button" onClick={() => setOptions(options.filter((_, i) => i !== idx))} className="w-9 h-9 rounded-xl glass text-red-400">✕</button>
+                )}
+              </div>
+            ))}
+            <button
+              type="button" onClick={() => setOptions([...options, ''])}
+              className="w-full py-2 text-[10px] font-bold text-pink-400 uppercase tracking-widest border border-dashed border-pink-500/20 rounded-xl hover:bg-pink-500/5 transition-all"
+            >
+              + Add Choice
+            </button>
+          </div>
         </div>
-        <button
-          type="submit"
-          disabled={submitting || (needsTarget && !targetId)}
-          className="btn-romance flex-1 py-2 text-sm disabled:opacity-40"
-        >
-          {submitting ? 'Creating…' : `Start Poll${selectedMember ? ` · ${selectedMember.name}` : ''
-            }`}
-        </button>
+      )}
+
+      {/* Simple Text Fields for Role Polls */}
+      {needsTarget && (
+        <div className="space-y-2">
+          <p className="text-[10px] font-bold uppercase tracking-wider opacity-60">Poll Reason</p>
+          <input
+            type="text" required value={title}
+            onChange={e => setTitle(e.target.value)}
+            placeholder={`Why should we ${pollType.split('_').join(' ')} ${selectedMember?.name ?? 'this user'}?`}
+            className="input-romance w-full text-sm py-3 px-4 rounded-xl"
+          />
+        </div>
+      )}
+
+      {/* Extra Context */}
+      <div className="space-y-2">
+        <p className="text-[10px] font-bold uppercase tracking-wider opacity-60">Duration (1-24h)</p>
+        <div className="flex items-center gap-4">
+          <input
+            type="range" min={1} max={24} value={hours}
+            onChange={e => setHours(Number(e.target.value))}
+            className="flex-1 accent-pink-500"
+          />
+          <span className="w-12 text-center text-sm font-bold bg-white/10 py-1 rounded-lg">{hours}h</span>
+        </div>
       </div>
+
+      <button
+        type="submit"
+        disabled={submitting || (needsTarget && !targetId)}
+        className="w-full py-4 rounded-2xl bg-linear-to-r from-pink-500 via-violet-500 to-indigo-500 text-white font-bold text-sm shadow-xl shadow-indigo-500/20 active:scale-[0.98] transition-all disabled:opacity-40"
+      >
+        {submitting ? 'Deploying Poll…' : 'Start Global Poll'}
+      </button>
     </form>
   );
 }

@@ -281,6 +281,7 @@ export const groupService = {
     description?: string;
     target_user_id?: string;
     expires_in_hours?: number;
+    options?: string[]; // For General polls
   }) => {
     const token = localStorage.getItem('accessToken');
     const response = await fetch(`${API_URL}/${groupId}/polls`, {
@@ -325,8 +326,12 @@ export const groupService = {
   },
 
   // Vote on a poll
-  voteOnPoll: async (groupId: string, pollId: string, voteValue: boolean) => {
+  voteOnPoll: async (groupId: string, pollId: string, voteValue?: boolean, optionId?: string) => {
     const token = localStorage.getItem('accessToken');
+    // const body: any = {};
+    const body: {vote_value?: boolean; option_id?: string} = {};
+    if (typeof voteValue === 'boolean') body.vote_value = voteValue;
+    if (optionId) body.option_id = optionId;
     const response = await fetch(`${API_URL}/${groupId}/polls/${pollId}/vote`, {
       method: 'POST',
       headers: {
@@ -334,7 +339,7 @@ export const groupService = {
         'Authorization': token ? `Bearer ${token}` : '',
       },
       credentials: 'include',
-      body: JSON.stringify({ vote_value: voteValue }),
+      body: JSON.stringify(body),
     });
 
     if (!response.ok) {
@@ -342,6 +347,21 @@ export const groupService = {
       throw new Error(error.message || 'Failed to vote on poll');
     }
 
+    return response.json();
+  },
+  // Get poll results (for General polls)
+  getPollResults: async (groupId: string, pollId: string) => {
+    const token = localStorage.getItem('accessToken');
+    const response = await fetch(`${API_URL}/${groupId}/polls/${pollId}/results`, {
+      headers: {
+        'Authorization': token ? `Bearer ${token}` : '',
+      },
+      credentials: 'include',
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message || 'Failed to fetch poll results');
+    }
     return response.json();
   },
 

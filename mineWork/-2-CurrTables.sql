@@ -6050,7 +6050,6 @@ $$;
 --                    5th March, 6:55PM
 -- ==============================================================================
 
-
 -- ================================================================================
 --  ADMIN MANAGEMENT POLLS — Side-Effects
 --  Update fn_execute_passed_poll to handle admin promotion/demotion.
@@ -6089,8 +6088,8 @@ BEGIN
         SET is_admin = TRUE,
             can_add_members = TRUE,
             can_remove_members = TRUE,
-            can_edit_group = TRUE,
-            updated_at = NOW()
+            can_edit_group = TRUE
+
         WHERE group_id = NEW.group_id 
           AND user_id = NEW.target_user_id;
 
@@ -6100,8 +6099,8 @@ BEGIN
         SET is_admin = FALSE,
             can_add_members = FALSE,
             can_remove_members = FALSE,
-            can_edit_group = FALSE,
-            updated_at = NOW()
+            can_edit_group = FALSE
+            
         WHERE group_id = NEW.group_id 
           AND user_id = NEW.target_user_id;
           
@@ -6119,6 +6118,42 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
+-- ==============================================================================
+--                    6th March, 12:30AM
+-- ==============================================================================
+
+CREATE TABLE IF NOT EXISTS poll_options (
+    option_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    poll_id UUID NOT NULL REFERENCES polls(poll_id) ON DELETE CASCADE,
+    option_text TEXT NOT NULL,
+    option_order INTEGER,
+    UNIQUE(poll_id, option_text)
+);
+
+ALTER TABLE votes ADD COLUMN option_id UUID REFERENCES poll_options(option_id);
+
+CREATE INDEX IF NOT EXISTS idx_poll_options_poll ON poll_options(poll_id);
+CREATE INDEX IF NOT EXISTS idx_votes_option ON votes(option_id);
+
+-- ==============================================================================
+--                    6th March, :30AM
+-- ==============================================================================
 
 
+ALTER TABLE polls DROP CONSTRAINT IF EXISTS polls_poll_type_check;
+
+ALTER TABLE polls
+ADD CONSTRAINT polls_poll_type_check
+CHECK (poll_type IN (
+    'kick_member',
+    'make_admin',
+    'remove_admin',
+    'General'
+));
+
+ALTER TABLE votes ALTER COLUMN vote_value DROP NOT NULL;
+
+-- ==============================================================================
+--                    6th March, :30AM
+-- ==============================================================================
 

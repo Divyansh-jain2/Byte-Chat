@@ -22,8 +22,8 @@ import {
   deleteGroupPicture,
   selectGroupPresetAvatar,
   uploadGroup,
-  uploadGroupChatImage
-} from '../controllers/group.controller.js';
+  uploadGroupChatImage,
+  getPollResults} from '../controllers/group.controller.js';
 import { authenticateToken } from '../middleware/auth.middleware.js';
 import { uploadImage, handleMulterError } from '../middleware/upload.middleware.js';
 import { asyncHandler } from '../utils/error.util.js';
@@ -84,5 +84,6 @@ router.get('/:groupId/polls', asyncHandler(getGroupPolls));
 router.post('/:groupId/polls/:pollId/vote', asyncHandler(voteOnPoll));
 router.delete('/:groupId/polls/:pollId', asyncHandler(cancelPoll));       // creator or admin
 router.post('/:groupId/polls/:pollId/execute', asyncHandler(executePoll));      // admin-only manual trigger
+router.get('/:groupId/polls/:pollId/results', asyncHandler(getPollResults));
 
 export default router;

@@ -4,13 +4,6 @@
 ## Group Administration
 - **Invite Links/Codes**: Generate shareable invite links with expiry
 
-## Enhanced Polling
-- **Multiple Choice Polls**: More than binary yes/no options
-- **Anonymous Voting**: Hide voter identities
-- **Poll Results Visibility**: Control when results are shown
-- **Poll Scheduling**: Schedule polls to open/close at specific times
-- **Survey Forms**: Create detailed surveys with multiple questions
-
 ## Message Status & Tracking
 - **Message Delivery Status**: Sent, delivered, read indicators (WhatsApp-style)
 - **Typing Indicators**: Enhanced typing indicators with names in groups
