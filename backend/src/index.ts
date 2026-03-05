@@ -20,8 +20,25 @@ import messageManagementRoutes from './routes/message-management.routes.js';
 import { errorHandler } from './utils/error.util.js';
 import { initializeSocket } from './socket/index.js';
 
+// Redis connection
+import { connectRedis, redis } from './lib/redis.js';
+
+
 const app: Express = express();
 const httpServer = createServer(app);
+
+// Connect to Redis at server startup
+connectRedis();
+// Redis test endpoint
+app.get('/redis-test', async (req: Request, res: Response) => {
+  try {
+    await redis.set('test_key', 'hello_from_backend');
+    const value = await redis.get('test_key');
+    res.json({ redis_value: value });
+  } catch (err) {
+    res.status(500).json({ error: 'Redis error', details: (err as Error).message });
+  }
+});
 
 // Security middleware
 app.use(helmet());

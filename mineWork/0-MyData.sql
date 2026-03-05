@@ -1,53 +1,248 @@
 
 
-## **NEW SESSION KEYS EXPLANATION:**
+## Authentication Layer
 
-### **PostgreSQL `chat_session_keys`:**
-    ```sql
-    -- Stores AES keys for each chat/group, encrypted per user
-    -- Example: Chat between A & B has one AES key
-    -- Stored as: [AES key encrypted with A's public key] + [same AES key encrypted with B's public key]
-    ```
+Used during **login / API auth middleware**.
 
-### **Redis `session_cache:{userId}:{chatId}`:**
-    ```javascript
-    // After user decrypts their AES key once, cache it here
-    // Avoids decrypting with RSA on every message
-    // TTL: 1 hour or until logout
-    {
-    "aesKey": "decrypted_aes_key_base64",
-    "keyVersion": 1,
-    "lastUsed": "timestamp"
-    }
-    ```
+1. `session:{sessionId}`
+2. `rate_limit:{userId}:{endpoint}:{minute}`
+3. `login_attempts:{ip}:{hour}`
 
-### **Redis `key_cache:{userId}:{chatId}`:**
-    ```javascript
-    // Similar to session_cache but shorter TTL
-    // For frequently accessed chats
-    // Cleared automatically after 5 minutes
-    ```
+Integration:
 
-### **Redis `ws_auth:{socketId}`:**
-    ```javascript
-    // WebSocket connection authentication
-    // When socket connects, validate once and store
-    // Prevents re-authentication on every message
-    {
-    "userId": "uuid",
-    "sessionId": "session_token",
-    "authenticatedAt": "timestamp"
-    }
-    ```
+```text
+Auth API
+ ├─ login
+ ├─ middleware verify session
+ └─ rate limiter
+```
+
+## WebSocket Authentication
+
+Used when **socket connects**.
+
+4. `ws_auth:{socketId}`
+
+Integration:
+
+```text
+WebSocket handshake
+ ↓
+verify session
+ ↓
+store ws_auth
+```
 
 ---
 
-## **SESSION KEY FLOW:**
-    1. **Login** → Create `session:{token}` in Redis + `user_sessions` in PostgreSQL
-    2. **Start Chat** → Fetch `chat_session_keys` from DB → Decrypt with RSA once → Store in `session_cache`
-    3. **Send Message** → Use cached AES key from `session_cache` → AES encrypt message
-    4. **WebSocket** → Validate once → Store in `ws_auth:{socketId}`
-    5. **Logout** → Delete all `session:*`, `session_cache:*`, `key_cache:*` for user
+## Socket Routing
+
+Required before any real-time events.
+
+5. `user_socket:{userId}`
+6. `socket_user:{socketId}`
+
+Integration:
+
+```text
+socket connected
+ ↓
+map user ↔ socket
+ ↓
+used for direct message delivery
+```
+
+---
+
+## Presence System
+
+7. `online_users`
+
+Integration:
+
+```text
+socket connect → SADD online_users
+socket disconnect → SREM online_users
+```
+
+Used by:
+
+* online indicator
+* message delivery
+
+---
+
+## Chat Room System
+
+8. `room:{chatId}`
+
+Integration:
+
+```text
+user opens chat
+ ↓
+SADD room:{chatId} socketId
+```
+
+Used for:
+
+* group message broadcast
+* typing events
+
+---
+
+## Typing Indicators
+
+9. `typing:{chatId}:{userId}`
+
+Integration:
+
+```text
+user typing
+ ↓
+SETEX typing:{chatId}:{userId} 5
+ ↓
+broadcast typing event
+```
+
+---
+
+## Messaging Performance
+
+10. `message_cache:{chatId}:recent`
+11. `offline_messages:{userId}`
+12. `unread_counts:{userId}:{chatId}`
+
+Integration:
+
+```text
+message sent
+ ├─ save DB
+ ├─ LPUSH message_cache
+ ├─ INCR unread_counts
+ └─ if offline → offline_messages
+```
+
+---
+
+## Notifications
+
+13. `notifications:{userId}`
+14. `notification_count:{userId}`
+
+Integration:
+
+```text
+poll created / admin action
+ ↓
+LPUSH notifications
+ ↓
+INCR notification_count
+```
+
+Yes — **TTL 7 days works**. Redis supports TTL on lists.
+
+---
+
+## Poll System
+
+15. `poll_live:{pollId}`
+16. `user_voted:{pollId}`
+
+Integration:
+
+```text
+vote
+ ├─ HINCRBY poll_live
+ └─ SADD user_voted
+```
+
+DB remains source of truth.
+
+---
+
+## Anonymous Identity System
+
+17. `anon_map:{randomString}`
+18. `user_anon:{userId}:{targetId}`
+
+Integration:
+
+```text
+user enters anonymous chat
+ ↓
+generate randomString
+ ↓
+store both mappings
+```
+
+Used when sending anonymous messages.
+
+---
+
+# Final Implementation Order
+
+```text
+1  session:{sessionId}
+2  rate_limit:{userId}:{endpoint}:{minute}
+3  login_attempts:{ip}:{hour}
+
+4  ws_auth:{socketId}
+
+5  user_socket:{userId}
+6  socket_user:{socketId}
+
+7  online_users
+
+8  room:{chatId}
+
+9  typing:{chatId}:{userId}
+
+10 message_cache:{chatId}:recent
+11 offline_messages:{userId}
+12 unread_counts:{userId}:{chatId}
+
+13 notifications:{userId}
+14 notification_count:{userId}
+
+15 poll_live:{pollId}
+16 user_voted:{pollId}
+
+17 anon_map:{randomString}
+18 user_anon:{userId}:{targetId}
+```
+
+---
+
+# Small Improvements (Recommended)
+
+## Limit message cache
+
+```text
+LPUSH message_cache:{chatId}:recent
+LTRIM message_cache:{chatId}:recent 0 49
+```
+
+---
+
+## Limit offline queue
+
+```text
+LPUSH offline_messages:{userId}
+LTRIM offline_messages:{userId} 0 99
+```
+
+---
+
+## Notification TTL
+
+Better approach:
+
+```text
+LPUSH notifications:{userId}
+LTRIM notifications:{userId} 0 49
+EXPIRE notifications:{userId} 604800
+```
 
 ===============================================================
 
@@ -87,558 +282,6 @@
 ### **Encryption & Security**
 22. **user_encryption_keys**: Only public keys
 23. **chat_session_keys**: Per-chat/group AES keys encrypted per user
-
-
-
-1. Core User Tables
--- ========== USERS TABLE ==========
--- Main user table - verified students only
-CREATE TABLE users (
-    user_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    roll_no VARCHAR(10) UNIQUE NOT NULL,  -- B23XX format
-    name VARCHAR(100) NOT NULL,
-    gender VARCHAR(10) NOT NULL CHECK (gender IN ('male', 'female', 'other')),
-    branch VARCHAR(50) NOT NULL,
-    password_hash VARCHAR(255) NOT NULL,
-    dp_url TEXT,
-    dob DATE,
-    bio TEXT,
-    is_verified BOOLEAN DEFAULT FALSE,
-    is_active BOOLEAN DEFAULT TRUE,
-    last_login TIMESTAMPTZ,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Indexes for users
-CREATE INDEX idx_users_roll_no ON users(roll_no);
-CREATE INDEX idx_users_branch ON users(branch);
-
-
--- ========== USER_VERIFICATIONS TABLE ==========
--- OTP and email verification records
-CREATE TABLE user_verifications (
-    verification_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    user_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
-    verification_type VARCHAR(20) NOT NULL CHECK (verification_type IN ('signup', 'reset_password', 'change_email')),
-    otp_code VARCHAR(6) NOT NULL,
-    verification_token VARCHAR(255) UNIQUE,
-    is_used BOOLEAN DEFAULT FALSE,
-    expires_at TIMESTAMPTZ NOT NULL,
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE INDEX idx_user_verifications_token ON user_verifications(verification_token);
-CREATE INDEX idx_user_verifications_user ON user_verifications(user_id);
-
--- ========== USER_SESSIONS TABLE ==========
--- Alternative to Redis for sessions (can use both)
-CREATE TABLE user_sessions (
-    session_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    user_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
-    session_token VARCHAR(255) UNIQUE NOT NULL,
-    device_info JSONB,
-    ip_address INET,
-    expires_at TIMESTAMPTZ NOT NULL,
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE INDEX idx_user_sessions_token ON user_sessions(session_token);
-CREATE INDEX idx_user_sessions_user ON user_sessions(user_id);
-
--- ========== USER_SETTINGS TABLE ==========
--- User preferences and settings
-CREATE TABLE user_settings (
-    setting_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    user_id UUID UNIQUE REFERENCES users(user_id) ON DELETE CASCADE,
-    theme VARCHAR(10) DEFAULT 'light' CHECK (theme IN ('light', 'dark', 'system')),
-    notification_enabled BOOLEAN DEFAULT TRUE,
-    email_notifications BOOLEAN DEFAULT TRUE,
-    privacy_profile_public BOOLEAN DEFAULT TRUE,
-    privacy_show_online_status BOOLEAN DEFAULT TRUE,
-    privacy_allow_anonymous_chats BOOLEAN DEFAULT TRUE,
-    updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE INDEX idx_settings_user_id ON user_settings(user_id);
-
--- ========== USER_PASSWORD_RESETS TABLE ==========
-CREATE TABLE user_password_resets (
-    reset_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    user_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
-    reset_token VARCHAR(255) UNIQUE NOT NULL,
-    is_used BOOLEAN DEFAULT FALSE,
-    expires_at TIMESTAMPTZ NOT NULL,
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE INDEX idx_password_resets_token ON user_password_resets(reset_token);
-CREATE INDEX idx_password_resets_user_id ON user_password_resets(user_id);
-
-
-2. Chat & Messaging Tables
-
--- ========== CHAT_CONVERSATIONS TABLE ==========
--- 1:1 personal chats between users
-CREATE TABLE chat_conversations (
-    conversation_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user1_id UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
-    user2_id UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
-    is_anonymous BOOLEAN DEFAULT FALSE,
-    anonymous_initiator_id UUID REFERENCES users(user_id), -- Who started as anonymous
-    is_accepted BOOLEAN DEFAULT FALSE,
-    is_blocked BOOLEAN DEFAULT FALSE,
-    blocked_by_user_id UUID REFERENCES users(user_id),
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW(),
-    last_message_at TIMESTAMPTZ DEFAULT NOW(),
-    UNIQUE(user1_id, user2_id)
-);
-
-
-CREATE INDEX idx_conversations_user1 ON chat_conversations(user1_id);
-CREATE INDEX idx_conversations_user2 ON chat_conversations(user2_id);
-CREATE INDEX idx_conversations_last_message ON chat_conversations(last_message_at DESC);
-CREATE INDEX IF NOT EXISTS idx_conversations_accepted ON chat_conversations(is_accepted);
-CREATE INDEX IF NOT EXISTS idx_conversations_blocked ON chat_conversations(is_blocked);
-
--- ========== CHAT_MESSAGES TABLE ==========
--- ALL messages (personal + group)
-CREATE TABLE chat_messages (
-    message_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    conversation_id UUID REFERENCES chat_conversations(conversation_id) ON DELETE CASCADE,
-    group_id UUID REFERENCES groups(group_id) ON DELETE CASCADE, -- NULL for personal
-    sender_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
-    message_type VARCHAR(20) DEFAULT 'text' CHECK (message_type IN ('text', 'image', 'emoji')),
-    
-    -- Encrypted content
-    encrypted_content TEXT NOT NULL, -- AES-256-GCM encrypted
-    content_iv VARCHAR(50), -- Initialization vector
-    content_auth_tag VARCHAR(50), -- Authentication tag
-    
-    -- For media messages
-    media_url TEXT,
-    media_size INTEGER,
-    media_mime_type VARCHAR(100),
-    thumbnail_url TEXT,
-    
-    -- Anonymous messaging
-    is_anonymous BOOLEAN DEFAULT FALSE,
-    anonymous_identity_id UUID REFERENCES anonymous_identities(identity_id) ON DELETE SET NULL,
-    
-    -- Status
-    is_edited BOOLEAN DEFAULT FALSE,
-    is_deleted BOOLEAN DEFAULT FALSE,
-    deleted_at TIMESTAMPTZ,
-    
-    -- Parent message for replies
-    parent_message_id UUID REFERENCES chat_messages(message_id) ON DELETE SET NULL,
-
-    -- Encryption info
-    encryption_key_version INTEGER DEFAULT 1,
-    key_id UUID REFERENCES chat_session_keys(session_key_id) ON DELETE SET NULL,
-    
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW(),
-
-    CHECK (
-        (conversation_id IS NOT NULL AND group_id IS NULL)
-        OR
-        (conversation_id IS NULL AND group_id IS NOT NULL)
-    )
-);
-
-CREATE INDEX idx_messages_conversation ON chat_messages(conversation_id, created_at DESC);
-CREATE INDEX idx_messages_group ON chat_messages(group_id, created_at DESC);
-CREATE INDEX idx_messages_sender ON chat_messages(sender_id);
-CREATE INDEX idx_messages_created_at ON chat_messages(created_at DESC);
-
--- ========== MESSAGE_STATUS TABLE ==========
--- Read receipts and delivery status
-CREATE TABLE message_status (
-    status_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    message_id UUID REFERENCES chat_messages(message_id) ON DELETE CASCADE,
-    user_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
-    status VARCHAR(20) DEFAULT 'sent' CHECK (status IN ('sent', 'delivered', 'read')),
-    read_at TIMESTAMPTZ,
-    delivered_at TIMESTAMPTZ,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    UNIQUE(message_id, user_id)
-);
-
-CREATE INDEX idx_message_status_message ON message_status(message_id);
-CREATE INDEX idx_message_status_user ON message_status(user_id);
-
--- ========== CHAT_REQUESTS TABLE ==========
-CREATE TABLE chat_requests (
-    request_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    sender_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
-    receiver_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
-    request_type VARCHAR(20) DEFAULT 'normal' CHECK (request_type IN ('normal', 'anonymous')),
-    anonymous_identity_id UUID REFERENCES anonymous_identities(identity_id) ON DELETE SET NULL,
-    status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'rejected', 'blocked', 'expired')),
-    expires_at TIMESTAMPTZ DEFAULT (NOW() + INTERVAL '24 hours'),
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW(),
-    UNIQUE(sender_id, receiver_id, request_type)
-);
-
-CREATE INDEX idx_chat_requests_receiver ON chat_requests(receiver_id, status);
-CREATE INDEX idx_chat_requests_sender ON chat_requests(sender_id);
-
--- ========== ANONYMOUS_IDENTITIES TABLE ==========
--- Core of anonymous system
-CREATE TABLE anonymous_identities (
-    identity_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    user_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
-    target_user_id UUID REFERENCES users(user_id) ON DELETE CASCADE, -- NULL for group anonymous
-    conversation_id UUID REFERENCES chat_conversations(conversation_id) ON DELETE CASCADE,
-    group_id UUID REFERENCES groups(group_id) ON DELETE CASCADE,
-    
-    -- Display info
-    random_string VARCHAR(50) UNIQUE NOT NULL,
-    display_gender VARCHAR(10) NOT NULL CHECK (display_gender IN ('male', 'female', 'other')),
-
-    -- Metadata
-    is_active BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    last_used_at TIMESTAMPTZ DEFAULT NOW(),
-    is_revealed BOOLEAN DEFAULT FALSE,
-    revealed_at TIMESTAMPTZ,
-    
-    CONSTRAINT chk_anon_target CHECK (
-        (target_user_id IS NOT NULL AND group_id IS NULL) OR
-        (target_user_id IS NULL AND group_id IS NOT NULL)
-    )
-);
-
-CREATE INDEX idx_anon_identities_user ON anonymous_identities(user_id);
-CREATE INDEX idx_anon_identities_random ON anonymous_identities(random_string);
-CREATE INDEX idx_anon_identities_target ON anonymous_identities(target_user_id);
-CREATE INDEX idx_anon_identities_group ON anonymous_identities(group_id);
-
--- ========== USER_BLOCKS TABLE ==========
-CREATE TABLE user_blocks (
-    block_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    blocker_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
-    blocked_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
-    block_type VARCHAR(20) DEFAULT 'permanent' CHECK (block_type IN ('permanent', 'temporary')),
-    expires_at TIMESTAMPTZ,
-    reason TEXT,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    UNIQUE(blocker_id, blocked_id)
-);
-
-CREATE INDEX idx_user_blocks_blocker ON user_blocks(blocker_id);
-CREATE INDEX idx_user_blocks_blocked ON user_blocks(blocked_id);
-
-
-3. Group Tables
-
--- ========== GROUPS TABLE ==========
-CREATE TABLE groups (
-    group_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    group_name VARCHAR(100) NOT NULL,
-    group_desc TEXT,
-    group_dp_url TEXT,
-    is_public BOOLEAN DEFAULT TRUE,
-    is_active BOOLEAN DEFAULT TRUE,
-    max_members INTEGER DEFAULT 500,
-    created_by UUID REFERENCES users(user_id) ON DELETE SET NULL,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE INDEX idx_groups_public ON groups(is_public, created_at DESC);
-CREATE INDEX idx_groups_creator ON groups(created_by);
-
--- ========== GROUP_MEMBERS TABLE ==========
-CREATE TABLE group_members (
-    member_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    group_id UUID REFERENCES groups(group_id) ON DELETE CASCADE,
-    user_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
-    is_admin BOOLEAN DEFAULT FALSE,
-    is_owner BOOLEAN DEFAULT FALSE,
-    
-    -- Anonymous in group
-    is_anonymous BOOLEAN DEFAULT FALSE,
-    anonymous_display_name VARCHAR(50),
-    anonymous_identity_id UUID REFERENCES anonymous_identities(identity_id) ON DELETE SET NULL,
-    
-    -- Permissions
-    -- See if we can avoid the same
-    can_send_messages BOOLEAN DEFAULT TRUE,
-    can_add_members BOOLEAN DEFAULT FALSE,
-    can_remove_members BOOLEAN DEFAULT FALSE,
-    can_edit_group BOOLEAN DEFAULT FALSE,
-    
-    joined_at TIMESTAMPTZ DEFAULT NOW(),
-    last_seen_at TIMESTAMPTZ DEFAULT NOW(),
-    UNIQUE(group_id, user_id)
-);
-
-CREATE INDEX idx_group_members_group ON group_members(group_id);
-CREATE INDEX idx_group_members_user ON group_members(user_id);
-CREATE INDEX idx_group_members_admin ON group_members(group_id) WHERE is_admin = TRUE;
-
--- ========== GROUP_INVITES TABLE ==========
-CREATE TABLE group_invites (
-    invite_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    group_id UUID REFERENCES groups(group_id) ON DELETE CASCADE,
-    invited_by UUID REFERENCES users(user_id) ON DELETE CASCADE,
-    invitee_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
-
-    -- these 2 can be avoided
-    invite_token VARCHAR(255) UNIQUE,
-    invite_type VARCHAR(20) DEFAULT 'private' CHECK (invite_type IN ('private', 'public_link')),
-    
-    status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'rejected', 'expired')),
-    expires_at TIMESTAMPTZ DEFAULT (NOW() + INTERVAL '30 days'),
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    
-    UNIQUE(group_id, invitee_id) WHERE status = 'pending'
-);
-
-CREATE INDEX IF NOT EXISTS idx_group_invites_invitee ON group_invites(invitee_id, status);
-CREATE INDEX IF NOT EXISTS idx_group_invites_group ON group_invites(group_id, status);
-CREATE INDEX IF NOT EXISTS idx_group_invites_inviter ON group_invites(invited_by);
-CREATE INDEX IF NOT EXISTS idx_group_invites_expires ON group_invites(expires_at);
-
--- ========== GROUP_BANS TABLE ==========
--- After poll kicks or manual bans
-CREATE TABLE group_bans (
-    ban_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    group_id UUID REFERENCES groups(group_id) ON DELETE CASCADE,
-    user_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
-    banned_by UUID REFERENCES users(user_id) ON DELETE CASCADE,
-    reason TEXT,
-    expires_at TIMESTAMPTZ, -- NULL = permanent
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    UNIQUE(group_id, user_id)
-);
-
-CREATE INDEX idx_group_bans_group ON group_bans(group_id);
-CREATE INDEX idx_group_bans_user ON group_bans(user_id);
-
-
-
-4. Polling & Voting Tables
-
--- ========== POLLS TABLE ==========
-CREATE TABLE polls (
-    poll_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    group_id UUID REFERENCES groups(group_id) ON DELETE CASCADE,
-    created_by UUID REFERENCES users(user_id) ON DELETE CASCADE,
-    target_user_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
-    
-    poll_type VARCHAR(20) NOT NULL CHECK (poll_type IN (
-        'kick_member', 'make_admin', 'remove_admin', 
-        'change_group_name', 'object_removal'
-    )),
-    
-    title VARCHAR(200) NOT NULL,
-    description TEXT,
-    
-    -- Voting stats
-    votes_required INTEGER, -- NULL = majority of active members
-    votes_for INTEGER DEFAULT 0,
-    votes_against INTEGER DEFAULT 0,
-    total_voters INTEGER DEFAULT 0,
-    
-    -- Status
-    status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'passed', 'failed', 'cancelled', 'expired')),
-    is_executed BOOLEAN DEFAULT FALSE,
-    
-    -- Timestamps
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    expires_at TIMESTAMPTZ NOT NULL,
-    executed_at TIMESTAMPTZ,
-    
-    -- For objection polls
-    parent_poll_id UUID REFERENCES polls(poll_id) ON DELETE SET NULL,
-    objection_reason TEXT
-);
-
-CREATE INDEX idx_polls_group ON polls(group_id, status, expires_at);
-CREATE INDEX idx_polls_creator ON polls(created_by);
-CREATE INDEX idx_polls_target ON polls(target_user_id);
-
--- ========== VOTES TABLE ==========
-CREATE TABLE votes (
-    vote_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    poll_id UUID REFERENCES polls(poll_id) ON DELETE CASCADE,
-    user_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
-    anonymous_identity_id UUID REFERENCES anonymous_identities(identity_id) ON DELETE SET NULL,
-    vote_value BOOLEAN NOT NULL, -- TRUE = for, FALSE = against
-    voted_at TIMESTAMPTZ DEFAULT NOW(),
-    UNIQUE(poll_id, user_id),
-    UNIQUE(poll_id, anonymous_identity_id)
-);
-
-CREATE INDEX idx_votes_poll ON votes(poll_id);
-CREATE INDEX idx_votes_user ON votes(user_id);
-
-
-5. Media & Files
-
--- ========== MEDIA_UPLOADS TABLE ==========
-CREATE TABLE media_uploads (
-    media_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    user_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
-    conversation_id UUID REFERENCES chat_conversations(conversation_id) ON DELETE CASCADE,
-    group_id UUID REFERENCES groups(group_id) ON DELETE CASCADE,
-    message_id UUID REFERENCES chat_messages(message_id) ON DELETE CASCADE,
-    
-    -- File info
-    file_name VARCHAR(255) NOT NULL,
-    file_type VARCHAR(100) NOT NULL,
-    file_size BIGINT NOT NULL,
-    mime_type VARCHAR(100),
-    
-    -- Storage
-    storage_path TEXT NOT NULL,
-    storage_bucket VARCHAR(100) DEFAULT 'chat-media',
-    
-    -- Encryption
-    file_key_encrypted TEXT,
-    file_key_iv VARCHAR(50),
-    
-    -- Access
-    access_url TEXT,
-    thumbnail_url TEXT,
-    expires_at TIMESTAMPTZ, -- For temporary URLs
-    
-    -- Status
-    upload_status VARCHAR(20) DEFAULT 'uploading' CHECK (upload_status IN ('uploading', 'completed', 'failed', 'deleted')),
-    
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE INDEX idx_media_uploads_user ON media_uploads(user_id);
-CREATE INDEX idx_media_uploads_message ON media_uploads(message_id);
-
-
-6. System & Audit
-
--- ========== AUDIT_LOGS TABLE ==========
-CREATE TABLE audit_logs (
-    log_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    user_id UUID REFERENCES users(user_id) ON DELETE SET NULL,
-    action_type VARCHAR(50) NOT NULL,
-    entity_type VARCHAR(50),
-    entity_id UUID,
-    
-    -- Before/after state (JSON)
-    old_values JSONB,
-    new_values JSONB,
-    
-    ip_address INET,
-    user_agent TEXT,
-    
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE INDEX idx_audit_logs_user ON audit_logs(user_id);
-CREATE INDEX idx_audit_logs_action ON audit_logs(action_type);
-CREATE INDEX idx_audit_logs_created ON audit_logs(created_at DESC);
-
--- ========== REPORTS TABLE ==========
-CREATE TABLE reports (
-    report_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    reporter_user_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
-    reported_user_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
-    reported_group_id UUID REFERENCES groups(group_id) ON DELETE CASCADE,
-    reported_message_id UUID REFERENCES chat_messages(message_id) ON DELETE CASCADE,
-    
-    report_type VARCHAR(50) NOT NULL CHECK (report_type IN (
-        'spam', 'harassment', 'inappropriate_content', 'impersonating',
-        'fake_profile', 'other'
-    )),
-    
-    description TEXT NOT NULL,
-    evidence_urls TEXT[],
-    
-    status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'reviewing', 'resolved', 'dismissed')),
-    resolved_by UUID REFERENCES users(user_id) ON DELETE SET NULL,
-    resolution_notes TEXT,
-    
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    resolved_at TIMESTAMPTZ
-);
-
-CREATE INDEX idx_reports_reporter ON reports(reporter_user_id);
-CREATE INDEX idx_reports_status ON reports(status);
-
--- ========== SYSTEM_NOTIFICATIONS TABLE ==========
-CREATE TABLE system_notifications (
-    notification_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    user_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
-    notification_type VARCHAR(50) NOT NULL CHECK (notification_type IN (
-        'chat_request', 'group_invite', 'poll_created', 
-        'vote_result', 'message', 'system_alert'
-    )),
-    
-    title VARCHAR(200) NOT NULL,
-    body TEXT NOT NULL,
-    data JSONB, -- Additional data like chat_id, poll_id, etc.
-    
-    is_read BOOLEAN DEFAULT FALSE,
-    read_at TIMESTAMPTZ,
-    
-    expires_at TIMESTAMPTZ,
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE INDEX idx_notifications_user ON system_notifications(user_id, is_read, created_at DESC);
-
-7. Encryption & Security
-
--- ========= Chat Session Keys (AES keys per chat) ========
-CREATE TABLE chat_session_keys (
-    session_key_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    conversation_id UUID REFERENCES chat_conversations(conversation_id) ON DELETE CASCADE,
-    group_id UUID REFERENCES groups(group_id) ON DELETE CASCADE,
-    
-    -- Single AES key for this chat/group (encrypted for each member)
-    aes_key_encrypted TEXT NOT NULL, -- Base64 encoded
-    aes_key_iv VARCHAR(50) NOT NULL, -- IV for AES key encryption
-    
-    -- Who encrypted this key copy
-    encrypted_for_user_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
-    encrypted_with_key_version INTEGER DEFAULT 1,
-    
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW(),
-    
-    -- Constraint: Either conversation OR group, not both
-    CONSTRAINT chk_chat_or_group CHECK (
-        (conversation_id IS NOT NULL AND group_id IS NULL) OR
-        (conversation_id IS NULL AND group_id IS NOT NULL)
-    ),
-    
-    UNIQUE(conversation_id, encrypted_for_user_id),
-    UNIQUE(group_id, encrypted_for_user_id)
-);
-
--- Indexes
-CREATE INDEX idx_chat_keys_conversation ON chat_session_keys(conversation_id);
-CREATE INDEX idx_chat_keys_group ON chat_session_keys(group_id);
-CREATE INDEX idx_chat_keys_user ON chat_session_keys(encrypted_for_user_id);
-
--- ============= User Encryption Keys ===========
-CREATE TABLE user_encryption_keys (
-    user_encrypt_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    user_id UUID UNIQUE REFERENCES users(user_id) ON DELETE CASCADE,
-    
-    -- Only store public key (private key stays on client)
-    public_key TEXT NOT NULL, -- RSA public key in PEM format
-    
-    key_version INTEGER DEFAULT 1,
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE INDEX idx_user_keys_user ON user_encryption_keys(user_id);
 
 ===================================================================================
 
@@ -726,6 +369,52 @@ Client-Side Storage:
 ### **System Health**
 29. **ws_connections** - Count of active WebSocket connections
 30. **message_throughput:{second}** - Messages per second (TTL: 60 secs)
+
+
+=================================================================================
+=================================================================================
+
+1.  session:{sessionId}
+3.  ws_auth:{socketId}
+4.  user_socket:{userId}
+5.  socket_user:{socketId}
+7.  online_users
+9.  room:{chatId}
+10. typing:{chatId}:{userId}
+11. unread_counts:{userId}:{chatId}
+12. message_cache:{chatId}:recent
+13. offline_messages:{userId}
+14. notifications:{userId}
+15. notification_count:{userId}
+16. poll_live:{pollId}
+17. user_voted:{pollId}
+18. anon_map:{randomString}
+19. user_anon:{userId}:{targetId}
+21. rate_limit:{userId}:{endpoint}:{minute}
+22. login_attempts:{ip}:{hour}
+
+
+NOT IMPs:
+| Key                               | Reason                       |
+| --------------------------------- | ---------------------------- |
+| `ws_connections`                  | can be computed from sockets |
+| `session_cache:{userId}:{chatId}` | premature optimization       |
+| `anon_cache:{userId}:{chatId}`    | DB lookup is cheap           |
+| `key_cache:{userId}:{chatId}`     | only needed for E2EE         |
+| `key_version:{chatId}`            | only needed for E2EE         |
+
+
+OPTIONAL:
+| Key                                       | Reason                     |
+| ----------------------------------------- | -------------------------- |
+| `user_sessions:{userId}`                  | logout all devices feature |
+| `user_presence:{userId}`                  | last seen tracking         |
+| `notifications:{userId}`                  | faster notifications       |
+| `notification_count:{userId}`             | notification badge         |
+
+
+=================================================================================
+=================================================================================
 
 
 Session & Auth (String type)

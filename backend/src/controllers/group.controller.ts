@@ -1014,7 +1014,7 @@ export const createPoll = async (req: Request, res: Response) => {
   }
 
   // Validate poll type
-  const validPollTypes = ['kick_member', 'make_admin', 'remove_admin', 'change_group_name', 'object_removal'];
+  const validPollTypes = ['kick_member', 'make_admin', 'remove_admin'];
   if (!validPollTypes.includes(poll_type)) {
     throw new ApiError(400, 'Invalid poll type');
   }
@@ -1027,7 +1027,7 @@ export const createPoll = async (req: Request, res: Response) => {
   const hoursNum = Math.min(24, Math.max(1, Number(expires_in_hours) || 6));
 
   // Polls that affect a specific member must have a target
-  const memberPollTypes = ['kick_member', 'make_admin', 'remove_admin', 'object_removal'];
+  const memberPollTypes = ['kick_member', 'make_admin', 'remove_admin'];
   if (memberPollTypes.includes(poll_type) && !target_user_id) {
     throw new ApiError(400, `Poll type '${poll_type}' requires a target_user_id`);
   }
@@ -1037,18 +1037,20 @@ export const createPoll = async (req: Request, res: Response) => {
   try {
     await client.query('BEGIN');
 
-    // 1. Confirm requesting user is an admin in this group
-    const adminCheck = await client.query(
+    // 1. Confirm requesting user is a member of this group
+    const memberRow = await client.query(
       `SELECT is_admin, is_owner FROM group_members
        WHERE group_id = $1 AND user_id = $2`,
       [groupId, userId]
     );
-    if (adminCheck.rows.length === 0) {
+    if (memberRow.rows.length === 0) {
       throw new ApiError(403, 'You are not a member of this group');
     }
-    if (!adminCheck.rows[0].is_admin && !adminCheck.rows[0].is_owner) {
-      throw new ApiError(403, 'Only group admins can create polls');
-    }
+
+    // Relaxed permission: Any member can create governance polls.
+    // If we had sensitive "admin-only" polls, we'd check them here.
+    // The current types (kick_member, make_admin, remove_admin, object_removal) are democratic.
+    const groupMember = memberRow.rows[0];
 
     // 2. If targeting someone, validate target membership & prevent self-targeting
     if (target_user_id) {
@@ -1056,11 +1058,14 @@ export const createPoll = async (req: Request, res: Response) => {
         throw new ApiError(400, 'You cannot create a poll targeting yourself');
       }
       const targetCheck = await client.query(
-        `SELECT 1 FROM group_members WHERE group_id = $1 AND user_id = $2`,
+        `SELECT is_owner FROM group_members WHERE group_id = $1 AND user_id = $2`,
         [groupId, target_user_id]
       );
       if (targetCheck.rows.length === 0) {
         throw new ApiError(404, 'Target user is not a member of this group');
+      }
+      if (targetCheck.rows[0].is_owner) {
+        throw new ApiError(403, 'The group owner cannot be targeted by polls');
       }
     }
 
