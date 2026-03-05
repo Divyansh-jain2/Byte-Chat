@@ -159,3 +159,9 @@
 - **Message Reactions**: React to messages with emojis (👍, ❤️, 😂, etc.) [Done]
 - **Reply/Quote**: Reply to specific messages with threading [Done]
 
+## Group Polls (for member removal)
+- **Poll Creation**: Admins can create polls for member removal
+- **Voting System**: Members can vote on active polls
+- **Vote Tracking**: Real-time vote counting and status updates
+- **Auto-execution**: Automatic member removal based on poll results
+- **Poll Expiry**: 6-hour voting window with automatic closure

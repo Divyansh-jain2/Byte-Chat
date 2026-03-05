@@ -5433,3 +5433,620 @@ EXECUTE FUNCTION update_message_edited_at();
 -- Add per-user soft-delete tracking column
 ALTER TABLE chat_messages
 ADD COLUMN IF NOT EXISTS deleted_for_user_ids UUID[] DEFAULT '{}';
+
+
+-- ==============================================================================
+--                    4th March, 11.25PM
+-- ==============================================================================
+
+-- ================================================================================
+--  POLLS v2 MIGRATION — Member Removal Redesign
+--  Architecture:
+--    • DB trigger handles ALL execution side-effects (removal, bans, etc.)
+--      → works even when backend is offline
+--    • DB trigger also handles vote-count updates
+--    • Backend: only upserts votes, reads result, emits socket events
+--    • Backend: 60s sweeper marks expired polls → emits socket events
+-- ================================================================================
+
+BEGIN;
+
+-- ================================================================================
+-- STEP 1: Drop the old COMBINED trigger (it mixed expiry + execution + bad
+--         ON CONFLICT syntax). We replace it with two clean, focused triggers.
+-- ================================================================================
+
+DROP TRIGGER IF EXISTS trigger_manage_poll_lifecycle     ON polls;
+DROP TRIGGER IF EXISTS trigger_poll_expiration           ON polls;
+DROP TRIGGER IF EXISTS trigger_execute_polls             ON polls;
+DROP TRIGGER IF EXISTS trigger_update_poll_stats         ON votes;
+
+DROP FUNCTION IF EXISTS manage_poll_lifecycle()                       CASCADE;
+DROP FUNCTION IF EXISTS update_poll_stats_after_vote()                CASCADE;
+
+-- Drop old helper functions (now handled in backend with clean SQL)
+DROP FUNCTION IF EXISTS create_poll(UUID,UUID,UUID,VARCHAR,VARCHAR,TEXT,INTEGER) CASCADE;
+DROP FUNCTION IF EXISTS cast_vote(UUID,UUID,BOOLEAN,UUID)              CASCADE;
+DROP FUNCTION IF EXISTS get_active_polls(UUID)                         CASCADE;
+DROP FUNCTION IF EXISTS get_poll_results(UUID)                         CASCADE;
+
+-- ================================================================================
+-- STEP 2: TRIGGER 1 — Auto-execute poll action when status → 'passed'
+--
+--   Fires: BEFORE UPDATE OF status ON polls
+--   Guards: OLD.status != 'passed' AND NEW.status = 'passed' AND NOT is_executed
+--   Side-effects (inside same transaction as the status change):
+--     kick_member  → DELETE from group_members, UPSERT into group_bans
+--     make_admin   → UPDATE group_members SET is_admin = TRUE
+--     remove_admin → UPDATE group_members SET is_admin = FALSE
+--   Also sets: NEW.is_executed = TRUE, NEW.executed_at = NOW()
+-- ================================================================================
+
+CREATE OR REPLACE FUNCTION fn_execute_passed_poll()
+RETURNS TRIGGER AS $$
+BEGIN
+  -- Only trigger on the first transition to 'passed' and if not already executed
+  IF NEW.status = 'passed'
+     AND OLD.status IS DISTINCT FROM 'passed'
+     AND NEW.is_executed = FALSE
+  THEN
+    CASE NEW.poll_type
+
+      WHEN 'kick_member' THEN
+        -- Remove the target from the group
+        DELETE FROM group_members
+        WHERE group_id = NEW.group_id
+          AND user_id  = NEW.target_user_id;
+
+        -- Record in bans (upsert to handle rare pre-existing ban gracefully)
+        INSERT INTO group_bans (group_id, user_id, banned_by, reason)
+        VALUES (
+          NEW.group_id,
+          NEW.target_user_id,
+          NEW.created_by,
+          'Removed by group vote: ' || COALESCE(NEW.description, 'No reason provided')
+        )
+        ON CONFLICT (group_id, user_id) DO UPDATE
+          SET reason     = EXCLUDED.reason,
+              banned_by  = EXCLUDED.banned_by;
+
+      WHEN 'make_admin' THEN
+        UPDATE group_members
+        SET is_admin          = TRUE,
+            can_add_members   = TRUE,
+            can_remove_members = TRUE,
+            can_edit_group    = TRUE
+        WHERE group_id = NEW.group_id
+          AND user_id  = NEW.target_user_id;
+
+      WHEN 'remove_admin' THEN
+        UPDATE group_members
+        SET is_admin          = FALSE,
+            can_add_members   = FALSE,
+            can_remove_members = FALSE,
+            can_edit_group    = FALSE
+        WHERE group_id = NEW.group_id
+          AND user_id  = NEW.target_user_id;
+
+      ELSE
+        -- change_group_name, object_removal, etc. — handled by backend if needed
+        NULL;
+
+    END CASE;
+
+    -- Mark executed (modifies NEW row in-place — BEFORE trigger)
+    NEW.is_executed  := TRUE;
+    NEW.executed_at  := NOW();
+    NEW.updated_at   := NOW();
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Attach trigger — fires BEFORE the UPDATE commits, so is_executed=TRUE is saved
+-- in the same row update that changed status to 'passed'. Atomic. No race.
+DROP TRIGGER IF EXISTS trg_execute_passed_poll ON polls;
+CREATE TRIGGER trg_execute_passed_poll
+  BEFORE UPDATE OF status ON polls
+  FOR EACH ROW
+  EXECUTE FUNCTION fn_execute_passed_poll();
+
+
+-- ================================================================================
+-- STEP 3: TRIGGER 2 — Keep vote statistics in sync after every vote change
+--
+--   Fires: AFTER INSERT OR UPDATE OR DELETE ON votes
+--   Recalculates: votes_for, votes_against, total_voters, status
+--   Also promotes poll to 'passed' / 'failed' when threshold is met,
+--   which will re-fire trg_execute_passed_poll via the status change.
+-- ================================================================================
+
+CREATE OR REPLACE FUNCTION fn_update_poll_stats()
+RETURNS TRIGGER AS $$
+DECLARE
+  v_poll_id       UUID;
+  v_votes_for     INT;
+  v_votes_against INT;
+  v_total         INT;
+  v_required      INT;
+  v_new_status    VARCHAR(20);
+BEGIN
+  -- Determine which poll changed
+  v_poll_id := COALESCE(NEW.poll_id, OLD.poll_id);
+
+  -- Recalculate fresh stats from the votes table
+  SELECT
+    COUNT(*) FILTER (WHERE vote_value = TRUE),
+    COUNT(*) FILTER (WHERE vote_value = FALSE),
+    COUNT(*)
+  INTO v_votes_for, v_votes_against, v_total
+  FROM votes
+  WHERE poll_id = v_poll_id;
+
+  -- Get threshold
+  SELECT votes_required, status
+  INTO v_required, v_new_status
+  FROM polls
+  WHERE poll_id = v_poll_id;
+
+  -- Only change status if poll is still active (don't re-open a closed poll)
+  IF v_new_status = 'active' THEN
+    IF v_votes_for >= v_required THEN
+      v_new_status := 'passed';
+    ELSIF v_votes_against >= v_required THEN
+      v_new_status := 'failed';
+    END IF;
+  END IF;
+
+  -- Single UPDATE — if status changes to 'passed', trg_execute_passed_poll fires
+  UPDATE polls
+  SET votes_for    = v_votes_for,
+      votes_against = v_votes_against,
+      total_voters  = v_total,
+      status        = v_new_status,
+      updated_at    = NOW()
+  WHERE poll_id = v_poll_id;
+
+  RETURN COALESCE(NEW, OLD);
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS trg_update_poll_stats ON votes;
+CREATE TRIGGER trg_update_poll_stats
+  AFTER INSERT OR UPDATE OR DELETE ON votes
+  FOR EACH ROW
+  EXECUTE FUNCTION fn_update_poll_stats();
+
+-- ================================================================================
+-- STEP 4: Integrity constraints
+-- ================================================================================
+
+-- No two active polls of the same type for the same target in the same group
+CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_active_poll_per_target
+  ON polls(group_id, target_user_id, poll_type)
+  WHERE status = 'active' AND target_user_id IS NOT NULL;
+
+-- No two active polls of the same type with no target (e.g. change_group_name)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_active_group_poll_no_target
+  ON polls(group_id, poll_type)
+  WHERE status = 'active' AND target_user_id IS NULL;
+
+-- Ensure vote unique indexes exist
+CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_vote_user
+  ON votes(poll_id, user_id)
+  WHERE user_id IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_vote_anonymous
+  ON votes(poll_id, anonymous_identity_id)
+  WHERE anonymous_identity_id IS NOT NULL;
+
+-- ================================================================================
+-- STEP 5: New columns on polls (for cancel tracking)
+-- ================================================================================
+
+ALTER TABLE polls ADD COLUMN IF NOT EXISTS cancellation_reason TEXT;
+ALTER TABLE polls ADD COLUMN IF NOT EXISTS cancelled_by UUID REFERENCES users(user_id) ON DELETE SET NULL;
+
+-- ================================================================================
+-- STEP 6: Update RLS — poll cancellation
+-- ================================================================================
+
+DROP POLICY IF EXISTS "Creators can update own polls"          ON polls;
+DROP POLICY IF EXISTS "Admins can cancel polls"                ON polls;
+DROP POLICY IF EXISTS "Creator can cancel own active poll"     ON polls;
+DROP POLICY IF EXISTS "Admin can cancel any active poll in group" ON polls;
+
+CREATE POLICY "Creator can cancel own active poll" ON polls
+  FOR UPDATE USING (
+    created_by::text = auth.uid()::text
+    AND status = 'active'
+  );
+
+CREATE POLICY "Admin can cancel any active poll in group" ON polls
+  FOR UPDATE USING (
+    status = 'active'
+    AND EXISTS (
+      SELECT 1 FROM group_members gm
+      WHERE gm.group_id   = polls.group_id
+        AND gm.user_id::text = auth.uid()::text
+        AND (gm.is_admin = TRUE OR gm.is_owner = TRUE)
+    )
+  );
+
+COMMIT;
+
+
+-- ==============================================================================
+--                    5th March, 2:45PM
+-- ==============================================================================
+
+-- ================================================================================
+--  POLLS v3 MIGRATION — Time-Based Resolution & Coin Toss
+--  Architecture:
+--    • Resolution only happens at expiry (enforced by backend sweeper)
+--    • Tie results in a random "coin toss" (handled by backend sweeper)
+--    • DB trigger handles side-effects when status is set to 'passed'
+--    • Backend: only upserts votes, reads result, emits socket events
+--    • Backend sweeper: marks 'passed'/'failed' based on majority vote at expiry
+-- ================================================================================
+
+BEGIN;
+
+-- 1. Remove the vote threshold column
+ALTER TABLE polls DROP COLUMN IF EXISTS votes_required;
+
+-- 2. Update the stats trigger to remove automatic status transitions
+--    Now it only maintains the counters.
+CREATE OR REPLACE FUNCTION fn_update_poll_stats()
+RETURNS TRIGGER AS $$
+DECLARE
+  v_poll_id       UUID;
+  v_votes_for     INT;
+  v_votes_against INT;
+  v_total         INT;
+BEGIN
+  -- Determine which poll changed
+  v_poll_id := COALESCE(NEW.poll_id, OLD.poll_id);
+
+  -- Recalculate fresh stats from the votes table
+  SELECT
+    COUNT(*) FILTER (WHERE vote_value = TRUE),
+    COUNT(*) FILTER (WHERE vote_value = FALSE),
+    COUNT(*)
+  INTO v_votes_for, v_votes_against, v_total
+  FROM votes
+  WHERE poll_id = v_poll_id;
+
+  -- Update count stats only. 
+  -- Status is now strictly resolved by time (backend sweeper).
+  UPDATE polls
+  SET votes_for     = v_votes_for,
+      votes_against = v_votes_against,
+      total_voters  = v_total,
+      updated_at    = NOW()
+  WHERE poll_id = v_poll_id;
+
+  RETURN COALESCE(NEW, OLD);
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- 3. Ensure fn_execute_passed_poll is ready for side-effects
+--    (Basically keeping the same logic from v2, but ensuring it's defined correctly)
+CREATE OR REPLACE FUNCTION fn_execute_passed_poll()
+RETURNS TRIGGER AS $$
+BEGIN
+  -- Only trigger on transition to 'passed' and if not already executed
+  IF NEW.status = 'passed'
+     AND OLD.status IS DISTINCT FROM 'passed'
+     AND NEW.is_executed = FALSE
+  THEN
+    CASE NEW.poll_type
+      WHEN 'kick_member' THEN
+        -- Remove the target from the group
+        DELETE FROM group_members
+        WHERE group_id = NEW.group_id
+          AND user_id  = NEW.target_user_id;
+
+        -- Record in bans
+        INSERT INTO group_bans (group_id, user_id, banned_by, reason)
+        VALUES (
+          NEW.group_id,
+          NEW.target_user_id,
+          NEW.created_by,
+          'Removed by group vote: ' || COALESCE(NEW.description, 'No reason provided')
+        )
+        ON CONFLICT (group_id, user_id) DO UPDATE
+          SET reason     = EXCLUDED.reason,
+              banned_by  = EXCLUDED.banned_by;
+
+      -- make_admin, remove_admin can be added here...
+      WHEN 'make_admin' THEN
+        UPDATE group_members
+        SET is_admin = TRUE,
+            can_add_members = TRUE,
+            can_remove_members = TRUE,
+            can_edit_group = TRUE
+        WHERE group_id = NEW.group_id AND user_id = NEW.target_user_id;
+
+      WHEN 'remove_admin' THEN
+        UPDATE group_members
+        SET is_admin = FALSE,
+            can_add_members = FALSE,
+            can_remove_members = FALSE,
+            can_edit_group = FALSE
+        WHERE group_id = NEW.group_id AND user_id = NEW.target_user_id;
+
+      ELSE
+        NULL;
+    END CASE;
+
+    NEW.is_executed  := TRUE;
+    NEW.executed_at  := NOW();
+    NEW.updated_at   := NOW();
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+COMMIT;
+
+-- ==============================================================================
+--                    5th March, 2:45PM
+-- ==============================================================================
+
+SELECT
+    tg.tgname AS trigger_name,
+    p.proname AS function_name,
+    pg_get_triggerdef(tg.oid) AS trigger_definition
+FROM pg_trigger tg
+JOIN pg_proc p ON p.oid = tg.tgfoid
+JOIN pg_class c ON c.oid = tg.tgrelid
+WHERE c.relname = 'votes'
+AND NOT tg.tgisinternal;
+
+
+SELECT
+    p.proname AS function_name,
+    pg_get_functiondef(p.oid) AS function_definition
+FROM pg_proc p
+JOIN pg_namespace n ON n.oid = p.pronamespace
+WHERE n.nspname = 'public'
+AND p.proname IN (
+    SELECT proname
+    FROM pg_proc
+    WHERE oid IN (
+        SELECT tgfoid
+        FROM pg_trigger tg
+        JOIN pg_class c ON c.oid = tg.tgrelid
+        WHERE c.relname = 'votes'
+        AND NOT tg.tgisinternal
+    )
+);
+
+
+SELECT 
+    p.proname AS function_name,
+    pg_get_functiondef(p.oid) AS definition
+FROM pg_proc p
+JOIN pg_namespace n ON p.pronamespace = n.oid
+WHERE n.nspname = 'public'
+AND p.proname ILIKE '%vote%';
+
+
+SELECT
+    c.relname AS table_name,
+    tg.tgname AS trigger_name,
+    p.proname AS function_name,
+    pg_get_triggerdef(tg.oid)
+FROM pg_trigger tg
+JOIN pg_class c ON c.oid = tg.tgrelid
+JOIN pg_proc p ON p.oid = tg.tgfoid
+WHERE c.relname = 'votes'
+AND NOT tg.tgisinternal;
+
+DROP TRIGGER IF EXISTS trigger_update_poll_stats ON votes;
+DROP FUNCTION IF EXISTS update_poll_stats_after_vote();
+
+CREATE OR REPLACE FUNCTION public.create_poll(
+    p_group_id uuid,
+    p_created_by uuid,
+    p_target_user_id uuid,
+    p_poll_type character varying,
+    p_title character varying,
+    p_description text DEFAULT NULL,
+    p_duration_hours integer DEFAULT 6
+)
+RETURNS uuid
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+    v_poll_id UUID;
+    v_group_members INTEGER;
+    v_is_admin BOOLEAN;
+    v_target_is_member BOOLEAN;
+BEGIN
+    -- Check if creator is admin
+    SELECT EXISTS (
+        SELECT 1 FROM group_members
+        WHERE group_id = p_group_id
+        AND user_id = p_created_by
+        AND is_admin = TRUE
+    ) INTO v_is_admin;
+
+    IF NOT v_is_admin THEN
+        RAISE EXCEPTION 'Only admins can create polls';
+    END IF;
+
+    -- Check target membership
+    IF p_poll_type IN ('kick_member','make_admin','remove_admin','object_removal') THEN
+        SELECT EXISTS (
+            SELECT 1 FROM group_members
+            WHERE group_id = p_group_id
+            AND user_id = p_target_user_id
+        ) INTO v_target_is_member;
+
+        IF NOT v_target_is_member THEN
+            RAISE EXCEPTION 'Target user is not a group member';
+        END IF;
+    END IF;
+
+    -- Create poll (NO votes_required anymore)
+    INSERT INTO polls (
+        group_id,
+        created_by,
+        target_user_id,
+        poll_type,
+        title,
+        description,
+        expires_at
+    )
+    VALUES (
+        p_group_id,
+        p_created_by,
+        p_target_user_id,
+        p_poll_type,
+        p_title,
+        p_description,
+        NOW() + (p_duration_hours || ' hours')::INTERVAL
+    )
+    RETURNING poll_id INTO v_poll_id;
+
+    RETURN v_poll_id;
+END;
+$$;
+
+DROP FUNCTION IF EXISTS public.get_active_polls(uuid);
+
+CREATE FUNCTION public.get_active_polls(p_group_id uuid)
+RETURNS TABLE(
+    poll_id uuid,
+    created_by uuid,
+    target_user_id uuid,
+    poll_type character varying,
+    title character varying,
+    description text,
+    votes_for integer,
+    votes_against integer,
+    total_voters integer,
+    status character varying,
+    created_at timestamp with time zone,
+    expires_at timestamp with time zone,
+    time_remaining interval,
+    creator_name character varying,
+    target_name character varying,
+    has_voted boolean
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+    current_user_id UUID;
+BEGIN
+    current_user_id := auth.uid()::UUID;
+
+    RETURN QUERY
+    SELECT
+        p.poll_id,
+        p.created_by,
+        p.target_user_id,
+        p.poll_type,
+        p.title,
+        p.description,
+        p.votes_for,
+        p.votes_against,
+        p.total_voters,
+        p.status,
+        p.created_at,
+        p.expires_at,
+        p.expires_at - NOW(),
+        uc.name,
+        ut.name,
+        EXISTS (
+            SELECT 1
+            FROM votes v
+            WHERE v.poll_id = p.poll_id
+            AND v.user_id = current_user_id
+        )
+    FROM polls p
+    JOIN users uc ON p.created_by = uc.user_id
+    LEFT JOIN users ut ON p.target_user_id = ut.user_id
+    WHERE p.group_id = p_group_id
+    AND p.status = 'active'
+    ORDER BY p.expires_at ASC;
+END;
+$$;
+
+
+SELECT 
+    p.proname AS function_name,
+    pg_get_functiondef(p.oid) AS definition
+FROM pg_proc p
+JOIN pg_namespace n ON n.oid = p.pronamespace
+WHERE n.nspname = 'public'
+AND p.prosrc ILIKE '%votes_required%';
+
+
+
+CREATE OR REPLACE FUNCTION public.check_and_expire_polls()
+RETURNS TABLE(
+    poll_id uuid,
+    old_status character varying,
+    new_status character varying,
+    decision_method text
+)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    RETURN QUERY
+    UPDATE polls
+    SET status =
+        CASE
+            WHEN votes_for > votes_against THEN 'passed'
+            WHEN votes_for < votes_against THEN 'failed'
+            ELSE CASE
+                    WHEN random() < 0.5 THEN 'passed'
+                    ELSE 'failed'
+                 END
+        END,
+        updated_at = NOW()
+    WHERE status = 'active'
+    AND expires_at <= NOW()
+    RETURNING
+        polls.poll_id,
+        'active'::VARCHAR,
+        polls.status,
+        CASE
+            WHEN votes_for > votes_against THEN 'majority_for'
+            WHEN votes_for < votes_against THEN 'majority_against'
+            ELSE 'coin_flip'
+        END;
+END;
+$$;
+
+
+
+CREATE OR REPLACE FUNCTION public.manage_poll_lifecycle()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    -- Prevent updates on expired polls unless status is being resolved
+    IF OLD.status = 'active'
+       AND OLD.expires_at <= NOW()
+       AND NEW.status = 'active'
+    THEN
+        RETURN OLD;
+    END IF;
+
+    RETURN NEW;
+END;
+$$;
+
+
+
+
+
+

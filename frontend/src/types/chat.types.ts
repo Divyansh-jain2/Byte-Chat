@@ -95,6 +95,7 @@ export interface Group {
 
 export interface Poll {
   poll_id: string;
+  id: string;
   group_id: string;
   created_by: string;
   creator_name?: string;
@@ -105,7 +106,6 @@ export interface Poll {
   poll_type: 'kick_member' | 'make_admin' | 'remove_admin' | 'change_group_name' | 'object_removal';
   title: string;
   description?: string;
-  votes_required: number;
   votes_for: number;
   votes_against: number;
   total_voters: number;
@@ -115,6 +115,10 @@ export interface Poll {
   updated_at: Date;
   expires_at: Date;
   executed_at?: Date;
+  parent_poll_id?: string;
+  objection_reason?: string;
+  cancellation_reason?: string;
+  cancelled_by?: string;
   has_voted?: boolean;
   user_vote?: boolean; // true = for, false = against
 }

@@ -345,6 +345,46 @@ export const groupService = {
     return response.json();
   },
 
+  // Cancel an active poll (creator or admin)
+  cancelPoll: async (groupId: string, pollId: string, reason?: string) => {
+    const token = localStorage.getItem('accessToken');
+    const response = await fetch(`${API_URL}/${groupId}/polls/${pollId}`, {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': token ? `Bearer ${token}` : '',
+      },
+      credentials: 'include',
+      body: JSON.stringify({ reason }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message || 'Failed to cancel poll');
+    }
+
+    return response.json();
+  },
+
+  // Manually execute a passed poll (admin only)
+  executePoll: async (groupId: string, pollId: string) => {
+    const token = localStorage.getItem('accessToken');
+    const response = await fetch(`${API_URL}/${groupId}/polls/${pollId}/execute`, {
+      method: 'POST',
+      headers: {
+        'Authorization': token ? `Bearer ${token}` : '',
+      },
+      credentials: 'include',
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message || 'Failed to execute poll');
+    }
+
+    return response.json();
+  },
+
   // Upload group chat image
   uploadImage: async (groupId: string, file: File) => {
     const token = localStorage.getItem('accessToken');

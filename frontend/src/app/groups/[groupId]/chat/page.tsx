@@ -7,7 +7,7 @@ import dynamic from 'next/dynamic';
 import { groupService } from '@/services/group.service';
 import { useSocket } from '@/contexts/SocketContext';
 import { useToast } from '@/contexts/ToastContext';
-import type { Message, Poll } from '@/types/chat.types';
+import type { Message, Poll, Group } from '@/types/chat.types';
 import { Theme } from 'emoji-picker-react';
 import Image from 'next/image';
 import MessageBubble from '@/components/MessageBubble';
@@ -37,6 +37,7 @@ export default function GroupChatPage() {
 
   const [messages, setMessages] = useState<GroupMessage[]>([]);
   const [polls, setPolls] = useState<Poll[]>([]);
+  const [group, setGroup] = useState<Group | null>(null);
   const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
@@ -50,6 +51,9 @@ export default function GroupChatPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messageInputRef = useRef<HTMLInputElement>(null);
   const emojiPickerRef = useRef<HTMLDivElement>(null);
+  const userStr = typeof window !== 'undefined' ? localStorage.getItem('user') : null;
+  const currentUser = userStr ? JSON.parse(userStr) : null;
+  const currentUserId = currentUser?.user_id || currentUser?.userId;
 
   const fetchMessages = useCallback(async () => {
     try {
@@ -99,8 +103,37 @@ export default function GroupChatPage() {
       setPolls((prev) => prev.map(p => p.poll_id === poll.poll_id ? poll : p));
     };
 
+    const handlePollCancelled = (data: { poll_id: string }) => {
+      setPolls(prev => prev.filter(p => p.poll_id !== data.poll_id));
+    };
+
     socket.on('new-poll', handleNewPoll);
     socket.on('poll-updated', handlePollUpdated);
+    socket.on('poll-cancelled', handlePollCancelled);
+
+    // Poll lifecycle events
+    const handlePollExecuted = (data: { poll_id: string }) => {
+      setPolls(prev => prev.filter(p => p.poll_id !== data.poll_id));
+    };
+    const handlePollExpired = (data: { poll_id: string }) => {
+      setPolls(prev => prev.filter(p => p.poll_id !== data.poll_id));
+    };
+    const handleMemberRemoved = (data: { user_id: string }) => {
+      // If the current user was removed, redirect them out
+      const userStr = localStorage.getItem('user');
+      const currentUserId = userStr ? JSON.parse(userStr).user_id : null;
+      if (currentUserId === data.user_id) {
+        toast.error('You were removed from this group by a poll vote.');
+        router.push('/my-groups');
+      } else {
+        toast.error('A member was removed by poll vote.');
+      }
+    };
+
+    socket.on('poll-executed', handlePollExecuted);
+    socket.on('poll-cancelled', handlePollCancelled);
+    socket.on('poll-expired', handlePollExpired);
+    socket.on('member-removed', handleMemberRemoved);
 
     // Message management events
     const handleMessageReaction = () => fetchMessages();
@@ -131,11 +164,28 @@ export default function GroupChatPage() {
       socket.off('new-group-message', handleNewGroupMessage);
       socket.off('new-poll', handleNewPoll);
       socket.off('poll-updated', handlePollUpdated);
+      socket.off('poll-cancelled', handlePollCancelled);
+      socket.off('poll-executed', handlePollExecuted);
+      socket.off('poll-expired', handlePollExpired);
+      socket.off('member-removed', handleMemberRemoved);
       socket.off('message:reaction', handleMessageReaction);
       socket.off('message:edited', handleMessageEdited);
       socket.off('message:deleted', handleMessageDeleted);
     };
   }, [socket, fetchMessages]);
+
+  const fetchGroup = useCallback(async () => {
+    try {
+      const response = await groupService.getGroupDetails(groupId);
+      // Backend returns { success: true, data: { group: {...} } } OR sometimes { success: true, data: {...} }
+      const groupData = response.data?.group || response.data;
+      if (groupData) {
+        setGroup(groupData);
+      }
+    } catch (error) {
+      console.error('Failed to fetch group details:', error);
+    }
+  }, [groupId]);
 
   useEffect(() => {
     scrollToBottom();
@@ -195,8 +245,22 @@ export default function GroupChatPage() {
     }
   };
 
+  const handleCancelPoll = async (pollId: string) => {
+    if (!window.confirm('Are you sure you want to cancel this poll?')) return;
+
+    try {
+      await groupService.cancelPoll(groupId, pollId);
+      toast.success('Poll cancelled');
+      fetchPolls();
+    } catch (err: unknown) {
+      const errorMsg = (err as { message?: string })?.message || 'Failed to cancel poll';
+      toast.error(errorMsg);
+    }
+  };
+
   useEffect(() => {
     fetchPolls();
+    fetchGroup();
     if (groupId) {
       fetchMessages();
 
@@ -460,7 +524,11 @@ export default function GroupChatPage() {
       {/* Poll Panel (collapsible) */}
       {showCreatePoll && (
         <div className="shrink-0 px-4 pt-3">
-          <QuickPollForm groupId={groupId} onSuccess={() => { setShowCreatePoll(false); fetchPolls(); }} />
+          <QuickPollForm groupId={groupId} onSuccess={() => {
+            setShowCreatePoll(false);
+            fetchPolls();
+            fetchGroup();
+          }} />
         </div>
       )}
 
@@ -479,15 +547,23 @@ export default function GroupChatPage() {
                     'bg-red-500/15 text-red-400'
                   }`}>{poll.status}</span>
               </div>
-              {/* Progress bar */}
-              <div className="h-2 rounded-full overflow-hidden my-2" style={{ background: 'var(--glass-bg)' }}>
-                <div className="h-full bg-linear-to-r from-emerald-500 to-emerald-400 rounded-full"
-                  style={{ width: `${(poll.votes_for / Math.max(poll.total_voters, 1)) * 100}%` }} />
+              {/* Balanced Progress Bar (For vs Against) */}
+              <div className="h-2 rounded-full overflow-hidden my-2 flex" style={{ background: 'var(--glass-bg)' }}>
+                <div className="h-full bg-emerald-500"
+                  style={{ width: `${(poll.votes_for / Math.max(poll.votes_for + poll.votes_against, 1)) * 100}%` }} />
+                <div className="h-full bg-red-500"
+                  style={{ width: `${(poll.votes_against / Math.max(poll.votes_for + poll.votes_against, 1)) * 100}%` }} />
               </div>
-              <div className="flex justify-between text-xs mb-2" style={{ color: 'var(--muted)' }}>
-                <span className="text-emerald-400">{poll.votes_for} for</span>
-                <span>{poll.votes_for + poll.votes_against}/{poll.total_voters}</span>
-                <span className="text-red-400">{poll.votes_against} against</span>
+
+              <div className="flex justify-between text-xs mb-2 px-1" style={{ color: 'var(--muted)' }}>
+                <span className="text-emerald-400 font-bold">{poll.votes_for} For</span>
+                <span className="text-[10px] opacity-70">
+                  {poll.status === 'active'
+                    ? `Ends ${new Date(poll.expires_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+                    : `Ended ${new Date(poll.expires_at).toLocaleDateString()}`
+                  }
+                </span>
+                <span className="text-red-400 font-bold">{poll.votes_against} Against</span>
               </div>
               {poll.status === 'active' && (
                 <div className="flex gap-2">
@@ -497,6 +573,18 @@ export default function GroupChatPage() {
                   <button onClick={() => handleVote(poll.poll_id, false)} disabled={poll.has_voted && poll.user_vote === false}
                     className={`flex-1 py-1 rounded-xl text-xs font-semibold transition-all ${poll.has_voted && poll.user_vote === false ? 'bg-red-500 text-white' : 'bg-red-500/15 text-red-400 hover:bg-red-500/25'
                       }`}>✗ Against</button>
+
+                  {/* Cancel button for admins or creators */}
+                  {(group?.user_is_admin || group?.user_is_owner || poll.created_by === currentUserId) && (
+                    <button
+                      onClick={() => handleCancelPoll(poll.poll_id)}
+                      className="px-3 py-1 rounded-xl text-[10px] font-bold bg-red-500/10 text-red-400 hover:bg-red-500/20 border border-red-500/20 transition-all flex items-center gap-1"
+                      title="Cancel Poll"
+                    >
+                      <span>🗑️</span>
+                      <span>Cancel</span>
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -600,56 +688,209 @@ export default function GroupChatPage() {
   );
 }
 
-// Quick Poll Form Component
+// ─── Poll Creation Form ────────────────────────────────────────────────────────
+// Shown when admin clicks the Poll button in the chat header.
+// For member-targeted poll types (kick, make_admin, remove_admin) it
+// automatically fetches and displays a member picker before posting the poll.
+
+interface GroupMember {
+  user_id: string;
+  name: string;
+  roll_no: string;
+  is_admin: boolean;
+  is_owner: boolean;
+  dp_url?: string;
+  is_anonymous: boolean;
+}
+
+const MEMBER_POLL_TYPES = ['kick_member', 'make_admin', 'remove_admin', 'object_removal'];
+
 function QuickPollForm({ groupId, onSuccess }: { groupId: string; onSuccess: () => void }) {
   const toast = useToast();
-  const [formData, setFormData] = useState({
-    poll_type: 'kick_member',
-    title: '',
-    expires_in_hours: 24
-  });
-  const [loading, setLoading] = useState(false);
+
+  const [pollType, setPollType] = useState('kick_member');
+  const [title, setTitle] = useState('');
+  const [desc, setDesc] = useState('');
+  const [hours, setHours] = useState(6);
+  const [targetId, setTargetId] = useState('');
+  const [members, setMembers] = useState<GroupMember[]>([]);
+  const [loadingMembers, setLoadingMembers] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+
+  const needsTarget = MEMBER_POLL_TYPES.includes(pollType);
+
+  // Fetch members whenever a target-required type is selected
+  useEffect(() => {
+    if (!needsTarget) { setTargetId(''); return; }
+    setLoadingMembers(true);
+    groupService.getGroupMembers(groupId)
+      .then(res => {
+        const list: GroupMember[] = res.data?.members ?? res.data ?? [];
+        // Filter out current user so you can't kick yourself
+        const me = JSON.parse(localStorage.getItem('user') || '{}').user_id;
+        setMembers(list.filter(m => m.user_id !== me));
+      })
+      .catch(() => toast.error('Could not load members'))
+      .finally(() => setLoadingMembers(false));
+  }, [pollType, groupId, needsTarget, toast]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
+    if (needsTarget && !targetId) {
+      toast.error('Please select a member to target');
+      return;
+    }
+    setSubmitting(true);
     try {
-      await groupService.createPoll(groupId, formData);
+      await groupService.createPoll(groupId, {
+        poll_type: pollType,
+        title: title.trim(),
+        description: desc.trim() || undefined,
+        target_user_id: needsTarget ? targetId : undefined,
+        expires_in_hours: hours,
+      });
+      toast.success('Poll created!');
       onSuccess();
-      setFormData({ poll_type: 'kick_member', title: '', expires_in_hours: 24 });
+      // reset
+      setTitle(''); setDesc(''); setTargetId(''); setHours(6);
     } catch (err: unknown) {
-      let errorMsg = 'Failed to create poll';
-      if (typeof err === 'object' && err !== null && 'message' in err && typeof (err as { message?: string }).message === 'string') {
-        errorMsg = (err as { message: string }).message;
-      }
-      toast.error(errorMsg);
+      const msg = (err as { message?: string })?.message ?? 'Failed to create poll';
+      toast.error(msg);
     } finally {
-      setLoading(false);
+      setSubmitting(false);
     }
   };
 
+  const selectedMember = members.find(m => m.user_id === targetId);
+
   return (
-    <form onSubmit={handleSubmit} className="glass rounded-2xl p-4 mb-2">
-      <h3 className="text-sm font-bold mb-3" style={{ color: 'var(--heading)' }}>Create Poll</h3>
-      <div className="space-y-2">
-        <input type="text" required value={formData.title}
-          onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-          placeholder="Poll question…" className="input-romance w-full text-sm" />
-        <div className="flex gap-2">
-          <select value={formData.poll_type} onChange={(e) => setFormData({ ...formData, poll_type: e.target.value })}
-            className="select-romance flex-1 text-sm">
-            <option value="kick_member">Kick Member</option>
-            <option value="make_admin">Make Admin</option>
-            <option value="remove_admin">Remove Admin</option>
-            <option value="change_group_name">Change Name</option>
-          </select>
-          <input type="number" min={1} max={168} value={formData.expires_in_hours}
-            onChange={(e) => setFormData({ ...formData, expires_in_hours: parseInt(e.target.value) })}
-            className="input-romance w-20 text-sm" placeholder="hrs" />
-          <button type="submit" disabled={loading} className="btn-romance px-4 py-2 text-sm">
-            {loading ? '…' : 'Post'}
+    <form onSubmit={handleSubmit} className="glass rounded-2xl p-4 mb-2 space-y-3">
+      <h3 className="text-sm font-bold" style={{ color: 'var(--heading)' }}>📊 Create Poll</h3>
+
+      {/* Poll type */}
+      <div className="flex gap-2 flex-wrap">
+        {[
+          { value: 'kick_member', label: '🚫 Kick Member' },
+          { value: 'make_admin', label: '⭐ Make Admin' },
+          { value: 'remove_admin', label: '🔻 Remove Admin' },
+          { value: 'change_group_name', label: '✏️ Rename Group' },
+          { value: 'object_removal', label: '🛡️ Object Removal' },
+        ].map(opt => (
+          <button
+            key={opt.value}
+            type="button"
+            onClick={() => { setPollType(opt.value); setTargetId(''); }}
+            className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all border ${pollType === opt.value
+              ? 'border-pink-500/60 text-pink-400'
+              : 'border-transparent btn-ghost'
+              }`}
+            style={pollType === opt.value ? { background: 'rgba(236,72,153,0.12)' } : {}}
+          >
+            {opt.label}
           </button>
+        ))}
+      </div>
+
+      {/* Member picker — only for member-targeted poll types */}
+      {needsTarget && (
+        <div>
+          <p className="text-xs font-semibold mb-1.5" style={{ color: 'var(--muted)' }}>
+            Select member to {pollType === 'kick_member' ? 'remove' : pollType === 'make_admin' ? 'promote' : 'demote'}
+          </p>
+          {loadingMembers ? (
+            <p className="text-xs" style={{ color: 'var(--muted)' }}>Loading members…</p>
+          ) : members.length === 0 ? (
+            <p className="text-xs" style={{ color: 'var(--muted)' }}>No eligible members found.</p>
+          ) : (
+            <div className="grid grid-cols-2 gap-1.5 max-h-36 overflow-y-auto custom-scrollbar pr-1">
+              {members.map(member => (
+                <button
+                  key={member.user_id}
+                  type="button"
+                  onClick={() => setTargetId(member.user_id)}
+                  className={`flex items-center gap-2 px-2.5 py-2 rounded-xl text-left transition-all border ${targetId === member.user_id
+                    ? 'border-pink-500/60'
+                    : 'border-transparent btn-ghost'
+                    }`}
+                  style={targetId === member.user_id ? { background: 'rgba(236,72,153,0.12)' } : {}}
+                >
+                  {/* Avatar */}
+                  <div
+                    className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-white text-xs font-bold"
+                    style={{ background: 'var(--grad-ocean)' }}
+                  >
+                    {member.is_anonymous ? '?' : member.name?.[0]?.toUpperCase() ?? '?'}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold truncate" style={{ color: 'var(--heading)' }}>
+                      {member.is_anonymous ? 'Anonymous' : member.name}
+                    </p>
+                    <p className="text-[10px] truncate" style={{ color: 'var(--muted)' }}>
+                      {member.is_admin ? '⭐ Admin' : member.roll_no}
+                    </p>
+                  </div>
+                  {targetId === member.user_id && (
+                    <span className="ml-auto text-pink-400 text-xs shrink-0">✓</span>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Selected member chip */}
+          {selectedMember && (
+            <div className="mt-2 flex items-center gap-2 px-2.5 py-1.5 rounded-lg"
+              style={{ background: 'rgba(236,72,153,0.08)', border: '1px solid rgba(236,72,153,0.3)' }}
+            >
+              <span className="text-xs text-pink-400">Target:</span>
+              <span className="text-xs font-semibold" style={{ color: 'var(--heading)' }}>
+                {selectedMember.name}
+              </span>
+              <button type="button" onClick={() => setTargetId('')}
+                className="ml-auto text-xs text-pink-400 hover:text-pink-300"
+              >✕</button>
+            </div>
+          )}
         </div>
+      )}
+
+      {/* Title */}
+      <input
+        type="text" required value={title}
+        onChange={e => setTitle(e.target.value)}
+        placeholder={pollType === 'kick_member'
+          ? `Reason to remove ${selectedMember?.name ?? 'member'}…`
+          : 'Poll question…'}
+        className="input-romance w-full text-sm"
+      />
+
+      {/* Description (optional) */}
+      <input
+        type="text" value={desc}
+        onChange={e => setDesc(e.target.value)}
+        placeholder="Additional context (optional)…"
+        className="input-romance w-full text-sm"
+      />
+
+      {/* Expiry + Submit */}
+      <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--muted)' }}>
+          <span>⏱</span>
+          <input
+            type="number" min={1} max={24} value={hours}
+            onChange={e => setHours(Math.min(24, Math.max(1, Number(e.target.value))))}
+            className="input-romance w-14 text-sm text-center"
+          />
+          <span>hrs</span>
+        </div>
+        <button
+          type="submit"
+          disabled={submitting || (needsTarget && !targetId)}
+          className="btn-romance flex-1 py-2 text-sm disabled:opacity-40"
+        >
+          {submitting ? 'Creating…' : `Start Poll${selectedMember ? ` · ${selectedMember.name}` : ''
+            }`}
+        </button>
       </div>
     </form>
   );

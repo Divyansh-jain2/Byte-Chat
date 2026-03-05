@@ -1001,10 +1001,12 @@ export const promoteMemberToAdmin = async (req: Request, res: Response) => {
   }
 };
 
+// ============================================================
 // Create a poll (admins only)
+// ============================================================
 export const createPoll = async (req: Request, res: Response) => {
   const { groupId } = req.params;
-  const { poll_type, title, description, target_user_id, expires_in_hours = 24 } = req.body;
+  const { poll_type, title, description, target_user_id, expires_in_hours = 6 } = req.body;
   const userId = req.user?.userId;
 
   if (!userId) {
@@ -1021,44 +1023,77 @@ export const createPoll = async (req: Request, res: Response) => {
     throw new ApiError(400, 'Poll title is required');
   }
 
+  // expires_in_hours: min 1, max 24, default 6
+  const hoursNum = Math.min(24, Math.max(1, Number(expires_in_hours) || 6));
+
+  // Polls that affect a specific member must have a target
+  const memberPollTypes = ['kick_member', 'make_admin', 'remove_admin', 'object_removal'];
+  if (memberPollTypes.includes(poll_type) && !target_user_id) {
+    throw new ApiError(400, `Poll type '${poll_type}' requires a target_user_id`);
+  }
+
   const client = await pool.connect();
 
   try {
     await client.query('BEGIN');
 
-    // Check if user is admin in the group
+    // 1. Confirm requesting user is an admin in this group
     const adminCheck = await client.query(
-      `SELECT is_admin, is_owner FROM group_members 
+      `SELECT is_admin, is_owner FROM group_members
        WHERE group_id = $1 AND user_id = $2`,
       [groupId, userId]
     );
-
     if (adminCheck.rows.length === 0) {
       throw new ApiError(403, 'You are not a member of this group');
     }
-
-    if (!adminCheck.rows[0].is_admin) {
-      throw new ApiError(403, 'Only admins can create polls');
+    if (!adminCheck.rows[0].is_admin && !adminCheck.rows[0].is_owner) {
+      throw new ApiError(403, 'Only group admins can create polls');
     }
 
-    // Get total member count for votes_required calculation
+    // 2. If targeting someone, validate target membership & prevent self-targeting
+    if (target_user_id) {
+      if (target_user_id === userId) {
+        throw new ApiError(400, 'You cannot create a poll targeting yourself');
+      }
+      const targetCheck = await client.query(
+        `SELECT 1 FROM group_members WHERE group_id = $1 AND user_id = $2`,
+        [groupId, target_user_id]
+      );
+      if (targetCheck.rows.length === 0) {
+        throw new ApiError(404, 'Target user is not a member of this group');
+      }
+    }
+
+    // 3. Guard: no duplicate active poll for same (group, target, type)
+    //    (DB unique index also enforces this, but we give a friendly message)
+    const dupCheck = await client.query(
+      `SELECT poll_id FROM polls
+       WHERE group_id = $1
+         AND poll_type = $2
+         AND status = 'active'
+         AND ($3::UUID IS NULL OR target_user_id = $3::UUID)`,
+      [groupId, poll_type, target_user_id || null]
+    );
+    if (dupCheck.rows.length > 0) {
+      throw new ApiError(400, 'An active poll of this type already exists for this target');
+    }
+
+    // 4. Get current member count for total_voters display
     const memberCountResult = await client.query(
       `SELECT COUNT(*) as count FROM group_members WHERE group_id = $1`,
       [groupId]
     );
     const memberCount = parseInt(memberCountResult.rows[0].count);
-    const votesRequired = Math.ceil(memberCount / 2); // Majority
 
-    // Calculate expiration time
     const expiresAt = new Date();
-    expiresAt.setHours(expiresAt.getHours() + expires_in_hours);
+    expiresAt.setHours(expiresAt.getHours() + hoursNum);
 
-    // Create the poll
+    // 5. Insert the poll
     const pollResult = await client.query(
       `INSERT INTO polls (
-        group_id, created_by, target_user_id, poll_type, title, description,
-        votes_required, total_voters, expires_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        group_id, created_by, target_user_id, poll_type,
+        title, description, total_voters, expires_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
       RETURNING *`,
       [
         groupId,
@@ -1067,9 +1102,8 @@ export const createPoll = async (req: Request, res: Response) => {
         poll_type,
         title.trim(),
         description?.trim() || null,
-        votesRequired,
         memberCount,
-        expiresAt
+        expiresAt,
       ]
     );
 
@@ -1077,17 +1111,18 @@ export const createPoll = async (req: Request, res: Response) => {
 
     const poll = pollResult.rows[0];
 
-    // Emit socket event for real-time update
-    io.to(`group-${groupId}`).emit('new-poll', poll);
+    // Emit to correct room  (group: not group-)
+    io.to(`group:${groupId}`).emit('new-poll', poll);
 
     res.status(201).json({
       success: true,
       message: 'Poll created successfully',
-      data: poll
+      data: poll,
     });
   } catch (error: any) {
     await client.query('ROLLBACK');
     console.error('Error creating poll:', error);
+    if (error instanceof ApiError) throw error;
     throw new ApiError(500, error.message || 'Failed to create poll');
   } finally {
     client.release();
@@ -1160,18 +1195,17 @@ export const getGroupPolls = async (req: Request, res: Response) => {
   }
 };
 
+// ============================================================
 // Vote on a poll
+// ============================================================
 export const voteOnPoll = async (req: Request, res: Response) => {
   const { groupId, pollId } = req.params;
   const { vote_value } = req.body; // true = for, false = against
   const userId = req.user?.userId;
 
-  if (!userId) {
-    throw new ApiError(401, 'Unauthorized');
-  }
-
+  if (!userId) throw new ApiError(401, 'Unauthorized');
   if (typeof vote_value !== 'boolean') {
-    throw new ApiError(400, 'vote_value must be a boolean (true for yes, false for no)');
+    throw new ApiError(400, 'vote_value must be a boolean (true = yes, false = no)');
   }
 
   const client = await pool.connect();
@@ -1179,129 +1213,262 @@ export const voteOnPoll = async (req: Request, res: Response) => {
   try {
     await client.query('BEGIN');
 
-    // Check if user is a member of the group
+    // 1. Confirm user is a group member
     const memberCheck = await client.query(
       `SELECT 1 FROM group_members WHERE group_id = $1 AND user_id = $2`,
       [groupId, userId]
     );
+    if (memberCheck.rows.length === 0) throw new ApiError(403, 'You are not a member of this group');
 
-    if (memberCheck.rows.length === 0) {
-      throw new ApiError(403, 'You are not a member of this group');
-    }
-
-    // Check if poll exists and is active
-    const pollCheck = await client.query(
-      `SELECT status, expires_at FROM polls 
-       WHERE poll_id = $1 AND group_id = $2`,
+    // 2. Fetch poll and lock it (prevents concurrent double-votes)
+    const pollResult = await client.query(
+      `SELECT poll_id, status, expires_at, poll_type, target_user_id
+       FROM polls
+       WHERE poll_id = $1 AND group_id = $2
+       FOR UPDATE`,
       [pollId, groupId]
     );
+    if (pollResult.rows.length === 0) throw new ApiError(404, 'Poll not found in this group');
+    const poll = pollResult.rows[0];
 
-    if (pollCheck.rows.length === 0) {
-      throw new ApiError(404, 'Poll not found');
-    }
-
-    const poll = pollCheck.rows[0];
-
+    // 3. Guards
     if (poll.status !== 'active') {
-      throw new ApiError(400, `Cannot vote on ${poll.status} poll`);
+      throw new ApiError(400, `Cannot vote on a ${poll.status} poll`);
     }
-
-    if (new Date(poll.expires_at) < new Date()) {
-      throw new ApiError(400, 'Poll has expired');
-    }
-
-    // Check if user already voted
-    const voteCheck = await client.query(
-      `SELECT vote_id, vote_value FROM votes 
-       WHERE poll_id = $1 AND user_id = $2`,
-      [pollId, userId]
-    );
-
-    if (voteCheck.rows.length > 0) {
-      // Update existing vote
+    if (new Date(poll.expires_at) <= new Date()) {
+      // Expire inline so next caller sees the right status
       await client.query(
-        `UPDATE votes SET vote_value = $1, voted_at = NOW() 
-         WHERE poll_id = $2 AND user_id = $3`,
-        [vote_value, pollId, userId]
+        `UPDATE polls SET status = 'expired', updated_at = NOW() WHERE poll_id = $1`,
+        [pollId]
       );
-    } else {
-      // Insert new vote
-      await client.query(
-        `INSERT INTO votes (poll_id, user_id, vote_value) 
-         VALUES ($1, $2, $3)`,
-        [pollId, userId, vote_value]
-      );
+      await client.query('COMMIT');
+      io.to(`group:${groupId}`).emit('poll-expired', { poll_id: pollId, group_id: groupId });
+      throw new ApiError(400, 'This poll has expired');
+    }
+    // Target of a kick poll cannot vote on their own removal
+    if (poll.poll_type === 'kick_member' && poll.target_user_id === userId) {
+      throw new ApiError(403, 'You cannot vote on a poll targeting you for removal');
     }
 
-    // Update poll statistics
-    const voteStatsResult = await client.query(
-      `SELECT 
-        COUNT(*) FILTER (WHERE vote_value = true) as votes_for,
-        COUNT(*) FILTER (WHERE vote_value = false) as votes_against,
-        COUNT(*) as total_voters
-       FROM votes 
-       WHERE poll_id = $1`,
-      [pollId]
+    const upsertResult = await client.query(
+      `INSERT INTO votes (poll_id, user_id, vote_value)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (poll_id, user_id)
+         WHERE user_id IS NOT NULL
+       DO UPDATE SET vote_value = EXCLUDED.vote_value, voted_at = NOW()
+       RETURNING (xmax = 0) AS inserted`,
+      [pollId, userId, vote_value]
     );
+    const voteWasNew: boolean = upsertResult.rows[0]?.inserted ?? true;
 
-    const stats = voteStatsResult.rows[0];
-
-    // Get votes_required from poll
-    const pollDetailsResult = await client.query(
-      `SELECT votes_required FROM polls WHERE poll_id = $1`,
-      [pollId]
-    );
-    const votesRequired = pollDetailsResult.rows[0].votes_required;
-
-    // Determine if poll should be marked as passed/failed
-    let newStatus = 'active';
-    if (parseInt(stats.votes_for) >= votesRequired) {
-      newStatus = 'passed';
-    } else if (parseInt(stats.votes_against) >= votesRequired) {
-      newStatus = 'failed';
-    }
-
-    // Update poll with new statistics and status
-    await client.query(
-      `UPDATE polls 
-       SET votes_for = $1, votes_against = $2, total_voters = $3, status = $4, updated_at = NOW()
-       WHERE poll_id = $5`,
-      [stats.votes_for, stats.votes_against, stats.total_voters, newStatus, pollId]
-    );
-
+    // 5. Commit — stats trigger updates counters only. Status resolution happens at expiry.
     await client.query('COMMIT');
 
-    // Get updated poll data
-    const updatedPoll = await query(
-      `SELECT p.*, 
-        u.name as creator_name,
-        tu.name as target_name
+    // 6. Read final poll state
+    const finalPoll = await query(
+      `SELECT p.*,
+              u.name  AS creator_name,
+              tu.name AS target_name
        FROM polls p
-       JOIN users u ON p.created_by = u.user_id
+       JOIN  users u  ON p.created_by      = u.user_id
        LEFT JOIN users tu ON p.target_user_id = tu.user_id
        WHERE p.poll_id = $1`,
       [pollId]
     );
+    const updatedPoll = finalPoll.rows[0];
 
-    // Emit socket event for real-time update
-    io.to(`group-${groupId}`).emit('poll-updated', updatedPoll.rows[0]);
+    // 7. Emit socket events
+    io.to(`group:${groupId}`).emit('poll-updated', updatedPoll);
 
     res.json({
       success: true,
-      message: voteCheck.rows.length > 0 ? 'Vote updated successfully' : 'Vote cast successfully',
-      data: {
-        poll: updatedPoll.rows[0],
-        user_vote: vote_value
-      }
+      message: voteWasNew ? 'Vote cast successfully' : 'Vote updated successfully',
+      data: { poll: updatedPoll, user_vote: vote_value },
     });
   } catch (error: any) {
     await client.query('ROLLBACK');
     console.error('Error voting on poll:', error);
-    throw error;
+    if (error instanceof ApiError) throw error;
+    throw new ApiError(500, error.message || 'Failed to cast vote');
   } finally {
     client.release();
   }
 };
+
+// ============================================================
+// Cancel a poll (creator or any admin)
+// ============================================================
+export const cancelPoll = async (req: Request, res: Response) => {
+  const { groupId, pollId } = req.params;
+  const { reason } = req.body;
+  const userId = req.user?.userId;
+
+  if (!userId) throw new ApiError(401, 'Unauthorized');
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Verify membership
+    const memberRow = await client.query(
+      `SELECT is_admin, is_owner FROM group_members
+       WHERE group_id = $1 AND user_id = $2`,
+      [groupId, userId]
+    );
+    if (memberRow.rows.length === 0) {
+      throw new ApiError(403, 'You are not a member of this group');
+    }
+    const { is_admin, is_owner } = memberRow.rows[0];
+
+    // Fetch poll
+    const pollRow = await client.query(
+      `SELECT poll_id, status, created_by FROM polls
+       WHERE poll_id = $1 AND group_id = $2`,
+      [pollId, groupId]
+    );
+    if (pollRow.rows.length === 0) {
+      throw new ApiError(404, 'Poll not found');
+    }
+    const poll = pollRow.rows[0];
+
+    if (poll.status !== 'active') {
+      throw new ApiError(400, `Cannot cancel a ${poll.status} poll`);
+    }
+
+    // Authorization: poll creator OR group admin/owner
+    const isCreator = poll.created_by === userId;
+    if (!isCreator && !is_admin && !is_owner) {
+      throw new ApiError(403, 'Only the poll creator or a group admin can cancel this poll');
+    }
+
+    await client.query(
+      `UPDATE polls
+       SET status = 'cancelled',
+           cancelled_by = $1,
+           cancellation_reason = $2,
+           updated_at = NOW()
+       WHERE poll_id = $3`,
+      [userId, reason?.trim() || null, pollId]
+    );
+
+    await client.query('COMMIT');
+
+    io.to(`group:${groupId}`).emit('poll-cancelled', {
+      poll_id: pollId,
+      group_id: groupId,
+      cancelled_by: userId,
+    });
+
+    res.json({
+      success: true,
+      message: 'Poll cancelled successfully',
+    });
+  } catch (error: any) {
+    await client.query('ROLLBACK');
+    console.error('Error cancelling poll:', error);
+    if (error instanceof ApiError) throw error;
+    throw new ApiError(500, error.message || 'Failed to cancel poll');
+  } finally {
+    client.release();
+  }
+};
+
+// ============================================================
+// Manually execute a passed (but not yet executed) poll — admins only
+// Useful if auto-execution failed for any reason.
+// ============================================================
+export const executePoll = async (req: Request, res: Response) => {
+  const { groupId, pollId } = req.params;
+  const userId = req.user?.userId;
+
+  if (!userId) throw new ApiError(401, 'Unauthorized');
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Admin only
+    const adminRow = await client.query(
+      `SELECT is_admin, is_owner FROM group_members
+       WHERE group_id = $1 AND user_id = $2`,
+      [groupId, userId]
+    );
+    if (adminRow.rows.length === 0) {
+      throw new ApiError(403, 'You are not a member of this group');
+    }
+    if (!adminRow.rows[0].is_admin && !adminRow.rows[0].is_owner) {
+      throw new ApiError(403, 'Only group admins can manually execute a poll');
+    }
+
+    // Fetch poll
+    const pollRow = await client.query(
+      `SELECT * FROM polls WHERE poll_id = $1 AND group_id = $2 FOR UPDATE`,
+      [pollId, groupId]
+    );
+    if (pollRow.rows.length === 0) {
+      throw new ApiError(404, 'Poll not found');
+    }
+    const poll = pollRow.rows[0];
+
+    if (poll.status !== 'passed') {
+      throw new ApiError(400, `Poll must be in 'passed' status to execute (current: ${poll.status})`);
+    }
+    if (poll.is_executed) {
+      throw new ApiError(400, 'This poll has already been executed');
+    }
+
+    // Re-fire the DB execution trigger fn_execute_passed_poll by toggling status.
+    // The trigger fires on: NEW.status='passed' AND OLD.status IS DISTINCT FROM 'passed'
+    // AND NEW.is_executed=FALSE — so we reset is_executed then do the toggle.
+    await client.query(
+      `UPDATE polls SET is_executed = FALSE, updated_at = NOW() WHERE poll_id = $1`,
+      [pollId]
+    );
+    await client.query(
+      `UPDATE polls SET status = 'active', updated_at = NOW() WHERE poll_id = $1`,
+      [pollId]
+    );
+    // This UPDATE fires fn_execute_passed_poll (BEFORE UPDATE OF status):
+    // does the DELETE/INSERT/is_executed=TRUE inside the same transaction.
+    await client.query(
+      `UPDATE polls SET status = 'passed', updated_at = NOW() WHERE poll_id = $1`,
+      [pollId]
+    );
+
+    await client.query('COMMIT');
+
+    // Read final state and emit socket events
+    const finalRow = await query(`SELECT * FROM polls WHERE poll_id = $1`, [pollId]);
+    const fp = finalRow.rows[0];
+
+    if (fp?.is_executed) {
+      if (fp.poll_type === 'kick_member' && fp.target_user_id) {
+        io.to(`group:${groupId}`).emit('member-removed', {
+          group_id: groupId,
+          user_id: fp.target_user_id,
+          reason: 'poll_manual_execute',
+          poll_id: pollId,
+        });
+      }
+      io.to(`group:${groupId}`).emit('poll-executed', {
+        poll_id: pollId,
+        group_id: groupId,
+        poll_type: fp.poll_type,
+        executed_at: fp.executed_at,
+      });
+    }
+
+    res.json({ success: true, message: 'Poll executed successfully' });
+  } catch (error: any) {
+    await client.query('ROLLBACK');
+    console.error('Error executing poll:', error);
+    if (error instanceof ApiError) throw error;
+    throw new ApiError(500, error.message || 'Failed to execute poll');
+  } finally {
+    client.release();
+  }
+};
+
 
 // Upload group picture (admins/owners only)
 export const uploadGroupPicture = async (req: Request, res: Response) => {

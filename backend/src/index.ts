@@ -6,6 +6,7 @@ import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { config } from './config/index.js';
+import { pool } from './lib/db.js';
 import authRoutes from './routes/auth.routes.js';
 import testRoutes from './routes/test.routes.js';
 import profileRoutes from './routes/profile.routes.js';
@@ -87,6 +88,71 @@ httpServer.listen(PORT, () => {
   console.log(`📝 Environment: ${config.server.nodeEnv}`);
   console.log(`🌐 Frontend URL: ${config.cors.frontendUrl}`);
   console.log(`⚡ Socket.io initialized`);
+
+  setInterval(async () => {
+    try {
+      // 1. Resolve active polls that have reached expires_at.
+      // Majority wins; ties resolved via random() coin toss.
+      const result = await pool.query<{
+        poll_id: string;
+        group_id: string;
+        status: string;
+        poll_type: string;
+        target_user_id: string | null;
+        is_executed: boolean;
+        executed_at: Date | null;
+        votes_for: number;
+        votes_against: number;
+        total_voters: number;
+        title: string;
+      }>(
+        `UPDATE polls
+         SET status = CASE 
+               WHEN votes_for > votes_against THEN 'passed'::VARCHAR
+               WHEN votes_against > votes_for THEN 'failed'::VARCHAR
+               ELSE (CASE WHEN random() < 0.5 THEN 'passed'::VARCHAR ELSE 'failed'::VARCHAR END)
+             END,
+             updated_at = NOW()
+         WHERE status = 'active' AND expires_at <= NOW()
+         RETURNING *`
+      );
+
+      // 2. Notify clients and handle socket side-effects
+      for (const poll of result.rows) {
+        const roomId = `group:${poll.group_id}`;
+
+        // Always notify the group that the poll state changed
+        io.to(roomId).emit('poll-updated', poll);
+
+        if (poll.status === 'passed' && poll.is_executed) {
+          // If the poll passed, the DB trigger fn_execute_passed_poll already
+          // handled the state change (kick/promote/etc.). Tell the clients.
+          if (poll.poll_type === 'kick_member' && poll.target_user_id) {
+            io.to(roomId).emit('member-removed', {
+              group_id: poll.group_id,
+              user_id: poll.target_user_id,
+              reason: 'poll_vote_expiry',
+              poll_id: poll.poll_id
+            });
+          }
+
+          io.to(roomId).emit('poll-executed', {
+            poll_id: poll.poll_id,
+            group_id: poll.group_id,
+            poll_type: poll.poll_type,
+            executed_at: poll.executed_at,
+          });
+        }
+      }
+
+      if (result.rows.length > 0) {
+        console.log(`[Poll Sweeper] Resolved ${result.rows.length} poll(s)`);
+      }
+    } catch (err) {
+      console.error('[Poll Sweeper] Error resolving polls:', err);
+    }
+  }, 60_000); // every 60 seconds
+  // ────────────────────────────────────────────────────────────────────────
 });
 
 export default app;

@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { 
+import {
   createGroup,
   getPublicGroups,
   getMyGroups,
@@ -16,6 +16,8 @@ import {
   createPoll,
   getGroupPolls,
   voteOnPoll,
+  cancelPoll,
+  executePoll,
   uploadGroupPicture,
   deleteGroupPicture,
   selectGroupPresetAvatar,
@@ -80,5 +82,7 @@ router.post('/:groupId/members/:memberId/promote', asyncHandler(promoteMemberToA
 router.post('/:groupId/polls', asyncHandler(createPoll));
 router.get('/:groupId/polls', asyncHandler(getGroupPolls));
 router.post('/:groupId/polls/:pollId/vote', asyncHandler(voteOnPoll));
+router.delete('/:groupId/polls/:pollId', asyncHandler(cancelPoll));       // creator or admin
+router.post('/:groupId/polls/:pollId/execute', asyncHandler(executePoll));      // admin-only manual trigger
 
 export default router;
