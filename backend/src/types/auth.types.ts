@@ -31,6 +31,8 @@ export interface SignupRequest {
   gender: 'male' | 'female' | 'other';
   branch: string;
   password: string;
+  publicKey?: string; // Standardized RSA public key (PEM)
+  encryptedPrivateKey?: string; // Standardized encrypted private key (salt:iv:ciphertext+tag)
 }
 
 export interface VerifyOTPRequest {

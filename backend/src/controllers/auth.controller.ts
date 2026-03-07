@@ -21,7 +21,7 @@ import { config } from '../config/index.js';
  */
 export async function signup(req: Request, res: Response) {
   try {
-    const { degreeType, rollNumber, name, gender, branch, password } = req.body as SignupRequest;
+    const { degreeType, rollNumber, name, gender, branch, password, publicKey, encryptedPrivateKey } = req.body as SignupRequest;
 
     // Validate inputs
     if (!degreeType || !rollNumber || !name || !gender || !branch || !password) {
@@ -100,6 +100,15 @@ export async function signup(req: Request, res: Response) {
     );
 
     const userId = newUser.rows[0].user_id;
+
+    // E2EE: Store client-provided keys
+    if (publicKey && encryptedPrivateKey) {
+      await pool.query(
+        `INSERT INTO user_encryption_keys (user_id, public_key, encrypted_private_key)
+         VALUES ($1, $2, $3)`,
+        [userId, publicKey, encryptedPrivateKey]
+      );
+    }
 
     // Generate OTP
     const otp = generateOTP();
@@ -352,9 +361,11 @@ export async function login(req: Request, res: Response) {
 
     if (isEmail) {
       // Login with email
-      query = `SELECT user_id, roll_no, name, branch, gender, is_verified, is_active, password_hash
-               FROM users
-               WHERE LOWER(email) = LOWER($1)`;
+      query = `SELECT u.user_id, u.roll_no, u.name, u.branch, u.gender, u.is_verified, u.is_active, u.password_hash,
+                      uek.encrypted_private_key
+               FROM users u
+               LEFT JOIN user_encryption_keys uek ON u.user_id = uek.user_id
+               WHERE LOWER(u.email) = LOWER($1)`;
       params = [rollNo];
     } else {
       // Login with roll number
@@ -364,9 +375,11 @@ export async function login(req: Request, res: Response) {
           message: 'Invalid roll number format'
         });
       }
-      query = `SELECT user_id, roll_no, name, branch, gender, is_verified, is_active, password_hash
-               FROM users
-               WHERE UPPER(roll_no) = UPPER($1)`;
+      query = `SELECT u.user_id, u.roll_no, u.name, u.branch, u.gender, u.is_verified, u.is_active, u.password_hash,
+                      uek.encrypted_private_key
+               FROM users u
+               LEFT JOIN user_encryption_keys uek ON u.user_id = uek.user_id
+               WHERE UPPER(u.roll_no) = UPPER($1)`;
       params = [rollNo];
     }
 
@@ -466,7 +479,8 @@ export async function login(req: Request, res: Response) {
           name: user.name,
           branch: user.branch,
           gender: user.gender,
-          isVerified: user.is_verified
+          isVerified: user.is_verified,
+          encryptedPrivateKey: user.encrypted_private_key
         }
       }
     });
@@ -713,7 +727,7 @@ export async function logout(req: Request, res: Response) {
 
     if (refreshToken) {
       const tokenHash = hashToken(refreshToken);
-      
+
       // Get user_id before deleting session
       const session = await pool.query(
         'SELECT user_id FROM user_sessions WHERE session_token = $1',

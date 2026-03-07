@@ -1,7 +1,23 @@
 import { Router } from 'express';
 import { authenticateToken } from '../middleware/auth.middleware.js';
 import { uploadImage, handleMulterError } from '../middleware/upload.middleware.js';
-import * as chatController from '../controllers/chat.controller.js';
+import {
+    sendChatRequest,
+    getChatRequests,
+    respondToChatRequest,
+    getOrCreateConversation,
+    getConversations,
+    getMessages,
+    sendMessage,
+    updateMessageStatus,
+    deleteMessage,
+    uploadChatImage,
+    blockUser,
+    unblockUser,
+    reportUser,
+    getParticipantPublicKeys,
+    storeSessionKeys
+} from '../controllers/chat.controller.js';
 
 /**
  * REGULAR CHAT ROUTES
@@ -15,28 +31,32 @@ const router = Router();
 router.use(authenticateToken);
 
 // Chat requests (legacy - now uses conversation creation directly)
-router.post('/request', chatController.sendChatRequest);
-router.get('/requests', chatController.getChatRequests);
-router.put('/request/:requestId', chatController.respondToChatRequest);
+router.post('/request', sendChatRequest);
+router.get('/requests', getChatRequests);
+router.put('/request/:requestId', respondToChatRequest);
 
 // Regular Conversations (non-anonymous)
-router.post('/conversation', chatController.getOrCreateConversation);
-router.get('/conversations', chatController.getConversations);
-router.get('/conversation/:conversationId/messages', chatController.getMessages);
+router.post('/conversation', getOrCreateConversation);
+router.get('/conversations', getConversations);
+router.get('/conversation/:conversationId/messages', getMessages);
 
 // Regular Messages
-router.post('/send', chatController.sendMessage);
-router.put('/message/:messageId/status', chatController.updateMessageStatus);
-router.delete('/message/:messageId', chatController.deleteMessage);
+router.post('/send', sendMessage);
+router.put('/message/:messageId/status', updateMessageStatus);
+router.delete('/message/:messageId', deleteMessage);
 
 // Image Upload
-router.post('/upload-image', uploadImage.single('image'), chatController.uploadChatImage, handleMulterError);
+router.post('/upload-image', uploadImage.single('image'), uploadChatImage, handleMulterError);
 
 // Block/Unblock
-router.post('/block/:conversationId', chatController.blockUser);
-router.delete('/unblock/:conversationId', chatController.unblockUser);
+router.post('/block/:conversationId', blockUser);
+router.delete('/unblock/:conversationId', unblockUser);
 
 // Report
-router.post('/report', chatController.reportUser);
+router.post('/report', reportUser);
+
+// E2EE
+router.get('/:conversationId/participants/keys', getParticipantPublicKeys);
+router.post('/keys', storeSessionKeys);
 
 export default router;

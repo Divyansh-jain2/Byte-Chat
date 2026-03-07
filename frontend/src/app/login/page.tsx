@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { authService } from '@/services/auth.service';
 import { useTheme } from '@/contexts/ThemeContext';
+import { decryptPrivateKey } from '@/utils/e2ee.utils';
 import './login.css';
 
 export default function LoginPage() {
@@ -49,10 +50,21 @@ export default function LoginPage() {
         password: formData.password
       });
 
-      if (response.success) {
+      if (response.success && response.data?.user) {
+        // E2EE: Decrypt and store private key
+        const user = response.data.user;
+        if (user.encryptedPrivateKey) {
+          try {
+            const privateKey = await decryptPrivateKey(user.encryptedPrivateKey, formData.password);
+            sessionStorage.setItem('decryptedPrivateKey', privateKey);
+          } catch (decryptErr) {
+            console.error('[E2EE] Failed to decrypt private key:', decryptErr);
+            // We don't block login if E2EE decryption fails here, but could show a warning later
+          }
+        }
         router.push('/dashboard');
       }
-    } 
+    }
     // catch (err: any) {
     //   setError(err.message || 'Login failed');
     // } 

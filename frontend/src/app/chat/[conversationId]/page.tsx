@@ -12,6 +12,17 @@ import { Theme } from 'emoji-picker-react';
 import Image from 'next/image';
 import MessageBubble from '@/components/MessageBubble';
 import { messageManagementService } from '@/services/message-management.service';
+import {
+  encryptMessageAES,
+  decryptMessageAES,
+  generateAESKey,
+  encryptKeyWithPublicKey,
+  decryptKeyWithPrivateKey,
+  // importPublicKey,
+  importPrivateKey,
+  exportKeyToBase64,
+  importKeyFromBase64
+} from '@/utils/e2ee.utils';
 
 // Dynamic import for emoji picker (client-side only)
 const EmojiPicker = dynamic(() => import('emoji-picker-react'), { ssr: false });
@@ -46,12 +57,19 @@ export default function ChatWindowPage() {
   const [anonymousIdentityId, setAnonymousIdentityId] = useState<string | null>(null);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const messageInputRef = useRef<HTMLInputElement>(null);
   const emojiPickerRef = useRef<HTMLDivElement>(null);
   const fetchingRef = useRef(false); // Prevent duplicate fetches
   const lastFetchRef = useRef(0); // Track last fetch time
+
+  // E2EE States
+  const [sessionKey, setSessionKey] = useState<CryptoKey | null>(null);
+  const [keyId, setKeyId] = useState<string | null>(null);
+  const [isE2EEReady, setIsE2EEReady] = useState(false);
+  const [userPrivateKey, setUserPrivateKey] = useState<CryptoKey | null>(null);
+
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const messageInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     scrollToBottom();
@@ -78,6 +96,139 @@ export default function ChatWindowPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
+  // E2EE: Initialize session key
+  const fetchAndDecryptConversationKey = useCallback(async (msgs: Message[]) => {
+    try {
+      const storedUser = localStorage.getItem('user');
+      const decryptedPrivateKeyB64 = sessionStorage.getItem('decryptedPrivateKey');
+
+      if (!decryptedPrivateKeyB64 || !storedUser) {
+        console.warn('[E2EE] Private key missing from session storage');
+        return null;
+      }
+
+      // const currentUserId = JSON.parse(storedUser).user_id;
+
+      // Import private key if not already done
+      let privKey = userPrivateKey;
+      if (!privKey && decryptedPrivateKeyB64) {
+        privKey = await importPrivateKey(decryptedPrivateKeyB64);
+        setUserPrivateKey(privKey);
+      }
+
+      if (!privKey) return null;
+
+      // Find the most recent message with a session key we can use
+      const msgWithKey = msgs.find(m => m.user_session_key && m.key_id);
+
+      if (msgWithKey && msgWithKey.user_session_key && msgWithKey.key_id) {
+        // Decrypt the session key to getting the base64 version
+        try {
+          console.log('[DEBUG] Decrypting session key for msg:', msgWithKey.message_id);
+          const aesKeyB64 = await decryptKeyWithPrivateKey(privKey, msgWithKey.user_session_key);
+          const aesKey = await importKeyFromBase64(aesKeyB64);
+          console.log('[DEBUG] Session key decrypted successfully');
+          setSessionKey(aesKey);
+          setKeyId(msgWithKey.key_id);
+          setIsE2EEReady(true);
+          return aesKey;
+        } catch (err) {
+          console.error('[E2EE] Failed to decrypt session key:', err);
+        }
+      }
+
+      // If no key found in messages, or decryption failed, try to initialize a new one
+      // But only if we have participants' public keys
+      const info = await chatService.getParticipantPublicKeys(conversationId);
+      const participants = info.participants;
+
+      // Generate new AES key
+      const newAesKey = await generateAESKey();
+
+      // Export new AES key to base64 for encryption
+      const aesKeyB64 = await exportKeyToBase64(newAesKey);
+
+      // Encrypt for all participants
+      const encryptedKeys = await Promise.all(participants.map(async (p: any) => {
+        const encrypted = await encryptKeyWithPublicKey(aesKeyB64, p.public_key);
+        return {
+          userId: p.user_id,
+          encryptedKey: encrypted,
+          keyVersion: 1
+        };
+      }));
+
+      // Store on server
+      const { keyId: newKeyId } = await chatService.storeSessionKeys({
+        conversationId,
+        keys: encryptedKeys
+      });
+
+      setSessionKey(newAesKey);
+      setKeyId(newKeyId);
+      setIsE2EEReady(true);
+      return newAesKey;
+    } catch (error) {
+      console.error('[E2EE] Session initialization failed:', error);
+    }
+  }, [conversationId, isAnonymous, userPrivateKey]);
+
+  const decryptMessages = useCallback(async (msgs: Message[], aesKey: CryptoKey) => {
+    console.log('[DEBUG] Starting decryptMessages for', msgs.length, 'messages');
+    return await Promise.all(msgs.map(async (m) => {
+      let decryptedMsg = { ...m };
+
+      if (m.encrypted_content && m.encrypted_content.length < 50) {
+        console.log('[DEBUG] msg to decrypt:', m.message_id, 'iv:', !!m.content_iv, 'tag:', !!m.content_auth_tag);
+      }
+
+      // Decrypt main content
+      if (m.encrypted_content && m.content_iv && m.content_auth_tag) {
+        try {
+          const decrypted = await decryptMessageAES(
+            m.encrypted_content,
+            m.content_iv,
+            m.content_auth_tag,
+            aesKey
+          );
+          decryptedMsg.encrypted_content = decrypted;
+        } catch (err) {
+          console.warn(`[E2EE] Failed to decrypt message ${m.message_id}:`, {
+            err,
+            content: m.encrypted_content?.substring(0, 10),
+            iv: m.content_iv,
+            tag: m.content_auth_tag
+          });
+          decryptedMsg.encrypted_content = '[Encrypted Message]';
+        }
+      }
+
+      // Decrypt parent message content if exists
+      if (m.parent_message && m.parent_message.encrypted_content && m.parent_message.content_iv && m.parent_message.content_auth_tag) {
+        try {
+          const decryptedParent = await decryptMessageAES(
+            m.parent_message.encrypted_content,
+            m.parent_message.content_iv,
+            m.parent_message.content_auth_tag,
+            aesKey
+          );
+          decryptedMsg.parent_message = {
+            ...m.parent_message,
+            encrypted_content: decryptedParent
+          };
+        } catch (err) {
+          console.warn(`[E2EE] Failed to decrypt parent of message ${m.message_id}:`, err);
+          decryptedMsg.parent_message = {
+            ...m.parent_message,
+            encrypted_content: '[Encrypted Quote]'
+          };
+        }
+      }
+
+      return decryptedMsg;
+    }));
+  }, []);
+
   const fetchMessages = useCallback(async () => {
     // Prevent duplicate fetches (debounce 500ms)
     const now = Date.now();
@@ -89,46 +240,51 @@ export default function ChatWindowPage() {
     lastFetchRef.current = now;
 
     try {
-      // First, try to fetch from regular chat
       let response;
       let conversationType: 'regular' | 'anonymous' = 'regular';
 
       try {
-        response = await chatService.getMessages(conversationId);
-      }
-      catch (regularError: unknown) {
-        // If 403/404, try anonymous chat
-        let status: number | undefined;
-        if (
-          typeof regularError === 'object' &&
-          regularError !== null &&
-          'response' in regularError &&
-          typeof (regularError as { response?: unknown }).response === 'object'
-        ) {
-          const resp = (regularError as { response: { status?: number } }).response;
-          status = resp.status;
-        }
+        // 1. First get participants and conversation type to avoid 403 console errors
+        console.log('[DEBUG] Fetching metadata for:', conversationId);
+        const info = await chatService.getParticipantPublicKeys(conversationId);
+        conversationType = info.isAnonymous ? 'anonymous' : 'regular';
 
-        if (status === 403 || status === 404) {
-          try {
-            response = await anonymousChatService.getAnonymousMessages(conversationId);
-            conversationType = 'anonymous';
-          } catch {
-            // If both fail, throw the original error
-            throw regularError;
-          }
+        if (conversationType === 'anonymous') {
+          console.log('[DEBUG] Calling anonymous service');
+          response = await anonymousChatService.getAnonymousMessages(conversationId);
         } else {
-          throw regularError;
+          console.log('[DEBUG] Calling regular service');
+          response = await chatService.getMessages(conversationId);
         }
       }
+      catch (fetchError: any) {
+        console.error('[ERROR] Initial fetch failed:', fetchError);
+        // Fallback or rethrow
+        throw fetchError;
+      }
 
-      setMessages(response.messages || []);
+      let fetchedMessages = Array.isArray(response) ? response : (response.messages || []);
+      console.log('[DEBUG] fetchedMessages count:', fetchedMessages.length);
+      if (fetchedMessages.length > 0) {
+        console.log('[DEBUG] First message keys:', Object.keys(fetchedMessages[0]));
+      }
+      setIsAnonymous(conversationType === 'anonymous');
 
-      // Use otherUser from API response
+      // E2EE handling - Enable for BOTH regular and anonymous
+      // Initialize even if 0 messages so the first message can be encrypted
+      console.log('[DEBUG] Initializing E2EE for chat, msgs count:', fetchedMessages.length);
+      const aesKey = await fetchAndDecryptConversationKey(fetchedMessages);
+      if (aesKey) {
+        console.log('[DEBUG] Decrypting messages with key');
+        fetchedMessages = await decryptMessages(fetchedMessages, aesKey);
+      } else {
+        console.log('[DEBUG] No AES key available for decryption');
+      }
+
+      setMessages(fetchedMessages);
+
       if (response.otherUser) {
         setOtherUser(response.otherUser);
-
-        // If anonymous conversation and viewing as receiver
         if (conversationType === 'anonymous' && response.otherUser.is_anonymous) {
           setIsViewingAnonymous(true);
           setAnonymousIdentityId(response.otherUser.identity_id || null);
@@ -140,41 +296,19 @@ export default function ChatWindowPage() {
         }
       }
 
-      // Set isAnonymous based on conversation type (not otherUser.is_anonymous)
-      // because sender sees real profile but conversation is still anonymous
-      setIsAnonymous(conversationType === 'anonymous');
-
-      // Check if conversation is blocked from conversation data
       if (response.conversation) {
         setIsBlocked(response.conversation.is_blocked || false);
       }
-
-      // console.log(`📱 Loaded ${conversationType} conversation:`, conversationId);
     }
-    catch (error: unknown) {
-      // Only log errors that aren't rate limiting (429)
-      let status: number | undefined;
-
-      if (
-        typeof error === 'object' &&
-        error !== null &&
-        'response' in error &&
-        typeof (error as { response?: unknown }).response === 'object'
-      ) {
-        const response = (error as { response: { status?: number } }).response;
-        status = response.status;
-
-        if (status !== 429) {
-          console.error('[ERROR] Failed to fetch messages:', error);
-
-          // Handle specific errors
-          if (status === 403) {
-            toast.error('You do not have access to this conversation.');
-            router.push('/chat');
-          } else if (status === 404) {
-            toast.error('Conversation not found.');
-            router.push('/chat');
-          }
+    catch (error: any) {
+      if (error.response?.status !== 429) {
+        console.error('[ERROR] Failed to fetch messages:', error);
+        if (error.response?.status === 403) {
+          toast.error('You do not have access to this conversation.');
+          router.push('/chat');
+        } else if (error.response?.status === 404) {
+          toast.error('Conversation not found.');
+          router.push('/chat');
         }
       }
     }
@@ -182,11 +316,8 @@ export default function ChatWindowPage() {
       setLoading(false);
       fetchingRef.current = false;
     }
-  }, [conversationId, router, toast]);
+  }, [conversationId, router, toast, fetchAndDecryptConversationKey, decryptMessages]);
 
-  // Main effect: fetch messages, handle socket join/leave, and loading timeout
-  // Removed 'loading' from dependencies to avoid unnecessary re-renders
-  // Ensure joinConversation/leaveConversation are stable (from context or useCallback)
   useEffect(() => {
     if (conversationId) {
       fetchMessages();
@@ -222,12 +353,32 @@ export default function ChatWindowPage() {
       console.log(data);
     };
 
-    const handleMessageEdited = (data: { messageId: string; newContent: string }) => {
-      // Update message in local state
+    const handleMessageEdited = async (data: {
+      messageId: string;
+      encryptedContent: string;
+      contentIv?: string;
+      contentAuthTag?: string;
+    }) => {
+      let finalContent = data.encryptedContent;
+
+      // Decrypt if E2EE is active and metadata is present
+      if (sessionKey && data.contentIv && data.contentAuthTag) {
+        try {
+          finalContent = await decryptMessageAES(
+            data.encryptedContent,
+            data.contentIv,
+            data.contentAuthTag,
+            sessionKey
+          );
+        } catch (err) {
+          console.error('[E2EE] Failed to decrypt socket edit:', err);
+        }
+      }
+
       setMessages(prev =>
         prev.map(msg =>
           msg.message_id === data.messageId
-            ? { ...msg, encrypted_content: data.newContent, is_edited: true, edited_at: new Date() }
+            ? { ...msg, encrypted_content: finalContent, is_edited: true, edited_at: new Date() }
             : msg
         )
       );
@@ -303,11 +454,31 @@ export default function ChatWindowPage() {
         }
       }
 
+      let finalContent = newMessage.trim() || 'Image';
+      let contentIv = 'dummy_iv';
+      let contentAuthTag = 'dummy_tag';
+
+      // E2EE: Encrypt message content
+      if (isE2EEReady && sessionKey) {
+        try {
+          const { ciphertext, iv, authTag } = await encryptMessageAES(finalContent, sessionKey);
+          finalContent = ciphertext;
+          contentIv = iv;
+          contentAuthTag = authTag;
+        }
+        catch (err) {
+          console.error('[E2EE] Encryption failed:', err);
+          toast.error('Failed to encrypt message securely');
+          setSending(false);
+          return;
+        }
+      }
+
       const messageData = {
         conversationId: conversationId,
-        encryptedContent: newMessage.trim() || 'Image',
-        contentIv: 'dummy_iv',
-        contentAuthTag: 'dummy_tag',
+        encryptedContent: finalContent,
+        contentIv,
+        contentAuthTag,
         messageType: selectedImage ? 'image' : 'text',
         ...(mediaUrl && {
           mediaUrl,
@@ -317,6 +488,7 @@ export default function ChatWindowPage() {
         ...(replyingTo && {
           parentMessageId: replyingTo.message_id,
         }),
+        keyId: keyId || undefined
       };
 
       // Use the correct service based on conversation type
@@ -455,11 +627,30 @@ export default function ChatWindowPage() {
         toast.error('Authentication required');
         return;
       }
+
+      let finalContent = newContent;
+      let contentIv = 'dummy_iv';
+      let contentAuthTag = 'dummy_tag';
+
+      // E2EE: Encrypt edited message content
+      if (isE2EEReady && sessionKey) {
+        try {
+          const { ciphertext, iv, authTag } = await encryptMessageAES(newContent, sessionKey);
+          finalContent = ciphertext;
+          contentIv = iv;
+          contentAuthTag = authTag;
+        } catch (err) {
+          console.error('[E2EE] Edit encryption failed:', err);
+          toast.error('Failed to encrypt edited message');
+          return;
+        }
+      }
+
       await messageManagementService.editMessage(
         messageId,
-        newContent,
-        'dummy_iv',
-        'dummy_tag',
+        finalContent,
+        contentIv,
+        contentAuthTag,
         token
       );
       toast.success('Message edited');
@@ -468,7 +659,7 @@ export default function ChatWindowPage() {
       console.error('Failed to edit message:', error);
       toast.error('Failed to edit message');
     }
-  }, [fetchMessages, toast]);
+  }, [fetchMessages, toast, isAnonymous, isE2EEReady, sessionKey]);
 
   const handleDelete = useCallback(async (messageId: string, deleteForEveryone: boolean) => {
     try {
@@ -562,15 +753,23 @@ export default function ChatWindowPage() {
   useEffect(() => {
     if (!socket) return;
 
-    const handleNewMessage = (message: Message) => {
+    const handleNewMessage = async (message: Message) => {
       // Add is_my_message flag
       const userStr = localStorage.getItem('user');
       const currentUserId = userStr ? JSON.parse(userStr).user_id : null;
 
-      setMessages((prev) => [...prev, {
+      let processedMessage = {
         ...message,
         is_my_message: message.sender_id === currentUserId,
-      }]);
+      };
+
+      // Decrypt if E2EE is ready
+      if (sessionKey) {
+        const decryptedArray = await decryptMessages([processedMessage], sessionKey);
+        processedMessage = decryptedArray[0];
+      }
+
+      setMessages((prev) => [...prev, processedMessage]);
     };
 
     const handleTyping = ({ userId, isTyping }: { userId: string; isTyping: boolean }) => {

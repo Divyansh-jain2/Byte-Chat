@@ -37,6 +37,8 @@ export interface User {
   branch: string;
   gender: 'male' | 'female' | 'other';
   isVerified: boolean;
+  publicKey?: string;
+  encryptedPrivateKey?: string;
 }
 
 // Auth request/response types
@@ -47,6 +49,8 @@ export interface SignupRequest {
   gender: 'male' | 'female' | 'other';
   branch: string;
   password: string;
+  publicKey?: string;
+  encryptedPrivateKey?: string;
 }
 
 export interface VerifyOTPRequest {

@@ -28,14 +28,14 @@ export default function ChatPage() {
         chatService.getConversations(),
         anonymousChatService.getAnonymousConversations()
       ]);
-      
+
       // Combine and sort by last_message_at
       const combined = [...regularData, ...anonymousData].sort((a, b) => {
         const dateA = new Date(a.last_message_at || a.created_at).getTime();
         const dateB = new Date(b.last_message_at || b.created_at).getTime();
         return dateB - dateA;
       });
-      
+
       setConversations(combined);
     } catch (error) {
       console.error('Failed to fetch conversations:', error);
@@ -78,7 +78,7 @@ export default function ChatPage() {
     const now = new Date();
     const diff = now.getTime() - d.getTime();
     const hours = Math.floor(diff / (1000 * 60 * 60));
-    
+
     if (hours < 1) return 'Just now';
     if (hours < 24) return `${hours}h ago`;
     if (hours < 48) return 'Yesterday';
@@ -155,11 +155,11 @@ export default function ChatPage() {
                 <p className="text-sm mb-5" style={{ color: 'var(--muted)' }}>Start chatting with someone!</p>
                 <Link href="/dashboard" className="btn-romance px-6 py-2.5 text-sm font-semibold inline-block">Find people →</Link>
               </div>
-            ) : conversations.map((conv) => (
+            ) : conversations.map((conv, index) => (
               <Link key={conv.conversation_id} href={`/chat/${conv.conversation_id}`} className="glass-card rounded-2xl p-4 flex items-center gap-4 no-underline">
                 <div className="relative shrink-0">
                   {conv.other_user_dp ? (
-                    <Image src={conv.other_user_dp} alt={conv.other_user_name} width={48} height={48} className="w-12 h-12 rounded-full object-cover ring-2 ring-white/50" />
+                    <Image src={conv.other_user_dp} alt={conv.other_user_name} width={48} height={48} className="w-12 h-12 rounded-full object-cover ring-2 ring-white/50" priority={index < 5} />
                   ) : (
                     <div className="w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-lg" style={{ background: conv.is_anonymous ? 'var(--grad-mystery)' : 'var(--grad-romance)' }}>
                       {conv.is_anonymous ? '?' : conv.other_user_name.charAt(0).toUpperCase()}
@@ -197,11 +197,11 @@ export default function ChatPage() {
                 <p className="font-semibold" style={{ color: 'var(--heading)' }}>No pending requests</p>
                 <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>You`re all caught up!</p>
               </div>
-            ) : chatRequests.map((request) => (
+            ) : chatRequests.map((request, index) => (
               <div key={request.request_id} className="glass-card rounded-2xl p-4 flex items-center gap-4">
                 <div className="shrink-0">
                   {request.sender_dp_url ? (
-                    <Image src={request.sender_dp_url} alt={request.sender_display_name} width={48} height={48} className="w-12 h-12 rounded-full object-cover" />
+                    <Image src={request.sender_dp_url} alt={request.sender_display_name} width={48} height={48} className="w-12 h-12 rounded-full object-cover" priority={index < 3} />
                   ) : (
                     <div className="w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-lg" style={{ background: request.request_type === 'anonymous' ? 'var(--grad-mystery)' : 'var(--grad-romance)' }}>
                       {request.sender_display_name.charAt(0).toUpperCase()}

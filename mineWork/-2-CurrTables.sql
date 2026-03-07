@@ -4597,11 +4597,9 @@ TRUNCATE TABLE
   public.chat_messages,
   public.media_uploads,
   public.chat_session_keys,
-  public.chat_requests,
   public.chat_conversations,
   public.anonymous_identities,
   public.group_members,
-  public.group_invites,
   public.group_bans,
   public.votes,
   public.polls,
@@ -4614,7 +4612,14 @@ TRUNCATE TABLE
   public.user_settings,
   public.user_password_resets,
   public.groups,
-  public.users
+  public.users,
+  public.group_session_keys,
+  public.message_edit_history,
+  public.message_reactions,
+  public.poll_options,
+  public.user_blocks,
+  public.chat_requests,
+  public.group_invites
 RESTART IDENTITY CASCADE;
 
 SELECT
@@ -4666,6 +4671,42 @@ WHERE tc.constraint_type = 'FOREIGN KEY'
   AND tc.table_schema = 'public'
 ORDER BY tc.table_name, tc.constraint_name;
 
+SELECT 
+    table_name,
+    column_name,
+    data_type,
+    is_nullable,
+    column_default
+FROM information_schema.columns
+WHERE table_schema = 'public'
+AND table_name IN (
+  'message_status',
+  'chat_messages',
+  'media_uploads',
+  'chat_session_keys',
+  'chat_conversations',
+  'anonymous_identities',
+  'group_members',
+  'group_bans',
+  'votes',
+  'polls',
+  'reports',
+  'system_notifications',
+  'audit_logs',
+  'user_encryption_keys',
+  'user_verifications',
+  'user_sessions',
+  'user_settings',
+  'user_password_resets',
+  'groups',
+  'users',
+  'group_session_keys',
+  'message_edit_history',
+  'message_reactions',
+  'poll_options',
+  'user_blocks'
+)
+ORDER BY table_name, ordinal_position;
 
 -- ========================================
 -- Migration: Allow 3 conversations between same users
@@ -6154,6 +6195,400 @@ CHECK (poll_type IN (
 ALTER TABLE votes ALTER COLUMN vote_value DROP NOT NULL;
 
 -- ==============================================================================
---                    6th March, :30AM
+--                    7th March, 5:30PM
 -- ==============================================================================
 
+-- ========== GROUP_INVITES TABLE RECREATION ==========
+-- Extracted from -2-CurrTables.sql
+
+CREATE TABLE IF NOT EXISTS group_invites (
+    invite_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    group_id UUID NOT NULL REFERENCES groups(group_id) ON DELETE CASCADE,
+    invited_by UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    invitee_id UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    
+    invite_token VARCHAR(255) UNIQUE,
+    invite_type VARCHAR(20) DEFAULT 'private' CHECK (invite_type IN ('private', 'public_link')),
+
+    status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'rejected', 'expired')),
+    expires_at TIMESTAMPTZ DEFAULT (NOW() + INTERVAL '30 days'),
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Unique constraint for pending invites
+CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_pending_invite 
+ON group_invites(group_id, invitee_id) 
+WHERE status = 'pending';
+
+-- Indexes for performance
+CREATE INDEX IF NOT EXISTS idx_group_invites_invitee ON group_invites(invitee_id, status);
+CREATE INDEX IF NOT EXISTS idx_group_invites_group ON group_invites(group_id, status);
+CREATE INDEX IF NOT EXISTS idx_group_invites_inviter ON group_invites(invited_by);
+CREATE INDEX IF NOT EXISTS idx_group_invites_expires ON group_invites(expires_at);
+
+-- ROW LEVEL SECURITY (RLS)
+ALTER TABLE group_invites ENABLE ROW LEVEL SECURITY;
+
+-- POLICIES
+
+-- Users can view invites sent to them
+CREATE POLICY "Users can view own invites" ON group_invites
+    FOR SELECT USING (auth.uid()::text = invitee_id::text);
+
+-- Inviters can view invites they sent
+CREATE POLICY "Inviters can view sent invites" ON group_invites
+    FOR SELECT USING (auth.uid()::text = invited_by::text);
+
+-- Group admins can view all invites for their group
+CREATE POLICY "Admins can view group invites" ON group_invites
+    FOR SELECT USING (
+        EXISTS (
+            SELECT 1 FROM group_members gm
+            WHERE gm.group_id = group_invites.group_id 
+            AND gm.user_id::text = auth.uid()::text
+            AND (gm.is_admin = TRUE OR gm.is_owner = TRUE)
+        )
+    );
+
+-- Only group admins can create invites
+CREATE POLICY "Admins can create invites" ON group_invites
+    FOR INSERT WITH CHECK (
+        EXISTS (
+            SELECT 1 FROM group_members gm
+            WHERE gm.group_id = group_invites.group_id 
+            AND gm.user_id::text = auth.uid()::text
+            AND (gm.is_admin = TRUE OR gm.is_owner = TRUE)
+        )
+    );
+
+-- Invitees can accept/reject their invites
+CREATE POLICY "Invitees can respond to invites" ON group_invites
+    FOR UPDATE USING (auth.uid()::text = invitee_id::text)
+    WITH CHECK (auth.uid()::text = invitee_id::text);
+
+-- Admins can cancel their invites
+CREATE POLICY "Admins can cancel invites" ON group_invites
+    FOR DELETE USING (
+        EXISTS (
+            SELECT 1 FROM group_members gm
+            WHERE gm.group_id = group_invites.group_id 
+            AND gm.user_id::text = auth.uid()::text
+            AND (gm.is_admin = TRUE OR gm.is_owner = TRUE)
+        )
+    );
+
+
+-- ==============================================================================
+--                    7th March, 5:30PM
+-- ==============================================================================
+
+-- ========== CHAT_REQUESTS TABLE RECREATION ==========
+-- Extracted from -2-CurrTables.sql
+
+-- 1. Create the table
+CREATE TABLE IF NOT EXISTS chat_requests (
+    request_id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    sender_id UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    receiver_id UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    request_type VARCHAR(20) DEFAULT 'normal' CHECK (request_type IN ('normal', 'anonymous')),
+    anonymous_identity_id UUID REFERENCES anonymous_identities(identity_id) ON DELETE SET NULL,
+    status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'rejected', 'blocked', 'expired')),
+    expires_at TIMESTAMPTZ DEFAULT (NOW() + INTERVAL '24 hours'),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 2. Create partial UNIQUE index for pending requests
+CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_pending_request 
+ON chat_requests(sender_id, receiver_id, request_type) 
+WHERE status = 'pending';
+
+-- 3. Create performance indexes
+CREATE INDEX IF NOT EXISTS idx_chat_requests_receiver ON chat_requests(receiver_id, status);
+CREATE INDEX IF NOT EXISTS idx_chat_requests_sender ON chat_requests(sender_id, status);
+CREATE INDEX IF NOT EXISTS idx_chat_requests_type ON chat_requests(request_type);
+CREATE INDEX IF NOT EXISTS idx_chat_requests_expires ON chat_requests(expires_at);
+CREATE INDEX IF NOT EXISTS idx_chat_requests_created ON chat_requests(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_chat_requests_sender_receiver ON chat_requests(sender_id, receiver_id);
+
+-- 4. Triggers and Functions
+
+-- Updated At Trigger
+CREATE TRIGGER update_chat_requests_updated_at 
+BEFORE UPDATE ON chat_requests 
+FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- Auto-expire requests
+CREATE OR REPLACE FUNCTION expire_old_requests()
+RETURNS TRIGGER AS $$
+BEGIN
+    UPDATE chat_requests 
+    SET status = 'expired',
+        updated_at = NOW()
+    WHERE status = 'pending'
+    AND expires_at <= NOW();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER check_expired_requests 
+BEFORE INSERT OR UPDATE ON chat_requests 
+FOR EACH ROW EXECUTE FUNCTION expire_old_requests();
+
+-- Handle Accepted Request (Create Conversation)
+CREATE OR REPLACE FUNCTION create_conversation_on_accept()
+RETURNS TRIGGER AS $$
+DECLARE
+    chat_conversations_exists BOOLEAN;
+    system_notifications_exists BOOLEAN;
+BEGIN
+    IF NEW.status = 'accepted' AND OLD.status != 'accepted' THEN
+        SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'chat_conversations') INTO chat_conversations_exists;
+        
+        IF chat_conversations_exists THEN
+            INSERT INTO chat_conversations (user1_id, user2_id, is_anonymous, anonymous_initiator_id, is_accepted)
+            VALUES (
+                LEAST(NEW.sender_id, NEW.receiver_id),
+                GREATEST(NEW.sender_id, NEW.receiver_id),
+                NEW.request_type = 'anonymous',
+                CASE WHEN NEW.request_type = 'anonymous' THEN NEW.sender_id ELSE NULL END,
+                TRUE
+            )
+            ON CONFLICT (user1_id, user2_id) 
+            DO UPDATE SET 
+                is_accepted = TRUE,
+                is_anonymous = NEW.request_type = 'anonymous',
+                anonymous_initiator_id = CASE WHEN NEW.request_type = 'anonymous' THEN NEW.sender_id ELSE NULL END,
+                updated_at = NOW();
+        END IF;
+        
+        SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'system_notifications') INTO system_notifications_exists;
+        
+        IF system_notifications_exists THEN
+            INSERT INTO system_notifications (user_id, notification_type, title, body, data)
+            VALUES (
+                NEW.sender_id,
+                'chat_request',
+                'Chat request accepted',
+                'Your chat request has been accepted.',
+                jsonb_build_object('request_id', NEW.request_id,'receiver_id', NEW.receiver_id,'accepted_at', NOW())
+            );
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER handle_accepted_request 
+AFTER UPDATE ON chat_requests 
+FOR EACH ROW EXECUTE FUNCTION create_conversation_on_accept();
+
+-- 5. Row Level Security (RLS)
+ALTER TABLE chat_requests ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can view own requests" ON chat_requests
+    FOR SELECT USING (sender_id::text = auth.uid()::text OR receiver_id::text = auth.uid()::text);
+
+CREATE POLICY "Users can send requests" ON chat_requests
+    FOR INSERT WITH CHECK (sender_id::text = auth.uid()::text);
+
+CREATE POLICY "Receivers can respond to requests" ON chat_requests
+    FOR UPDATE USING (receiver_id::text = auth.uid()::text)
+    WITH CHECK (receiver_id::text = auth.uid()::text);
+
+CREATE POLICY "Senders can cancel requests" ON chat_requests
+    FOR DELETE USING (sender_id::text = auth.uid()::text AND status = 'pending');
+
+-- 6. Helper Functions
+
+-- Send Chat Request
+CREATE OR REPLACE FUNCTION send_chat_request(
+    p_sender_id UUID,
+    p_receiver_id UUID,
+    p_request_type VARCHAR DEFAULT 'normal',
+    p_anonymous_identity_id UUID DEFAULT NULL
+)
+RETURNS UUID AS $$
+DECLARE
+    v_request_id UUID;
+    v_blocked BOOLEAN;
+    user_blocks_exists BOOLEAN;
+    system_notifications_exists BOOLEAN;
+BEGIN
+    SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'user_blocks') INTO user_blocks_exists;
+    IF user_blocks_exists THEN
+        SELECT EXISTS (SELECT 1 FROM user_blocks WHERE (blocker_id = p_receiver_id AND blocked_id = p_sender_id) OR (blocker_id = p_sender_id AND blocked_id = p_receiver_id)) INTO v_blocked;
+        IF v_blocked THEN RAISE EXCEPTION 'Cannot send request: user is blocked'; END IF;
+    END IF;
+    
+    IF EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'chat_conversations') AND EXISTS (SELECT 1 FROM chat_conversations WHERE (user1_id = LEAST(p_sender_id, p_receiver_id) AND user2_id = GREATEST(p_sender_id, p_receiver_id)) AND is_accepted = TRUE) THEN
+        RAISE EXCEPTION 'Already have an active conversation';
+    END IF;
+    
+    INSERT INTO chat_requests (sender_id, receiver_id, request_type, anonymous_identity_id, status, expires_at)
+    VALUES (p_sender_id, p_receiver_id, p_request_type, p_anonymous_identity_id, 'pending', NOW() + INTERVAL '24 hours')
+    ON CONFLICT (sender_id, receiver_id, request_type) WHERE status = 'pending'
+    DO UPDATE SET anonymous_identity_id = EXCLUDED.anonymous_identity_id, expires_at = EXCLUDED.expires_at, updated_at = NOW()
+    RETURNING request_id INTO v_request_id;
+    
+    SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'system_notifications') INTO system_notifications_exists;
+    IF system_notifications_exists THEN
+        INSERT INTO system_notifications (user_id, notification_type, title, body, data)
+        VALUES (p_receiver_id, 'chat_request', CASE WHEN p_request_type = 'anonymous' THEN 'Anonymous chat request' ELSE 'New chat request' END, CASE WHEN p_request_type = 'anonymous' THEN 'You have received an anonymous chat request' ELSE 'You have received a chat request' END, jsonb_build_object('request_id', v_request_id,'sender_id', p_sender_id,'request_type', p_request_type,'received_at', NOW()));
+    END IF;
+    RETURN v_request_id;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Get Pending Requests
+CREATE OR REPLACE FUNCTION get_pending_requests(p_user_id UUID)
+RETURNS TABLE (
+    request_id UUID, sender_id UUID, receiver_id UUID, request_type VARCHAR, anonymous_identity_id UUID, anonymous_display_gender VARCHAR, created_at TIMESTAMPTZ, expires_at TIMESTAMPTZ
+) AS $$
+DECLARE
+    anonymous_identities_exists BOOLEAN;
+BEGIN
+    SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'anonymous_identities') INTO anonymous_identities_exists;
+    IF anonymous_identities_exists THEN
+        RETURN QUERY SELECT cr.request_id, cr.sender_id, cr.receiver_id, cr.request_type, cr.anonymous_identity_id, ai.display_gender, cr.created_at, cr.expires_at FROM chat_requests cr LEFT JOIN anonymous_identities ai ON cr.anonymous_identity_id = ai.identity_id WHERE cr.receiver_id = p_user_id AND cr.status = 'pending' ORDER BY cr.created_at DESC;
+    ELSE
+        RETURN QUERY SELECT cr.request_id, cr.sender_id, cr.receiver_id, cr.request_type, cr.anonymous_identity_id, NULL::VARCHAR as display_gender, cr.created_at, cr.expires_at FROM chat_requests cr WHERE cr.receiver_id = p_user_id AND cr.status = 'pending' ORDER BY cr.created_at DESC;
+    END IF;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+
+-- ==============================================================================
+--                    7th March, 5:50PM
+-- ==============================================================================
+
+ALTER TABLE chat_session_keys ALTER COLUMN aes_key_iv DROP NOT NULL;
+
+
+-- ==============================================================================
+--                    7th March, 7:20PM
+-- ==============================================================================
+
+
+-- Migration: Fix chat_session_keys duplicate key error
+-- Purpose: 
+-- 1. session_key_id should not be the primary key because one session key is encrypted multiple times (once for each participant).
+-- 2. aes_key_iv is made nullable as it's not used in current RSA-OAEP implementation.
+
+BEGIN;
+
+-- 1. Drop the foreign key constraint from chat_messages that references session_key_id
+ALTER TABLE chat_messages DROP CONSTRAINT IF EXISTS fk_chat_messages_session_key;
+
+-- 2. Modify chat_session_keys table
+-- We'll create a new primary key 'id' and make 'session_key_id' a regular column (part of a composite unique constraint)
+ALTER TABLE chat_session_keys DROP CONSTRAINT IF EXISTS chat_session_keys_pkey;
+
+-- Add a new surrogate primary key if it doesn't exist (using 'id' to avoid confusion)
+ALTER TABLE chat_session_keys ADD COLUMN IF NOT EXISTS id UUID DEFAULT gen_random_uuid();
+-- Set it as primary key
+-- Note: If data exists, we might need more complex migration, but assuming we can reset or it's early stage.
+-- If 'id' was just added, it will have unique values.
+ALTER TABLE chat_session_keys ADD PRIMARY KEY (id);
+
+-- 3. Make aes_key_iv nullable
+ALTER TABLE chat_session_keys ALTER COLUMN aes_key_iv DROP NOT NULL;
+
+-- 4. Add a composite unique constraint to prevent duplicate keys for the SAME user in the SAME session
+ALTER TABLE chat_session_keys ADD CONSTRAINT chat_session_keys_unique_user_key UNIQUE (session_key_id, encrypted_for_user_id);
+
+-- 5. Restore the foreign key on chat_messages
+-- Now referencing the session_key_id (which is no longer a PK, but since it's used as a grouping ID, it's fine as long as we use it correctly)
+-- Actually, a foreign key usually references a unique/primary key.
+-- Since session_key_id is not unique on its own anymore, we might have issues with a standard FK.
+-- However, we can use a standard index or just keep it as a logical reference.
+-- If we want a strict FK, we'd need a 'master_session_keys' table.
+-- Given the current architecture, we'll keep it as a logical reference or reference the new 'id' if needed.
+-- But the code uses session_key_id. 
+-- Let's add an index for performance.
+CREATE INDEX IF NOT EXISTS idx_chat_session_keys_grouping ON chat_session_keys(session_key_id);
+
+-- Re-adding the FK might fail if session_key_id is not unique. 
+-- In Postgres, a FK must reference a unique constraint.
+-- Let's check if we should reference the composite key or just leave it as an indexed UUID.
+-- For now, let's not re-add the constraint as a strict FK to avoid errors, and rely on the index.
+-- OR we can point it to a unique index on session_key_id if we designate ONE row as master, but that's messy.
+-- Better: chat_messages.key_id just stores the session_key_id.
+
+COMMIT;
+
+-- ==============================================================================
+--                    7th March, 7:40PM
+-- ==============================================================================
+
+-- Migration: Fix chat_session_keys duplicate key error (Part 2)
+-- Purpose: 
+-- 1. Drop overly restrictive unique constraints that prevent having multiple session keys per conversation.
+-- 2. Continue with the surrogate primary key 'id' to fix the PK violation.
+
+BEGIN;
+
+-- 1. Drop restrictive unique constraints if they exist
+-- These are often named automatically by Postgres if not specified.
+-- Based on the error log, the name is 'chat_session_keys_conversation_id_encrypted_for_user_id_key'
+ALTER TABLE chat_session_keys DROP CONSTRAINT IF EXISTS chat_session_keys_conversation_id_encrypted_for_user_id_key;
+ALTER TABLE chat_session_keys DROP CONSTRAINT IF EXISTS chat_session_keys_group_id_encrypted_for_user_id_key;
+
+-- Also drop them if they were defined without a specific name (Postgres might have used a different naming pattern)
+-- But usually, we can target them by name from the error.
+
+-- 2. Re-ensure our composite unique constraint (which is the correct one for E2EE)
+-- This allows multiple session keys per conversation, but only ONE record per (session_key, user)
+ALTER TABLE chat_session_keys DROP CONSTRAINT IF EXISTS chat_session_keys_unique_user_key;
+ALTER TABLE chat_session_keys ADD CONSTRAINT chat_session_keys_unique_user_key UNIQUE (session_key_id, encrypted_for_user_id);
+
+-- 3. Ensure PK is correctly set to 'id'
+-- (In case the previous migration partially succeeded or needs to be re-run cleanly)
+DO $$ 
+BEGIN
+    -- Drop old PK constraint if it's still session_key_id
+    IF EXISTS (
+        SELECT 1 FROM information_schema.table_constraints 
+        WHERE table_name='chat_session_keys' AND constraint_type='PRIMARY KEY'
+        AND constraint_name != 'chat_session_keys_pkey_new' -- just a placeholder
+    ) THEN
+        ALTER TABLE chat_session_keys DROP CONSTRAINT IF EXISTS chat_session_keys_pkey;
+    END IF;
+
+    -- Add surrogate id column if missing
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='chat_session_keys' AND column_name='id') THEN
+        ALTER TABLE chat_session_keys ADD COLUMN id UUID DEFAULT gen_random_uuid();
+    END IF;
+END $$;
+
+-- Set the new PK
+ALTER TABLE chat_session_keys ADD PRIMARY KEY (id);
+
+-- 4. Final check on nulability
+ALTER TABLE chat_session_keys ALTER COLUMN aes_key_iv DROP NOT NULL;
+
+COMMIT;
+
+-- ==============================================================================
+--                    7th March, 5:30PM
+-- ==============================================================================
+
+-- ==============================================================================
+--                    7th March, 5:30PM
+-- ==============================================================================
+
+-- ==============================================================================
+--                    7th March, 5:30PM
+-- ==============================================================================
+
+-- ==============================================================================
+--                    7th March, 5:30PM
+-- ==============================================================================
+
+-- ==============================================================================
+--                    7th March, 5:30PM
+-- ==============================================================================
+
+-- ==============================================================================
+--                    7th March, 5:30PM
+-- ==============================================================================

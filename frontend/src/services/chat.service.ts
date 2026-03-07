@@ -130,4 +130,20 @@ export const chatService = {
     });
     return response.data;
   },
+
+  // Get participant public keys for E2EE
+  async getParticipantPublicKeys(conversationId: string) {
+    const response = await api.get(`/${conversationId}/participants/keys`);
+    return response.data.data;
+  },
+
+  // Store encrypted session keys
+  async storeSessionKeys(data: {
+    conversationId?: string;
+    groupId?: string;
+    keys: Array<{ userId: string; encryptedKey: string; keyVersion: number }>;
+  }) {
+    const response = await api.post('/keys', data);
+    return response.data.data;
+  },
 };

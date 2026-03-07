@@ -13,6 +13,7 @@ interface AvatarProps {
   className?: string;
   showOnlineStatus?: boolean;
   isOnline?: boolean;
+  priority?: boolean;
 }
 
 const sizeClasses = {
@@ -34,6 +35,7 @@ export default function Avatar({
   className = '',
   showOnlineStatus = false,
   isOnline = false,
+  priority = false,
 }: AvatarProps) {
   const avatarUrl = getUserAvatar(dpUrl || null, gender);
   const sizeClass = sizeClasses[size];
@@ -46,18 +48,18 @@ export default function Avatar({
         width={200}
         height={200}
         className={`${sizeClass} rounded-full object-cover border-2 border-gray-200`}
+        priority={priority}
         onError={(e) => {
           const target = e.target as HTMLImageElement;
           target.src = getUserAvatar(null, gender);
         }}
       />
-      
+
       {/* Online status indicator */}
       {showOnlineStatus && (
         <span
-          className={`absolute bottom-0 right-0 block rounded-full border-2 border-white ${
-            size === 'sm' ? 'w-2 h-2' : size === 'md' ? 'w-3 h-3' : 'w-4 h-4'
-          } ${isOnline ? 'bg-green-500' : 'bg-gray-400'}`}
+          className={`absolute bottom-0 right-0 block rounded-full border-2 border-white ${size === 'sm' ? 'w-2 h-2' : size === 'md' ? 'w-3 h-3' : 'w-4 h-4'
+            } ${isOnline ? 'bg-green-500' : 'bg-gray-400'}`}
         />
       )}
     </div>
@@ -72,15 +74,16 @@ interface GroupAvatarProps {
   groupName: string;
   size?: 'sm' | 'md' | 'lg' | 'xl';
   className?: string;
+  priority?: boolean;
 }
 
 export function GroupAvatar({ groupDpUrl, groupName,
-  size = 'md', className = '', }: GroupAvatarProps) {
+  size = 'md', className = '', priority = false, }: GroupAvatarProps) {
   const sizeClass = sizeClasses[size];
   const defaultGroupImage = `https://ui-avatars.com/api/?name=${encodeURIComponent(groupName)}&background=random&color=fff&size=200`;
   const [src, setSrc] = useState(groupDpUrl || defaultGroupImage);
 
-return (
+  return (
     <div className={`relative inline-block ${className}`}>
       <Image
         src={src}
@@ -88,6 +91,7 @@ return (
         width={200}
         height={200}
         className={`${sizeClass} rounded-full object-cover border-2 border-gray-200`}
+        priority={priority}
         onError={() => setSrc(defaultGroupImage)}
       />
     </div>
@@ -111,6 +115,7 @@ export function AvatarWithName({
   className = '',
   showOnlineStatus = false,
   isOnline = false,
+  priority = false,
   onClick,
 }: AvatarWithNameProps) {
   return (
@@ -125,6 +130,7 @@ export function AvatarWithName({
         size={size}
         showOnlineStatus={showOnlineStatus}
         isOnline={isOnline}
+        priority={priority}
       />
       <div className="flex-1 min-w-0">
         <p className="font-semibold text-gray-900 truncate">{name}</p>
@@ -152,6 +158,7 @@ export function GroupAvatarWithName({
   memberCount,
   size = 'md',
   className = '',
+  priority = false,
   onClick,
 }: GroupAvatarWithNameProps) {
   return (
@@ -163,6 +170,7 @@ export function GroupAvatarWithName({
         groupDpUrl={groupDpUrl}
         groupName={groupName}
         size={size}
+        priority={priority}
       />
       <div className="flex-1 min-w-0">
         <p className="font-semibold text-gray-900 truncate">{groupName}</p>

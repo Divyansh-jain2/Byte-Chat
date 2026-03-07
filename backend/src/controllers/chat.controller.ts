@@ -1,4 +1,5 @@
 import type { Request, Response } from 'express';
+import * as crypto from 'crypto';
 import { pool } from '../lib/db.js';
 import { ApiError } from '../utils/error.util.js';
 import { io } from '../index.js';
@@ -362,6 +363,7 @@ export async function getMessages(req: Request, res: Response) {
     );
 
     if (convCheck.rows.length === 0) {
+      console.log('[DEBUG] getMessages 403 - user not in regular conversation:', { conversationId, userId });
       throw new ApiError(403, 'Access denied to this conversation');
     }
 
@@ -403,7 +405,10 @@ export async function getMessages(req: Request, res: Response) {
         END as sender,
         CASE
           WHEN cm.parent_message_id IS NOT NULL THEN jsonb_build_object(
+            'message_id', pm.message_id,
             'encrypted_content', pm.encrypted_content,
+            'content_iv', pm.content_iv,
+            'content_auth_tag', pm.content_auth_tag,
             'sender', jsonb_build_object(
               'name', pu.name
             )
@@ -436,11 +441,13 @@ export async function getMessages(req: Request, res: Response) {
             ) r
           ),
           '[]'::json
-        ) as reactions
+        ) as reactions,
+        sk.aes_key_encrypted as user_session_key
       FROM chat_messages cm
       LEFT JOIN users u ON cm.sender_id = u.user_id
       LEFT JOIN chat_messages pm ON cm.parent_message_id = pm.message_id
       LEFT JOIN users pu ON pm.sender_id = pu.user_id
+      LEFT JOIN chat_session_keys sk ON cm.key_id = sk.session_key_id AND sk.encrypted_for_user_id = $2
       WHERE cm.conversation_id = $1
       ${before ? 'AND cm.created_at < $4' : ''}
       AND cm.is_deleted = false
@@ -559,7 +566,7 @@ export async function sendMessage(req: Request, res: Response) {
         mediaSize,
         mediaMimeType,
         thumbnailUrl,
-        keyId,
+        keyId, // Using keyId from request (session_key_id)
         parentMessageId || null
       ]
     );
@@ -587,8 +594,33 @@ export async function sendMessage(req: Request, res: Response) {
         is_anonymous: false,
       };
 
+      // Fetch full message with parent info for socket emission
+      const fullMessageResult = await pool.query(
+        `SELECT 
+          cm.*,
+          CASE
+            WHEN cm.parent_message_id IS NOT NULL THEN jsonb_build_object(
+              'message_id', pm.message_id,
+              'encrypted_content', pm.encrypted_content,
+              'content_iv', pm.content_iv,
+              'content_auth_tag', pm.content_auth_tag,
+              'sender', jsonb_build_object(
+                'name', pu.name
+              )
+            )
+            ELSE null
+          END as parent_message,
+          sk.aes_key_encrypted as user_session_key
+        FROM chat_messages cm
+        LEFT JOIN chat_messages pm ON cm.parent_message_id = pm.message_id
+        LEFT JOIN users pu ON pm.sender_id = pu.user_id
+        LEFT JOIN chat_session_keys sk ON cm.key_id = sk.session_key_id AND sk.encrypted_for_user_id != $2
+        WHERE cm.message_id = $1`,
+        [message.message_id, userId]
+      );
+
       emitToConversation(io, conversationId, 'new-message', {
-        ...message,
+        ...fullMessageResult.rows[0],
         sender: senderInfo,
         is_my_message: false,
       });
@@ -609,7 +641,112 @@ export async function sendMessage(req: Request, res: Response) {
   }
 }
 
-// Update message status (delivered/read)
+// Get public keys of all participants in a conversation
+export async function getParticipantPublicKeys(req: Request, res: Response) {
+  try {
+    const userId = req.user?.userId;
+    const { conversationId } = req.params;
+
+    if (!userId) throw new ApiError(401, 'Unauthorized');
+
+    // Check if user is part of conversation and get type
+    const convCheck = await pool.query(
+      `SELECT user1_id, user2_id, is_anonymous FROM chat_conversations 
+       WHERE conversation_id = $1 AND (user1_id = $2 OR user2_id = $2)`,
+      [conversationId, userId]
+    );
+
+    if (convCheck.rows.length === 0) {
+      throw new ApiError(403, 'Access denied to this conversation');
+    }
+
+    const { user1_id, user2_id, is_anonymous } = convCheck.rows[0];
+
+    // Fetch public keys for both users
+    const result = await pool.query(
+      `SELECT uek.user_id, uek.public_key, u.name
+       FROM user_encryption_keys uek
+       JOIN users u ON uek.user_id = u.user_id
+       JOIN chat_conversations cc ON uek.user_id = cc.user1_id OR uek.user_id = cc.user2_id
+       WHERE cc.conversation_id = $1`,
+      [conversationId]
+    );
+
+    res.json({
+      success: true,
+      data: {
+        participants: result.rows,
+        isAnonymous: !!is_anonymous
+      }
+    });
+  } catch (error) {
+    console.error('[E2EE] Get participant public keys error:', error);
+    if (error instanceof ApiError) throw error;
+    throw new ApiError(500, 'Failed to fetch public keys');
+  }
+}
+
+// Store encrypted session keys for participants
+export async function storeSessionKeys(req: Request, res: Response) {
+  try {
+    const userId = req.user?.userId;
+    const { conversationId, groupId, keys } = req.body;
+    // keys: Array<{ userId: string, encryptedKey: string, keyVersion: number }>
+
+    if (!userId) throw new ApiError(401, 'Unauthorized');
+    if (!keys || !Array.isArray(keys) || keys.length === 0) {
+      throw new ApiError(400, 'Keys array is required');
+    }
+
+    // Logic: Insert multiple rows into chat_session_keys/group_session_keys
+    // For simplicity, we use chat_session_keys for both but set group_id if applicable.
+
+    // Generate a common ID for this session key setup (so they can be referenced by one key_id)
+    const sessionKeyGroupId = crypto.randomUUID();
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      for (const k of keys) {
+        await client.query(
+          `INSERT INTO chat_session_keys (
+            session_key_id, conversation_id, group_id, 
+            aes_key_encrypted, aes_key_iv,
+            encrypted_for_user_id, encrypted_with_key_version
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          [
+            sessionKeyGroupId,
+            conversationId || null,
+            groupId || null,
+            k.encryptedKey,
+            k.aesKeyIv || null,
+            k.userId,
+            k.keyVersion || 1
+          ]
+        );
+      }
+
+      await client.query('COMMIT');
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+
+    res.status(201).json({
+      success: true,
+      data: {
+        keyId: sessionKeyGroupId
+      }
+    });
+  } catch (error) {
+    console.error('[E2EE] Store session keys error:', error);
+    if (error instanceof ApiError) throw error;
+    throw new ApiError(500, 'Failed to store session keys');
+  }
+}
 export async function updateMessageStatus(req: Request, res: Response) {
   try {
     const userId = req.user?.userId;

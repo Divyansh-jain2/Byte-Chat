@@ -1,297 +1,1485 @@
-# 1️⃣ AUTHENTICATION MODULE
 
-## Signup
+# 1. User Registration / First Login
 
-* Validate inputs
-* Roll number format check
-* Username uniqueness check
-* Hash password
-* Generate OTP
-* Send OTP email
-* Verify OTP
-* Create user
-* Issue access token
-* Issue refresh token
-* Create session
+Client generates keypair.
 
-## Login
+```text
+identity_key_pair
+ ├ private_key
+ └ public_key
+```
 
-* Validate credentials
-* Check account active
-* Compare password hash
-* Update last_seen
-* Issue access token
-* Issue refresh token
-* Create session entry
-* Log auth event
+Derive encryption key from password.
 
-## Logout
+```text
+derived_key = PBKDF2(password)
+```
 
-* Revoke refresh token
-* Delete session
+Encrypt private key.
 
-## Password Reset
+```text
+encrypted_private_key = AES_GCM(private_key, derived_key)
+```
 
-* Request reset OTP
-* Verify OTP
-* Set new password
-* Revoke all sessions
+Store in DB:
 
-## Token Management
+`user_encryption_keys`
 
-* Access token validation
-* Refresh token validation
-* Token rotation
-* Token revocation
+```text
+user_id
+public_key
+encrypted_private_key
+key_version = 1
+```
+
+Private key **never stored plaintext**.
 
 ---
 
-# 2️⃣ USER MANAGEMENT MODULE
+# 2. Login Flow
 
-## Profile
+User logs in.
 
-* Get self profile
-* Get public profile
-* Update username
-* Update display picture
-* Update settings
+Backend returns encryption keys.
 
-## Account Control
+```sql
+SELECT public_key, encrypted_private_key, key_version
+FROM user_encryption_keys
+WHERE user_id = ?
+ORDER BY key_version DESC
+LIMIT 1
+```
 
-* Soft delete account
-* Reactivate account (optional)
-* Update last_seen
+Client decrypts private key.
 
-## User Search
+```text
+derived_key = PBKDF2(password)
 
-* Search by username
-* Search by roll number
-* Search by branch
+private_key = AES_decrypt(encrypted_private_key, derived_key)
+```
 
----
-
-# 3️⃣ USER SETTINGS MODULE
-
-* Theme mode
-* Email notifications toggle
-* Push notifications toggle
-* Profile visibility
-* Show online status toggle
-* Show last_seen toggle
-* Update bio
+Store private key **in memory only**.
 
 ---
 
-# 4️⃣ BLOCK SYSTEM MODULE
+# 3. Starting a Chat (Conversation Creation)
 
-* Block user
-* Unblock user
-* Check block relation
-* Prevent 1v1 messaging
-* Prevent chat creation if blocked
+User A opens chat with B.
 
----
+Fetch B's public key.
 
-# 5️⃣ CHAT CORE MODULE
+```sql
+SELECT public_key
+FROM user_encryption_keys
+WHERE user_id = B
+ORDER BY key_version DESC
+LIMIT 1
+```
 
-## Conversation Creation
+Client A generates **conversation AES key**.
 
-* Create 1v1 conversation
-* Create group conversation
-* Validate participants
-
-## Membership Management
-
-* Add member
-* Remove member
-* Leave conversation
-* Check membership
-* Auto admin reassignment
+```text
+AES_session_key = random(256bit)
+```
 
 ---
 
-# 6️⃣ 1v1 CHAT MODULE
+# 4. Store Session Keys
 
-## Messaging
+Encrypt AES key for each participant.
 
-* Send encrypted message
-* Validate sender authorization
-* Store ciphertext
-* Emit real-time message
-* Create message receipt
+```text
+AES_for_A = encrypt(AES_key, public_key_A)
+AES_for_B = encrypt(AES_key, public_key_B)
+```
 
-## Message States
+Insert into:
 
-* Sent status
-* Delivered status
-* Read status
+`chat_session_keys`
 
-## History
+```text
+session_key_id
+conversation_id
+encrypted_for_user_id
+aes_key_encrypted
+aes_key_iv
+```
 
-* Fetch conversation history
-* Pagination support
+Two rows created:
 
-## Message Actions
-
-* Delete for me
-* Delete for all (soft delete)
-* Retry send (client-triggered)
-
----
-
-# 7️⃣ GROUP CHAT MODULE
-
-## Group Creation
-
-* Public group
-* Private group
-* Assign creator admin
-
-## Admin Controls
-
-* Promote admin
-* Demote admin
-* Remove member (private only)
-
-## Public Group Governance
-
-* Create removal poll
-* Vote on poll
-* Enforce poll result
-* Poll cooldown (24h)
-
-## Group Messaging
-
-* Broadcast message
-* Receipt creation for members
+```text
+conversation_id | encrypted_for_user_id
+---------------------------------------
+conv123         | userA
+conv123         | userB
+```
 
 ---
 
-# 8️⃣ INVITATION MODULE (PRIVATE GROUP)
+# 5. Sending Message
 
-* Generate invite token
-* Validate token
-* Join via token
-* Expire invite
-* Invalidate invite after use
+Client retrieves AES key.
 
----
+Encrypt message.
 
-# 9️⃣ MESSAGE MODULE
+```text
+ciphertext = AES_GCM(message)
+```
 
-## Message Types
+Insert into:
 
-* Text
-* Emoji
-* Image URL
+`chat_messages`
 
-## Message Storage
+```text
+conversation_id
+sender_id
+encrypted_content
+content_iv
+content_auth_tag
+key_id
+```
 
-* Encrypted payload
-* Encryption metadata
-* Sender reference
-* Conversation reference
-
-## Message Lifecycle
-
-* Create
-* Deliver
-* Read
-* Soft delete
+`key_id → chat_session_keys.session_key_id`
 
 ---
 
-# 🔟 REAL-TIME SOCKET MODULE
+# 6. Backend Handling
 
-## Connection
+Backend **never decrypts**.
 
-* JWT verification
-* Bind socket → user
+Backend only:
 
-## Events
+```text
+store message
+emit websocket event
+cache redis
+```
 
-* Join conversation
-* Leave conversation
-* Send message
-* Receive message
-* Message delivered
-* Message read
-* Typing start
-* Typing stop
-* Disconnect handling
+Redis example:
 
----
-
-# 1️⃣1️⃣ REPORT & MODERATION MODULE
-
-* Report user
-* Store report metadata
-* Count unique reporters
-* Auto-block after threshold (5+)
-* Notify admin via email
+```text
+message_cache:{chatId}
+room:{chatId}
+```
 
 ---
 
-# 1️⃣2️⃣ MEDIA MODULE
+# 7. Receiving Message
 
-* Upload image
-* Validate file type
-* Generate URL
-* Attach to message
-* Delete unused media (optional)
+Client B receives encrypted message.
 
----
+Read message fields:
 
-# 1️⃣3️⃣ AUDIT & LOGGING MODULE
+```text
+encrypted_content
+content_iv
+content_auth_tag
+key_id
+```
 
-* Auth logs
-* Profile changes
-* Block/unblock logs
-* Report events
-* Security anomalies
+Fetch encrypted AES key.
 
----
+```sql
+SELECT aes_key_encrypted
+FROM chat_session_keys
+WHERE session_key_id = ?
+AND encrypted_for_user_id = B
+```
 
-# 1️⃣4️⃣ SECURITY MODULE
+Decrypt AES key.
 
-* Rate limiting
-* OTP attempt limiting
-* IP tracking
-* Session validation
-* Account lock handling
-* Input validation
+```text
+AES_key = decrypt(private_key, aes_key_encrypted)
+```
 
----
+Decrypt message.
 
-# 1️⃣5️⃣ SYSTEM RULES MODULE (INVARIANTS)
-
-* Only members send messages
-* Only admins manage private group members
-* Public group removal via poll only
-* Deleted users cannot login
-* Blocked users cannot 1v1 chat
-* Server cannot decrypt messages
+```text
+plaintext = AES_decrypt(ciphertext, AES_key)
+```
 
 ---
 
-# 1️⃣6️⃣ OPTIONAL BUT SMART (Small Future Modules)
+# 8. Group Chat Flow
 
-* Presence (Redis online state)
-* Typing indicators
-* Unread message counters
-* Conversation pinning
-* Muted conversations
+Use `group_session_keys`.
+
+Each member has encrypted AES key.
+
+```text
+group_session_keys
+ ├ group_id
+ ├ user_id
+ └ aes_key_encrypted
+```
+
+Messages encrypted with group AES key.
+
+Stored in `chat_messages`.
 
 ---
 
-# FINAL BUILD ORDER (Best Implementation Sequence)
+# 9. Media Encryption
 
-1. Auth
-2. User Management
-3. Conversations + Membership
-4. 1v1 Messaging
-5. Socket events
-6. Group system
-7. Reports & block
-8. Media handling
-9. Governance (polls)
+Media uses **same AES key concept**.
+
+Stored in:
+
+```text
+media_uploads
+ ├ file_key_encrypted
+ ├ file_key_iv
+```
+
+File decrypted client-side.
+
+---
+
+# 10. Message Edit / History
+
+Old encrypted message stored in:
+
+```text
+message_edit_history
+```
+
+Still encrypted.
+
+---
+
+# 11. Key Rotation (Optional Later)
+
+Increase version.
+
+```text
+key_version++
+```
+
+New session keys generated.
+
+Stored again in:
+
+```text
+chat_session_keys
+```
+
+---
+
+# Complete System Flow
+
+```
+User Login
+   ↓
+Fetch encrypted_private_key
+   ↓
+Decrypt private key locally
+   ↓
+Start conversation
+   ↓
+Generate AES session key
+   ↓
+Store encrypted session keys
+   ↓
+Encrypt messages
+   ↓
+Store ciphertext
+   ↓
+Receiver decrypts
+```
+
+---
+
+# Backend Never Sees
+
+```
+private_key
+plaintext message
+AES session key
+```
+
+Only stores encrypted values.
+
+---
+
+# Your Schema Already Supports This
+
+Key tables used:
+
+```
+users
+user_encryption_keys
+chat_conversations
+chat_session_keys
+group_session_keys
+chat_messages
+media_uploads
+```
+
+Everything else remains unchanged.
+
+
+# #####################################################################
+[
+  {
+    "constraint_name": "anonymous_identities_conversation_id_fkey",
+    "from_table": "public.anonymous_identities",
+    "from_column": "conversation_id",
+    "to_table": "public.chat_conversations",
+    "to_column": "conversation_id"
+  },
+  {
+    "constraint_name": "anonymous_identities_group_id_fkey",
+    "from_table": "public.anonymous_identities",
+    "from_column": "group_id",
+    "to_table": "public.groups",
+    "to_column": "group_id"
+  },
+  {
+    "constraint_name": "anonymous_identities_target_user_id_fkey",
+    "from_table": "public.anonymous_identities",
+    "from_column": "target_user_id",
+    "to_table": "public.users",
+    "to_column": "user_id"
+  },
+  {
+    "constraint_name": "anonymous_identities_user_id_fkey",
+    "from_table": "public.anonymous_identities",
+    "from_column": "user_id",
+    "to_table": "public.users",
+    "to_column": "user_id"
+  },
+  {
+    "constraint_name": "audit_logs_user_id_fkey",
+    "from_table": "public.audit_logs",
+    "from_column": "user_id",
+    "to_table": "public.users",
+    "to_column": "user_id"
+  },
+  {
+    "constraint_name": "chat_conversations_anonymous_initiator_id_fkey",
+    "from_table": "public.chat_conversations",
+    "from_column": "anonymous_initiator_id",
+    "to_table": "public.anonymous_identities",
+    "to_column": "identity_id"
+  },
+  {
+    "constraint_name": "chat_conversations_blocked_by_user_id_fkey",
+    "from_table": "public.chat_conversations",
+    "from_column": "blocked_by_user_id",
+    "to_table": "public.users",
+    "to_column": "user_id"
+  },
+  {
+    "constraint_name": "chat_conversations_user1_id_fkey",
+    "from_table": "public.chat_conversations",
+    "from_column": "user1_id",
+    "to_table": "public.users",
+    "to_column": "user_id"
+  },
+  {
+    "constraint_name": "chat_conversations_user2_id_fkey",
+    "from_table": "public.chat_conversations",
+    "from_column": "user2_id",
+    "to_table": "public.users",
+    "to_column": "user_id"
+  },
+  {
+    "constraint_name": "chat_messages_anonymous_identity_id_fkey",
+    "from_table": "public.chat_messages",
+    "from_column": "anonymous_identity_id",
+    "to_table": "public.anonymous_identities",
+    "to_column": "identity_id"
+  },
+  {
+    "constraint_name": "chat_messages_conversation_id_fkey",
+    "from_table": "public.chat_messages",
+    "from_column": "conversation_id",
+    "to_table": "public.chat_conversations",
+    "to_column": "conversation_id"
+  },
+  {
+    "constraint_name": "chat_messages_group_id_fkey",
+    "from_table": "public.chat_messages",
+    "from_column": "group_id",
+    "to_table": "public.groups",
+    "to_column": "group_id"
+  },
+  {
+    "constraint_name": "chat_messages_parent_message_id_fkey",
+    "from_table": "public.chat_messages",
+    "from_column": "parent_message_id",
+    "to_table": "public.chat_messages",
+    "to_column": "message_id"
+  },
+  {
+    "constraint_name": "chat_messages_sender_id_fkey",
+    "from_table": "public.chat_messages",
+    "from_column": "sender_id",
+    "to_table": "public.users",
+    "to_column": "user_id"
+  },
+  {
+    "constraint_name": "fk_chat_messages_session_key",
+    "from_table": "public.chat_messages",
+    "from_column": "key_id",
+    "to_table": "public.chat_session_keys",
+    "to_column": "session_key_id"
+  },
+  {
+    "constraint_name": "chat_requests_anonymous_identity_id_fkey",
+    "from_table": "public.chat_requests",
+    "from_column": "anonymous_identity_id",
+    "to_table": "public.anonymous_identities",
+    "to_column": "identity_id"
+  },
+  {
+    "constraint_name": "chat_requests_receiver_id_fkey",
+    "from_table": "public.chat_requests",
+    "from_column": "receiver_id",
+    "to_table": "public.users",
+    "to_column": "user_id"
+  },
+  {
+    "constraint_name": "chat_requests_sender_id_fkey",
+    "from_table": "public.chat_requests",
+    "from_column": "sender_id",
+    "to_table": "public.users",
+    "to_column": "user_id"
+  },
+  {
+    "constraint_name": "fk_chat_requests_anonymous_identity",
+    "from_table": "public.chat_requests",
+    "from_column": "anonymous_identity_id",
+    "to_table": "public.anonymous_identities",
+    "to_column": "identity_id"
+  },
+  {
+    "constraint_name": "chat_session_keys_conversation_id_fkey",
+    "from_table": "public.chat_session_keys",
+    "from_column": "conversation_id",
+    "to_table": "public.chat_conversations",
+    "to_column": "conversation_id"
+  },
+  {
+    "constraint_name": "chat_session_keys_encrypted_for_user_id_fkey",
+    "from_table": "public.chat_session_keys",
+    "from_column": "encrypted_for_user_id",
+    "to_table": "public.users",
+    "to_column": "user_id"
+  },
+  {
+    "constraint_name": "chat_session_keys_group_id_fkey",
+    "from_table": "public.chat_session_keys",
+    "from_column": "group_id",
+    "to_table": "public.groups",
+    "to_column": "group_id"
+  },
+  {
+    "constraint_name": "group_bans_banned_by_fkey",
+    "from_table": "public.group_bans",
+    "from_column": "banned_by",
+    "to_table": "public.users",
+    "to_column": "user_id"
+  },
+  {
+    "constraint_name": "group_bans_group_id_fkey",
+    "from_table": "public.group_bans",
+    "from_column": "group_id",
+    "to_table": "public.groups",
+    "to_column": "group_id"
+  },
+  {
+    "constraint_name": "group_bans_user_id_fkey",
+    "from_table": "public.group_bans",
+    "from_column": "user_id",
+    "to_table": "public.users",
+    "to_column": "user_id"
+  },
+  {
+    "constraint_name": "group_invites_group_id_fkey",
+    "from_table": "public.group_invites",
+    "from_column": "group_id",
+    "to_table": "public.groups",
+    "to_column": "group_id"
+  },
+  {
+    "constraint_name": "group_invites_invited_by_fkey",
+    "from_table": "public.group_invites",
+    "from_column": "invited_by",
+    "to_table": "public.users",
+    "to_column": "user_id"
+  },
+  {
+    "constraint_name": "group_invites_invitee_id_fkey",
+    "from_table": "public.group_invites",
+    "from_column": "invitee_id",
+    "to_table": "public.users",
+    "to_column": "user_id"
+  },
+  {
+    "constraint_name": "group_members_anonymous_identity_id_fkey",
+    "from_table": "public.group_members",
+    "from_column": "anonymous_identity_id",
+    "to_table": "public.anonymous_identities",
+    "to_column": "identity_id"
+  },
+  {
+    "constraint_name": "group_members_group_id_fkey",
+    "from_table": "public.group_members",
+    "from_column": "group_id",
+    "to_table": "public.groups",
+    "to_column": "group_id"
+  },
+  {
+    "constraint_name": "group_members_user_id_fkey",
+    "from_table": "public.group_members",
+    "from_column": "user_id",
+    "to_table": "public.users",
+    "to_column": "user_id"
+  },
+  {
+    "constraint_name": "group_session_keys_group_id_fkey",
+    "from_table": "public.group_session_keys",
+    "from_column": "group_id",
+    "to_table": "public.groups",
+    "to_column": "group_id"
+  },
+  {
+    "constraint_name": "group_session_keys_user_id_fkey",
+    "from_table": "public.group_session_keys",
+    "from_column": "user_id",
+    "to_table": "public.users",
+    "to_column": "user_id"
+  },
+  {
+    "constraint_name": "groups_created_by_fkey",
+    "from_table": "public.groups",
+    "from_column": "created_by",
+    "to_table": "public.users",
+    "to_column": "user_id"
+  },
+  {
+    "constraint_name": "media_uploads_conversation_id_fkey",
+    "from_table": "public.media_uploads",
+    "from_column": "conversation_id",
+    "to_table": "public.chat_conversations",
+    "to_column": "conversation_id"
+  },
+  {
+    "constraint_name": "media_uploads_group_id_fkey",
+    "from_table": "public.media_uploads",
+    "from_column": "group_id",
+    "to_table": "public.groups",
+    "to_column": "group_id"
+  },
+  {
+    "constraint_name": "media_uploads_message_id_fkey",
+    "from_table": "public.media_uploads",
+    "from_column": "message_id",
+    "to_table": "public.chat_messages",
+    "to_column": "message_id"
+  },
+  {
+    "constraint_name": "media_uploads_user_id_fkey",
+    "from_table": "public.media_uploads",
+    "from_column": "user_id",
+    "to_table": "public.users",
+    "to_column": "user_id"
+  },
+  {
+    "constraint_name": "message_edit_history_message_id_fkey",
+    "from_table": "public.message_edit_history",
+    "from_column": "message_id",
+    "to_table": "public.chat_messages",
+    "to_column": "message_id"
+  },
+  {
+    "constraint_name": "message_reactions_message_id_fkey",
+    "from_table": "public.message_reactions",
+    "from_column": "message_id",
+    "to_table": "public.chat_messages",
+    "to_column": "message_id"
+  },
+  {
+    "constraint_name": "message_reactions_user_id_fkey",
+    "from_table": "public.message_reactions",
+    "from_column": "user_id",
+    "to_table": "public.users",
+    "to_column": "user_id"
+  },
+  {
+    "constraint_name": "message_status_message_id_fkey",
+    "from_table": "public.message_status",
+    "from_column": "message_id",
+    "to_table": "public.chat_messages",
+    "to_column": "message_id"
+  },
+  {
+    "constraint_name": "message_status_user_id_fkey",
+    "from_table": "public.message_status",
+    "from_column": "user_id",
+    "to_table": "public.users",
+    "to_column": "user_id"
+  },
+  {
+    "constraint_name": "poll_options_poll_id_fkey",
+    "from_table": "public.poll_options",
+    "from_column": "poll_id",
+    "to_table": "public.polls",
+    "to_column": "poll_id"
+  },
+  {
+    "constraint_name": "polls_cancelled_by_fkey",
+    "from_table": "public.polls",
+    "from_column": "cancelled_by",
+    "to_table": "public.users",
+    "to_column": "user_id"
+  },
+  {
+    "constraint_name": "polls_created_by_fkey",
+    "from_table": "public.polls",
+    "from_column": "created_by",
+    "to_table": "public.users",
+    "to_column": "user_id"
+  },
+  {
+    "constraint_name": "polls_group_id_fkey",
+    "from_table": "public.polls",
+    "from_column": "group_id",
+    "to_table": "public.groups",
+    "to_column": "group_id"
+  },
+  {
+    "constraint_name": "polls_parent_poll_id_fkey",
+    "from_table": "public.polls",
+    "from_column": "parent_poll_id",
+    "to_table": "public.polls",
+    "to_column": "poll_id"
+  },
+  {
+    "constraint_name": "polls_target_user_id_fkey",
+    "from_table": "public.polls",
+    "from_column": "target_user_id",
+    "to_table": "public.users",
+    "to_column": "user_id"
+  },
+  {
+    "constraint_name": "reports_reported_group_id_fkey",
+    "from_table": "public.reports",
+    "from_column": "reported_group_id",
+    "to_table": "public.groups",
+    "to_column": "group_id"
+  },
+  {
+    "constraint_name": "reports_reported_message_id_fkey",
+    "from_table": "public.reports",
+    "from_column": "reported_message_id",
+    "to_table": "public.chat_messages",
+    "to_column": "message_id"
+  },
+  {
+    "constraint_name": "reports_reported_user_id_fkey",
+    "from_table": "public.reports",
+    "from_column": "reported_user_id",
+    "to_table": "public.users",
+    "to_column": "user_id"
+  },
+  {
+    "constraint_name": "reports_reporter_user_id_fkey",
+    "from_table": "public.reports",
+    "from_column": "reporter_user_id",
+    "to_table": "public.users",
+    "to_column": "user_id"
+  },
+  {
+    "constraint_name": "reports_resolved_by_fkey",
+    "from_table": "public.reports",
+    "from_column": "resolved_by",
+    "to_table": "public.users",
+    "to_column": "user_id"
+  },
+  {
+    "constraint_name": "system_notifications_user_id_fkey",
+    "from_table": "public.system_notifications",
+    "from_column": "user_id",
+    "to_table": "public.users",
+    "to_column": "user_id"
+  },
+  {
+    "constraint_name": "user_blocks_blocked_id_fkey",
+    "from_table": "public.user_blocks",
+    "from_column": "blocked_id",
+    "to_table": "public.users",
+    "to_column": "user_id"
+  },
+  {
+    "constraint_name": "user_blocks_blocker_id_fkey",
+    "from_table": "public.user_blocks",
+    "from_column": "blocker_id",
+    "to_table": "public.users",
+    "to_column": "user_id"
+  },
+  {
+    "constraint_name": "user_encryption_keys_user_id_fkey",
+    "from_table": "public.user_encryption_keys",
+    "from_column": "user_id",
+    "to_table": "public.users",
+    "to_column": "user_id"
+  },
+  {
+    "constraint_name": "user_password_resets_user_id_fkey",
+    "from_table": "public.user_password_resets",
+    "from_column": "user_id",
+    "to_table": "public.users",
+    "to_column": "user_id"
+  },
+  {
+    "constraint_name": "user_sessions_user_id_fkey",
+    "from_table": "public.user_sessions",
+    "from_column": "user_id",
+    "to_table": "public.users",
+    "to_column": "user_id"
+  },
+  {
+    "constraint_name": "user_settings_user_id_fkey",
+    "from_table": "public.user_settings",
+    "from_column": "user_id",
+    "to_table": "public.users",
+    "to_column": "user_id"
+  },
+  {
+    "constraint_name": "user_verifications_user_id_fkey",
+    "from_table": "public.user_verifications",
+    "from_column": "user_id",
+    "to_table": "public.users",
+    "to_column": "user_id"
+  },
+  {
+    "constraint_name": "votes_option_id_fkey",
+    "from_table": "public.votes",
+    "from_column": "option_id",
+    "to_table": "public.poll_options",
+    "to_column": "option_id"
+  },
+  {
+    "constraint_name": "votes_poll_id_fkey",
+    "from_table": "public.votes",
+    "from_column": "poll_id",
+    "to_table": "public.polls",
+    "to_column": "poll_id"
+  },
+  {
+    "constraint_name": "votes_user_id_fkey",
+    "from_table": "public.votes",
+    "from_column": "user_id",
+    "to_table": "public.users",
+    "to_column": "user_id"
+  }
+]
+
+# #####################################################################
+
+[
+  {
+    "table_name": "active_group_bans",
+    "column_name": "ban_id",
+    "data_type": "uuid",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_name": "active_group_bans",
+    "column_name": "group_id",
+    "data_type": "uuid",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_name": "active_group_bans",
+    "column_name": "user_id",
+    "data_type": "uuid",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_name": "active_group_bans",
+    "column_name": "banned_by",
+    "data_type": "uuid",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_name": "active_group_bans",
+    "column_name": "reason",
+    "data_type": "text",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_name": "active_group_bans",
+    "column_name": "expires_at",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_name": "active_group_bans",
+    "column_name": "created_at",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_name": "active_group_bans",
+    "column_name": "is_active",
+    "data_type": "boolean",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_name": "anonymous_identities",
+    "column_name": "identity_id",
+    "data_type": "uuid",
+    "is_nullable": "NO",
+    "column_default": "gen_random_uuid()"
+  },
+  {
+    "table_name": "anonymous_identities",
+    "column_name": "user_id",
+    "data_type": "uuid",
+    "is_nullable": "NO",
+    "column_default": null
+  },
+  {
+    "table_name": "anonymous_identities",
+    "column_name": "target_user_id",
+    "data_type": "uuid",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_name": "anonymous_identities",
+    "column_name": "conversation_id",
+    "data_type": "uuid",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_name": "anonymous_identities",
+    "column_name": "group_id",
+    "data_type": "uuid",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_name": "anonymous_identities",
+    "column_name": "random_string",
+    "data_type": "character varying",
+    "is_nullable": "NO",
+    "column_default": null
+  },
+  {
+    "table_name": "anonymous_identities",
+    "column_name": "display_gender",
+    "data_type": "character varying",
+    "is_nullable": "NO",
+    "column_default": null
+  },
+  {
+    "table_name": "anonymous_identities",
+    "column_name": "is_active",
+    "data_type": "boolean",
+    "is_nullable": "YES",
+    "column_default": "true"
+  },
+  {
+    "table_name": "anonymous_identities",
+    "column_name": "created_at",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "YES",
+    "column_default": "now()"
+  },
+  {
+    "table_name": "anonymous_identities",
+    "column_name": "last_used_at",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "YES",
+    "column_default": "now()"
+  },
+  {
+    "table_name": "anonymous_identities",
+    "column_name": "is_revealed",
+    "data_type": "boolean",
+    "is_nullable": "YES",
+    "column_default": "false"
+  },
+  {
+    "table_name": "anonymous_identities",
+    "column_name": "revealed_at",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_name": "anonymous_identities",
+    "column_name": "receiver_custom_name",
+    "data_type": "character varying",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_name": "audit_logs",
+    "column_name": "log_id",
+    "data_type": "uuid",
+    "is_nullable": "NO",
+    "column_default": "gen_random_uuid()"
+  },
+  {
+    "table_name": "audit_logs",
+    "column_name": "user_id",
+    "data_type": "uuid",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_name": "audit_logs",
+    "column_name": "action_type",
+    "data_type": "character varying",
+    "is_nullable": "NO",
+    "column_default": null
+  },
+  {
+    "table_name": "audit_logs",
+    "column_name": "entity_type",
+    "data_type": "character varying",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_name": "audit_logs",
+    "column_name": "entity_id",
+    "data_type": "uuid",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_name": "audit_logs",
+    "column_name": "old_values",
+    "data_type": "jsonb",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_name": "audit_logs",
+    "column_name": "new_values",
+    "data_type": "jsonb",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_name": "audit_logs",
+    "column_name": "ip_address",
+    "data_type": "inet",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_name": "audit_logs",
+    "column_name": "user_agent",
+    "data_type": "text",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_name": "audit_logs",
+    "column_name": "created_at",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "YES",
+    "column_default": "now()"
+  },
+  {
+    "table_name": "chat_conversations",
+    "column_name": "conversation_id",
+    "data_type": "uuid",
+    "is_nullable": "NO",
+    "column_default": "gen_random_uuid()"
+  },
+  {
+    "table_name": "chat_conversations",
+    "column_name": "user1_id",
+    "data_type": "uuid",
+    "is_nullable": "NO",
+    "column_default": null
+  },
+  {
+    "table_name": "chat_conversations",
+    "column_name": "user2_id",
+    "data_type": "uuid",
+    "is_nullable": "NO",
+    "column_default": null
+  },
+  {
+    "table_name": "chat_conversations",
+    "column_name": "is_anonymous",
+    "data_type": "boolean",
+    "is_nullable": "YES",
+    "column_default": "false"
+  },
+  {
+    "table_name": "chat_conversations",
+    "column_name": "anonymous_initiator_id",
+    "data_type": "uuid",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_name": "chat_conversations",
+    "column_name": "is_accepted",
+    "data_type": "boolean",
+    "is_nullable": "YES",
+    "column_default": "false"
+  },
+  {
+    "table_name": "chat_conversations",
+    "column_name": "is_blocked",
+    "data_type": "boolean",
+    "is_nullable": "YES",
+    "column_default": "false"
+  },
+  {
+    "table_name": "chat_conversations",
+    "column_name": "blocked_by_user_id",
+    "data_type": "uuid",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_name": "chat_conversations",
+    "column_name": "created_at",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "YES",
+    "column_default": "now()"
+  },
+  {
+    "table_name": "chat_conversations",
+    "column_name": "updated_at",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "YES",
+    "column_default": "now()"
+  },
+  {
+    "table_name": "chat_conversations",
+    "column_name": "last_message_at",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "YES",
+    "column_default": "now()"
+  },
+  {
+    "table_name": "chat_messages",
+    "column_name": "message_id",
+    "data_type": "uuid",
+    "is_nullable": "NO",
+    "column_default": "gen_random_uuid()"
+  },
+  {
+    "table_name": "chat_messages",
+    "column_name": "conversation_id",
+    "data_type": "uuid",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_name": "chat_messages",
+    "column_name": "group_id",
+    "data_type": "uuid",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_name": "chat_messages",
+    "column_name": "sender_id",
+    "data_type": "uuid",
+    "is_nullable": "NO",
+    "column_default": null
+  },
+  {
+    "table_name": "chat_messages",
+    "column_name": "message_type",
+    "data_type": "character varying",
+    "is_nullable": "YES",
+    "column_default": "'text'::character varying"
+  },
+  {
+    "table_name": "chat_messages",
+    "column_name": "encrypted_content",
+    "data_type": "text",
+    "is_nullable": "NO",
+    "column_default": null
+  },
+  {
+    "table_name": "chat_messages",
+    "column_name": "content_iv",
+    "data_type": "character varying",
+    "is_nullable": "NO",
+    "column_default": null
+  },
+  {
+    "table_name": "chat_messages",
+    "column_name": "content_auth_tag",
+    "data_type": "character varying",
+    "is_nullable": "NO",
+    "column_default": null
+  },
+  {
+    "table_name": "chat_messages",
+    "column_name": "media_url",
+    "data_type": "text",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_name": "chat_messages",
+    "column_name": "media_size",
+    "data_type": "integer",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_name": "chat_messages",
+    "column_name": "media_mime_type",
+    "data_type": "character varying",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_name": "chat_messages",
+    "column_name": "thumbnail_url",
+    "data_type": "text",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_name": "chat_messages",
+    "column_name": "is_anonymous",
+    "data_type": "boolean",
+    "is_nullable": "YES",
+    "column_default": "false"
+  },
+  {
+    "table_name": "chat_messages",
+    "column_name": "anonymous_identity_id",
+    "data_type": "uuid",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_name": "chat_messages",
+    "column_name": "is_edited",
+    "data_type": "boolean",
+    "is_nullable": "YES",
+    "column_default": "false"
+  },
+  {
+    "table_name": "chat_messages",
+    "column_name": "is_deleted",
+    "data_type": "boolean",
+    "is_nullable": "YES",
+    "column_default": "false"
+  },
+  {
+    "table_name": "chat_messages",
+    "column_name": "deleted_at",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_name": "chat_messages",
+    "column_name": "parent_message_id",
+    "data_type": "uuid",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_name": "chat_messages",
+    "column_name": "encryption_key_version",
+    "data_type": "integer",
+    "is_nullable": "YES",
+    "column_default": "1"
+  },
+  {
+    "table_name": "chat_messages",
+    "column_name": "key_id",
+    "data_type": "uuid",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_name": "chat_messages",
+    "column_name": "created_at",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "YES",
+    "column_default": "now()"
+  },
+  {
+    "table_name": "chat_messages",
+    "column_name": "updated_at",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "YES",
+    "column_default": "now()"
+  },
+  {
+    "table_name": "chat_messages",
+    "column_name": "was_anonymous_message",
+    "data_type": "boolean",
+    "is_nullable": "YES",
+    "column_default": "false"
+  },
+  {
+    "table_name": "chat_messages",
+    "column_name": "deleted_for_everyone",
+    "data_type": "boolean",
+    "is_nullable": "YES",
+    "column_default": "false"
+  },
+  {
+    "table_name": "chat_messages",
+    "column_name": "edited_at",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_name": "chat_messages",
+    "column_name": "deleted_for_user_ids",
+    "data_type": "ARRAY",
+    "is_nullable": "YES",
+    "column_default": "'{}'::uuid[]"
+  },
+  {
+    "table_name": "chat_requests",
+    "column_name": "request_id",
+    "data_type": "uuid",
+    "is_nullable": "NO",
+    "column_default": "gen_random_uuid()"
+  },
+  {
+    "table_name": "chat_requests",
+    "column_name": "sender_id",
+    "data_type": "uuid",
+    "is_nullable": "NO",
+    "column_default": null
+  },
+  {
+    "table_name": "chat_requests",
+    "column_name": "receiver_id",
+    "data_type": "uuid",
+    "is_nullable": "NO",
+    "column_default": null
+  },
+  {
+    "table_name": "chat_requests",
+    "column_name": "request_type",
+    "data_type": "character varying",
+    "is_nullable": "YES",
+    "column_default": "'normal'::character varying"
+  },
+  {
+    "table_name": "chat_requests",
+    "column_name": "anonymous_identity_id",
+    "data_type": "uuid",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_name": "chat_requests",
+    "column_name": "status",
+    "data_type": "character varying",
+    "is_nullable": "YES",
+    "column_default": "'pending'::character varying"
+  },
+  {
+    "table_name": "chat_requests",
+    "column_name": "expires_at",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "YES",
+    "column_default": "(now() + '24:00:00'::interval)"
+  },
+  {
+    "table_name": "chat_requests",
+    "column_name": "created_at",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "YES",
+    "column_default": "now()"
+  },
+  {
+    "table_name": "chat_requests",
+    "column_name": "updated_at",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "YES",
+    "column_default": "now()"
+  },
+  {
+    "table_name": "chat_session_keys",
+    "column_name": "session_key_id",
+    "data_type": "uuid",
+    "is_nullable": "NO",
+    "column_default": "gen_random_uuid()"
+  },
+  {
+    "table_name": "chat_session_keys",
+    "column_name": "conversation_id",
+    "data_type": "uuid",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_name": "chat_session_keys",
+    "column_name": "group_id",
+    "data_type": "uuid",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_name": "chat_session_keys",
+    "column_name": "aes_key_encrypted",
+    "data_type": "text",
+    "is_nullable": "NO",
+    "column_default": null
+  },
+  {
+    "table_name": "chat_session_keys",
+    "column_name": "aes_key_iv",
+    "data_type": "character varying",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_name": "chat_session_keys",
+    "column_name": "encrypted_for_user_id",
+    "data_type": "uuid",
+    "is_nullable": "NO",
+    "column_default": null
+  },
+  {
+    "table_name": "chat_session_keys",
+    "column_name": "encrypted_with_key_version",
+    "data_type": "integer",
+    "is_nullable": "YES",
+    "column_default": "1"
+  },
+  {
+    "table_name": "chat_session_keys",
+    "column_name": "created_at",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "YES",
+    "column_default": "now()"
+  },
+  {
+    "table_name": "chat_session_keys",
+    "column_name": "updated_at",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "YES",
+    "column_default": "now()"
+  },
+  {
+    "table_name": "group_bans",
+    "column_name": "ban_id",
+    "data_type": "uuid",
+    "is_nullable": "NO",
+    "column_default": "gen_random_uuid()"
+  },
+  {
+    "table_name": "group_bans",
+    "column_name": "group_id",
+    "data_type": "uuid",
+    "is_nullable": "NO",
+    "column_default": null
+  },
+  {
+    "table_name": "group_bans",
+    "column_name": "user_id",
+    "data_type": "uuid",
+    "is_nullable": "NO",
+    "column_default": null
+  },
+  {
+    "table_name": "group_bans",
+    "column_name": "banned_by",
+    "data_type": "uuid",
+    "is_nullable": "NO",
+    "column_default": null
+  },
+  {
+    "table_name": "group_bans",
+    "column_name": "reason",
+    "data_type": "text",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_name": "group_bans",
+    "column_name": "expires_at",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_name": "group_bans",
+    "column_name": "created_at",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "YES",
+    "column_default": "now()"
+  },
+  {
+    "table_name": "group_invites",
+    "column_name": "invite_id",
+    "data_type": "uuid",
+    "is_nullable": "NO",
+    "column_default": "gen_random_uuid()"
+  },
+  {
+    "table_name": "group_invites",
+    "column_name": "group_id",
+    "data_type": "uuid",
+    "is_nullable": "NO",
+    "column_default": null
+  },
+  {
+    "table_name": "group_invites",
+    "column_name": "invited_by",
+    "data_type": "uuid",
+    "is_nullable": "NO",
+    "column_default": null
+  },
+  {
+    "table_name": "group_invites",
+    "column_name": "invitee_id",
+    "data_type": "uuid",
+    "is_nullable": "NO",
+    "column_default": null
+  },
+  {
+    "table_name": "group_invites",
+    "column_name": "invite_token",
+    "data_type": "character varying",
+    "is_nullable": "YES",
+    "column_default": null
+  },
+  {
+    "table_name": "group_invites",
+    "column_name": "invite_type",
+    "data_type": "character varying",
+    "is_nullable": "YES",
+    "column_default": "'private'::character varying"
+  },
+  {
+    "table_name": "group_invites",
+    "column_name": "status",
+    "data_type": "character varying",
+    "is_nullable": "YES",
+    "column_default": "'pending'::character varying"
+  }
+]
+
+

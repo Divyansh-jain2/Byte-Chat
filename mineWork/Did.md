@@ -172,3 +172,7 @@
 - **Poll Results Visibility**: Control when results are shown
 - **Poll Scheduling**: Schedule polls to open/close at specific times
 - **Survey Forms**: Create detailed surveys with multiple questions
+
+- **End-to-End Encryption**: Full E2EE for all messages (Signal Protocol)
+- **Encryption Verification**: Verify encryption keys with users
+

@@ -264,6 +264,7 @@ export async function getAnonymousConversations(req: Request, res: Response) {
 
 // Get messages for anonymous conversation
 export async function getAnonymousMessages(req: Request, res: Response) {
+  console.log('[DEBUG] getAnonymousMessages hit:', { conversationId: req.params.conversationId, userId: req.user?.userId });
   try {
     const userId = req.user?.userId;
     const { conversationId } = req.params;
@@ -283,6 +284,7 @@ export async function getAnonymousMessages(req: Request, res: Response) {
     );
 
     if (convCheck.rows.length === 0) {
+      console.error('[403] getAnonymousMessages Access Denied:', { conversationId, userId });
       throw new ApiError(403, 'Access denied to this anonymous conversation');
     }
 
@@ -367,7 +369,10 @@ export async function getAnonymousMessages(req: Request, res: Response) {
         END as sender,
         CASE
           WHEN cm.parent_message_id IS NOT NULL THEN jsonb_build_object(
+            'message_id', pm.message_id,
             'encrypted_content', pm.encrypted_content,
+            'content_iv', pm.content_iv,
+            'content_auth_tag', pm.content_auth_tag,
             'sender', jsonb_build_object(
               'name', pu.name
             )
@@ -400,13 +405,15 @@ export async function getAnonymousMessages(req: Request, res: Response) {
             ) r
           ),
           '[]'::json
-        ) as reactions
+        ) as reactions,
+        sk.aes_key_encrypted as user_session_key
       FROM chat_messages cm
       LEFT JOIN users u ON cm.sender_id = u.user_id
       LEFT JOIN chat_conversations cc ON cm.conversation_id = cc.conversation_id
       LEFT JOIN anonymous_identities ai ON cc.anonymous_initiator_id = ai.identity_id
       LEFT JOIN chat_messages pm ON cm.parent_message_id = pm.message_id
       LEFT JOIN users pu ON pm.sender_id = pu.user_id
+      LEFT JOIN chat_session_keys sk ON cm.key_id = sk.session_key_id AND sk.encrypted_for_user_id = $2
       WHERE cm.conversation_id = $1
       ${before ? 'AND cm.created_at < $3' : ''}
       AND cm.is_deleted = false
@@ -576,8 +583,33 @@ export async function sendAnonymousMessage(req: Request, res: Response) {
         is_anonymous: true,
       };
 
-      emitToConversation(conversationId, 'new-message', {
-        ...message,
+      // Fetch full message with parent info for socket emission
+      const fullMessageResult = await pool.query(
+        `SELECT 
+          cm.*,
+          CASE
+            WHEN cm.parent_message_id IS NOT NULL THEN jsonb_build_object(
+              'message_id', pm.message_id,
+              'encrypted_content', pm.encrypted_content,
+              'content_iv', pm.content_iv,
+              'content_auth_tag', pm.content_auth_tag,
+              'sender', jsonb_build_object(
+                'name', pu.name
+              )
+            )
+            ELSE null
+          END as parent_message,
+          sk.aes_key_encrypted as user_session_key
+        FROM chat_messages cm
+        LEFT JOIN chat_messages pm ON cm.parent_message_id = pm.message_id
+        LEFT JOIN users pu ON pm.sender_id = pu.user_id
+        LEFT JOIN chat_session_keys sk ON cm.key_id = sk.session_key_id AND sk.encrypted_for_user_id != $2
+        WHERE cm.message_id = $1`,
+        [message.message_id, userId]
+      );
+
+      emitToConversation(io, conversationId, 'new-message', {
+        ...fullMessageResult.rows[0],
         sender: senderInfo,
         is_my_message: false,
       });

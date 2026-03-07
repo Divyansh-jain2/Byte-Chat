@@ -63,7 +63,16 @@ export interface Message {
   encrypted_content: string;
   content_iv: string;
   content_auth_tag: string;
-  media_url?: string;
+  user_session_key?: string;
+  key_id?: string;
+  parent_message_id?: string;
+  parent_message?: {
+    message_id: string;
+    encrypted_content: string;
+    content_iv: string;
+    content_auth_tag: string;
+    sender?: { name: string };
+  };
   is_anonymous: boolean;
   is_my_message: boolean;
   is_edited: boolean;

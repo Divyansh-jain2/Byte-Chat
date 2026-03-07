@@ -31,10 +31,10 @@ export default function DashboardPage() {
     setMounted(true);
   }, []);
 
-  const fetchData = useCallback( async () => {
+  const fetchData = useCallback(async () => {
     try {
       const token = localStorage.getItem('accessToken');
-      
+
       // Fetch users
       const usersResponse = await fetch('http://localhost:3001/api/profile/all', {
         credentials: 'include',
@@ -42,13 +42,13 @@ export default function DashboardPage() {
           'Authorization': token ? `Bearer ${token}` : '',
         },
       });
-      
+
       if (usersResponse.status === 401) {
         setError('Please login to continue');
         setTimeout(() => router.push('/login'), 1500);
         return;
       }
-      
+
       const usersData = await usersResponse.json();
       if (usersData.success && usersData.data && Array.isArray(usersData.data.users)) {
         setUsers(usersData.data.users);
@@ -69,11 +69,11 @@ export default function DashboardPage() {
         const nonMemberGroups = groupsData.data.groups.filter((g: Group) => !myGroupIds.has(g.group_id));
         setGroups(nonMemberGroups);
       }
-    } 
+    }
     catch (error) {
       console.error('Failed to fetch data:', error);
       setError('Failed to connect to server');
-    } 
+    }
     finally {
       setLoading(false);
     }
@@ -94,7 +94,7 @@ export default function DashboardPage() {
 
   const filteredGroups = groups.filter((group) => {
     return group.group_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-           (group.group_desc && group.group_desc.toLowerCase().includes(searchQuery.toLowerCase()));
+      (group.group_desc && group.group_desc.toLowerCase().includes(searchQuery.toLowerCase()));
   });
 
   const branches = [...new Set(users.map((u) => u.branch))];
@@ -110,7 +110,7 @@ export default function DashboardPage() {
       await groupService.joinGroup(groupId, isAnonymous);
       toast.success('Joined group successfully!');
       fetchData();
-    } 
+    }
     catch (err: unknown) {
       let errorMsg = 'Failed to join group';
       if (typeof err === 'object' && err !== null && 'message' in err && typeof (err as { message?: string }).message === 'string') {
@@ -248,12 +248,19 @@ export default function DashboardPage() {
         {activeTab === 'users' && (
           <>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
-              {filteredUsers.map((user) => (
+              {filteredUsers.map((user, index) => (
                 <div key={user.user_id} className="glass-card rounded-2xl overflow-hidden flex flex-col">
                   {/* Avatar */}
                   <div className="relative h-40 flex items-center justify-center" style={{ background: 'linear-gradient(135deg,rgba(255,107,157,.15),rgba(168,85,247,.15))' }}>
                     {user.dp_url ? (
-                      <Image src={user.dp_url} alt={user.name} width={112} height={112} className="w-28 h-28 rounded-full object-cover ring-4 ring-white/60" />
+                      <Image
+                        src={user.dp_url}
+                        alt={user.name}
+                        width={112}
+                        height={112}
+                        className="w-28 h-28 rounded-full object-cover ring-4 ring-white/60"
+                        priority={index < 4}
+                      />
                     ) : (
                       <div className="w-28 h-28 rounded-full flex items-center justify-center text-4xl font-extrabold text-white ring-4 ring-white/40" style={{ background: 'var(--grad-romance)' }}>
                         {user.name.charAt(0).toUpperCase()}
@@ -291,11 +298,18 @@ export default function DashboardPage() {
         {activeTab === 'groups' && (
           <>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-              {filteredGroups.map((group) => (
+              {filteredGroups.map((group, index) => (
                 <div key={group.group_id} className="glass-card rounded-2xl p-5 flex flex-col gap-3">
                   <div className="flex items-start gap-3">
                     {group.group_dp_url ? (
-                      <Image src={group.group_dp_url} alt={group.group_name} width={48} height={48} className="w-12 h-12 rounded-xl object-cover shrink-0" />
+                      <Image
+                        src={group.group_dp_url}
+                        alt={group.group_name}
+                        width={48}
+                        height={48}
+                        className="w-12 h-12 rounded-xl object-cover shrink-0"
+                        priority={index < 4}
+                      />
                     ) : (
                       <div className="w-12 h-12 rounded-xl flex items-center justify-center text-xl text-white shrink-0" style={{ background: 'var(--grad-ocean)' }}>
                         {group.group_name.charAt(0).toUpperCase()}

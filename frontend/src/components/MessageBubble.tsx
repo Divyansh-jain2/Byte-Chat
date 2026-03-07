@@ -82,31 +82,38 @@ export default function MessageBubble({
     return () => document.removeEventListener('mousedown', handleClick);
   }, [showFullEmojiPicker]);
 
+  // Sync editContent when message updates (important for E2EE decryption)
+  useEffect(() => {
+    if (isEditing) {
+      setEditContent(message.encrypted_content || '');
+    }
+  }, [isEditing, message.encrypted_content]);
+
   const handleReaction = useCallback(async (emoji: string) => {
     // console.log('[MessageBubble] Reaction clicked:', emoji);
     try {
       const token = localStorage.getItem('accessToken');
       const userStr = localStorage.getItem('user');
-      
+
       // console.log('[MessageBubble] Raw user string:', userStr);
-      
+
       const currentUser = userStr ? JSON.parse(userStr) : null;
       // Support both user_id (snake_case from backend) and userId (camelCase)
       const currentUserId = currentUser?.user_id || currentUser?.userId;
-      
+
       // console.log('[MessageBubble] Parsed user:', currentUser);
       // console.log('[MessageBubble] Token:', token ? 'Present' : 'Missing');
       // console.log('[MessageBubble] User ID:', currentUserId);
-      
-      if (!token) { 
+
+      if (!token) {
         // console.error('[MessageBubble] No token found');
         alert('Please log in first');
-        return; 
+        return;
       }
-      if (!currentUserId) { 
+      if (!currentUserId) {
         // console.error('[MessageBubble] No user ID found. User object:', currentUser);
         alert('Please log out and log in again to fix your session');
-        return; 
+        return;
       }
 
       const userReacted = reactions.find(r =>
@@ -134,7 +141,7 @@ export default function MessageBubble({
           const existing = prev.find(r => r.emoji === emoji);
           if (existing) {
             return prev.map(r => r.emoji === emoji
-              ? { ...r, count: r.count + 1,users: [...(r.users || []), { user_id: currentUserId, name: currentUser.name || 'You' }] }
+              ? { ...r, count: r.count + 1, users: [...(r.users || []), { user_id: currentUserId, name: currentUser.name || 'You' }] }
               : r
             );
           }
@@ -185,8 +192,8 @@ export default function MessageBubble({
     <div
       ref={emojiPickerRef}
       className="absolute z-50 glass-strong rounded-xl p-2 shadow-xl flex gap-1 animate-scale-in"
-      style={{ 
-        bottom: '100%', 
+      style={{
+        bottom: '100%',
         marginBottom: '8px',
         [isMyMessage ? 'right' : 'left']: '0'
       }}
@@ -315,7 +322,7 @@ export default function MessageBubble({
         <div className="relative flex flex-col max-w-[75%] md:max-w-[60%]">
           {QuickEmojiStrip}
           {FullEmojiPickerOverlay}
-          
+
           <div className={`${isMyMessage ? 'bubble-sent' : 'bubble-received'} relative`}>
 
             {/* Sender name (received messages) */}
@@ -355,7 +362,7 @@ export default function MessageBubble({
                     width={300}
                     height={200}
                     className="max-w-full rounded-xl cursor-pointer hover:opacity-90 transition-opacity"
-                    style={{ objectFit: 'contain' }}
+                    style={{ objectFit: 'contain', height: 'auto' }}
                   />
                 </a>
               </div>

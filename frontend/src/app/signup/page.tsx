@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { authService } from '@/services/auth.service';
 import { DEGREE_TYPE_OPTIONS, DegreeType } from '@/types/auth.types';
 import { useTheme } from '@/contexts/ThemeContext';
+import { generateUserKeyPair, encryptPrivateKey } from '@/utils/e2ee.utils';
 
 export default function SignupPage() {
   const router = useRouter();
@@ -42,8 +43,8 @@ export default function SignupPage() {
     setError('');
 
     // Validation
-    if (!formData.degreeType || !formData.rollNumber || !formData.name || 
-        !formData.gender || !formData.branch || !formData.password) {
+    if (!formData.degreeType || !formData.rollNumber || !formData.name ||
+      !formData.gender || !formData.branch || !formData.password) {
       setError('All fields are required');
       return;
     }
@@ -61,20 +62,28 @@ export default function SignupPage() {
     setLoading(true);
 
     try {
+      // E2EE: Generate RSA Key Pair
+      const { publicKey, privateKey } = await generateUserKeyPair();
+
+      // E2EE: Encrypt private key with user password
+      const encryptedPrivateKey = await encryptPrivateKey(privateKey, formData.password);
+
       const response = await authService.signup({
         degreeType: formData.degreeType,
         rollNumber: formData.rollNumber,
         name: formData.name,
         gender: formData.gender,
         branch: formData.branch,
-        password: formData.password
+        password: formData.password,
+        publicKey,
+        encryptedPrivateKey
       });
 
       if (response.success && response.data?.rollNo) {
         setFullRollNo(response.data.rollNo);
         setStep('verify');
       }
-    } 
+    }
     catch (err: unknown) {
       let errorMsg = 'SignUp failed';
       if (typeof err === 'object' && err !== null && 'message' in err && typeof (err as { message?: string }).message === 'string') {
@@ -109,7 +118,7 @@ export default function SignupPage() {
         // Redirect to dashboard or home
         router.push('/dashboard');
       }
-    } 
+    }
     catch (err: unknown) {
       let errorMsg = 'OTP verification failed';
       if (typeof err === 'object' && err !== null && 'message' in err && typeof (err as { message?: string }).message === 'string') {

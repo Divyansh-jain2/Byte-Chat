@@ -9,7 +9,7 @@ export const config = {
   jwt: {
     accessSecret: process.env.JWT_ACCESS_SECRET || 'fallback-secret-change-in-production',
     refreshSecret: process.env.JWT_REFRESH_SECRET || 'fallback-refresh-secret-change-in-production',
-    accessExpiry: process.env.JWT_ACCESS_EXPIRY || '15m',
+    accessExpiry: process.env.JWT_ACCESS_EXPIRY || '7d',
     refreshExpiry: process.env.JWT_REFRESH_EXPIRY || '7d'
   },
   otp: {
