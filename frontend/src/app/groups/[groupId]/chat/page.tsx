@@ -12,6 +12,17 @@ import { Theme } from 'emoji-picker-react';
 import Image from 'next/image';
 import MessageBubble from '@/components/MessageBubble';
 import { messageManagementService } from '@/services/message-management.service';
+import {
+  encryptMessageAES,
+  decryptMessageAES,
+  generateAESKey,
+  encryptKeyWithPublicKey,
+  decryptKeyWithPrivateKey,
+  importPrivateKey,
+  exportKeyToBase64,
+  importKeyFromBase64
+} from '@/utils/e2ee.utils';
+import { chatService } from '@/services/chat.service';
 
 // Dynamic import for emoji picker (client-side only)
 const EmojiPicker = dynamic(() => import('emoji-picker-react'), { ssr: false });
@@ -49,6 +60,10 @@ export default function GroupChatPage() {
   const [uploadingImage, setUploadingImage] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
+  const [sessionKey, setSessionKey] = useState<CryptoKey | null>(null);
+  const [keyId, setKeyId] = useState<string | null>(null);
+  const [isE2EEReady, setIsE2EEReady] = useState(false);
+  const [userPrivateKey, setUserPrivateKey] = useState<CryptoKey | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messageInputRef = useRef<HTMLInputElement>(null);
@@ -58,10 +73,132 @@ export default function GroupChatPage() {
   const currentUser = userStr ? JSON.parse(userStr) : null;
   const currentUserId = currentUser?.user_id || currentUser?.userId;
 
+  // E2EE: Initialize session key
+  const fetchAndDecryptConversationKey = useCallback(async (msgs: GroupMessage[]) => {
+    try {
+      const storedUser = localStorage.getItem('user');
+      const decryptedPrivateKeyB64 = sessionStorage.getItem('decryptedPrivateKey');
+
+      if (!decryptedPrivateKeyB64 || !storedUser) {
+        console.warn('[E2EE] Private key missing from session storage');
+        return null;
+      }
+
+      // Import private key if not already done
+      let privKey = userPrivateKey;
+      if (!privKey && decryptedPrivateKeyB64) {
+        privKey = await importPrivateKey(decryptedPrivateKeyB64);
+        setUserPrivateKey(privKey);
+      }
+
+      if (!privKey) return null;
+
+      // Find the most recent message with a session key we can use
+      const msgWithKey = msgs.find(m => m.user_session_key && m.key_id);
+
+      if (msgWithKey && msgWithKey.user_session_key && msgWithKey.key_id) {
+        try {
+          // console.log('[DEBUG] Decrypting session key for msg:', msgWithKey.message_id);
+          const aesKeyB64 = await decryptKeyWithPrivateKey(privKey, msgWithKey.user_session_key);
+          const aesKey = await importKeyFromBase64(aesKeyB64);
+          // console.log('[DEBUG] Session key decrypted successfully');
+          setSessionKey(aesKey);
+          setKeyId(msgWithKey.key_id);
+          setIsE2EEReady(true);
+          return aesKey;
+        } catch (err) {
+          console.error('[E2EE] Failed to decrypt session key:', err);
+        }
+      }
+
+      // If no key found in messages, or decryption failed, try to initialize a new one
+      const info = await groupService.getGroupParticipantPublicKeys(groupId);
+      const participants = info.data.participants;
+
+      // Generate new AES key
+      const newAesKey = await generateAESKey();
+      const aesKeyB64 = await exportKeyToBase64(newAesKey);
+
+      // Encrypt for all participants
+      const encryptedKeys = await Promise.all(participants.map(async (p: any) => {
+        const encrypted = await encryptKeyWithPublicKey(aesKeyB64, p.public_key);
+        return {
+          userId: p.user_id,
+          encryptedKey: encrypted,
+          keyVersion: 1
+        };
+      }));
+
+      // Store on server
+      const { keyId: newKeyId } = await chatService.storeSessionKeys({
+        groupId, // Use groupId instead of conversationId for group session storage
+        keys: encryptedKeys
+      });
+
+      setSessionKey(newAesKey);
+      setKeyId(newKeyId);
+      setIsE2EEReady(true);
+      return newAesKey;
+    } catch (error) {
+      console.error('[E2EE] Session initialization failed:', error);
+    }
+  }, [groupId, userPrivateKey]);
+
+  const decryptMessages = useCallback(async (msgs: GroupMessage[], aesKey: CryptoKey) => {
+    return await Promise.all(msgs.map(async (m) => {
+      let decryptedMsg = { ...m };
+
+      // Decrypt main content
+      if (m.encrypted_content && m.content_iv && m.content_auth_tag) {
+        try {
+          const decrypted = await decryptMessageAES(
+            m.encrypted_content,
+            m.content_iv,
+            m.content_auth_tag,
+            aesKey
+          );
+          decryptedMsg.encrypted_content = decrypted;
+        } catch (err) {
+          console.warn(`[E2EE] Failed to decrypt message ${m.message_id}:`, err);
+          decryptedMsg.encrypted_content = '[Encrypted Message]';
+        }
+      }
+
+      // Decrypt parent message content if exists
+      if (m.parent_message && m.parent_message.encrypted_content && m.parent_message.content_iv && m.parent_message.content_auth_tag) {
+        try {
+          const decryptedParent = await decryptMessageAES(
+            m.parent_message.encrypted_content,
+            m.parent_message.content_iv,
+            m.parent_message.content_auth_tag,
+            aesKey
+          );
+          decryptedMsg.parent_message = {
+            ...m.parent_message,
+            encrypted_content: decryptedParent
+          };
+        } catch (err) {
+          console.warn(`[E2EE] Failed to decrypt parent of message ${m.message_id}:`, err);
+        }
+      }
+
+      return decryptedMsg;
+    }));
+  }, []);
+
   const fetchMessages = useCallback(async () => {
     try {
       const response = await groupService.getGroupMessages(groupId);
-      setMessages(response.data.messages || []);
+      const fetchedMessages = response.data.messages || [];
+
+      // E2EE: Initialize key and decrypt
+      const aesKey = await fetchAndDecryptConversationKey(fetchedMessages);
+      if (aesKey) {
+        const decrypted = await decryptMessages(fetchedMessages, aesKey);
+        setMessages(decrypted);
+      } else {
+        setMessages(fetchedMessages);
+      }
     }
     catch (error: unknown) {
       // console.error('Failed to fetch group messages:', error);
@@ -82,18 +219,55 @@ export default function GroupChatPage() {
     finally {
       setLoading(false);
     }
-  }, [groupId, toast, router]);
+  }, [groupId, toast, router, fetchAndDecryptConversationKey, decryptMessages]);
 
   useEffect(() => {
     if (!socket) return;
 
-    const handleNewGroupMessage = (message: GroupMessage) => {
+    const handleNewGroupMessage = async (message: GroupMessage) => {
+      // Robust current user identification
       const userStr = localStorage.getItem('user');
-      const currentUserId = userStr ? JSON.parse(userStr).user_id : null;
+      const currentUser = userStr ? JSON.parse(userStr) : null;
+      const currentUserId = currentUser?.user_id || currentUser?.userId;
+
+      let processedMessage = { ...message };
+
+      // Decrypt main content if session key is ready
+      if (sessionKey && message.encrypted_content) {
+        try {
+          const decrypted = await decryptMessageAES(
+            message.encrypted_content,
+            message.content_iv || '',
+            message.content_auth_tag || '',
+            sessionKey
+          );
+          processedMessage.encrypted_content = decrypted;
+        } catch (err) {
+          console.warn('[E2EE] Failed to decrypt real-time message:', err);
+        }
+      }
+
+      // Decrypt parent message content if session key is ready
+      if (sessionKey && message.parent_message?.encrypted_content) {
+        try {
+          const decryptedParent = await decryptMessageAES(
+            message.parent_message.encrypted_content,
+            message.parent_message.content_iv || '',
+            message.parent_message.content_auth_tag || '',
+            sessionKey
+          );
+          processedMessage.parent_message = {
+            ...message.parent_message,
+            encrypted_content: decryptedParent
+          };
+        } catch (err) {
+          console.warn('[E2EE] Failed to decrypt parent of real-time message:', err);
+        }
+      }
 
       setMessages((prev) => [...prev, {
-        ...message,
-        is_my_message: message.sender_id === currentUserId,
+        ...processedMessage,
+        is_my_message: message.sender_id === currentUserId || (message.sender?.user_id === currentUserId),
       }]);
     };
 
@@ -338,11 +512,31 @@ export default function GroupChatPage() {
         }
       }
 
+      // E2EE Encryption
+      let encryptedContent = newMessage.trim() || (selectedImage ? 'Image' : '');
+      let contentIv = '';
+      let contentAuthTag = '';
+
+      if (sessionKey && encryptedContent) {
+        try {
+          const encrypted = await encryptMessageAES(encryptedContent, sessionKey);
+          encryptedContent = encrypted.ciphertext;
+          contentIv = encrypted.iv;
+          contentAuthTag = encrypted.authTag;
+        } catch (err) {
+          console.error('[E2EE] Encryption failed:', err);
+          toast.error('Failed to encrypt message');
+          setSending(false);
+          return;
+        }
+      }
+
       await groupService.sendGroupMessage(groupId, {
-        encryptedContent: newMessage.trim() || 'Image',
-        contentIv: 'dummy_iv',
-        contentAuthTag: 'dummy_tag',
+        encryptedContent,
+        contentIv,
+        contentAuthTag,
         messageType: selectedImage ? 'image' : 'text',
+        keyId: keyId || undefined,
         ...(mediaUrl && {
           mediaUrl,
           mediaSize,
@@ -465,11 +659,28 @@ export default function GroupChatPage() {
         toast.error('Authentication required');
         return;
       }
+      let encryptedContent = newContent;
+      let contentIv = '';
+      let contentAuthTag = '';
+
+      if (sessionKey) {
+        try {
+          const encrypted = await encryptMessageAES(newContent, sessionKey);
+          encryptedContent = encrypted.ciphertext;
+          contentIv = encrypted.iv;
+          contentAuthTag = encrypted.authTag;
+        } catch (err) {
+          console.error('[E2EE] Edit encryption failed:', err);
+          toast.error('Failed to encrypt edit');
+          return;
+        }
+      }
+
       await messageManagementService.editMessage(
         messageId,
-        newContent,
-        'dummy_iv',
-        'dummy_tag',
+        encryptedContent,
+        contentIv,
+        contentAuthTag,
         token
       );
       toast.success('Message edited');

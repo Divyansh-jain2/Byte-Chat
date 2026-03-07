@@ -1,0 +1,29 @@
+/* Specific fixes for Signup Page UI */
+
+.select-romance {
+  width: 100%;
+  min-width: 0; /* Ensures it can shrink if needed */
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+/* Ensure the grid cells handle their content properly */
+.grid-cols-2 {
+  gap: 1rem;
+}
+
+.grid-cols-2 > div {
+  min-width: 0; /* Prevents flex/grid items from overflowing */
+}
+
+/* Optional: improve the look of the options inside */
+.select-romance option {
+  font-size: 0.9rem;
+  padding: 8px;
+}
+
+/* Ensure font-mono doesn't break the layout of the roll number */
+.input-romance.font-mono {
+  letter-spacing: 0.05em;
+}

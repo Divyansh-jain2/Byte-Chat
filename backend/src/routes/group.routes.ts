@@ -12,6 +12,7 @@ import {
   updateGroup,
   promoteMemberToAdmin,
   getGroupMessages,
+  getGroupParticipantPublicKeys,
   sendGroupMessage,
   createPoll,
   getGroupPolls,
@@ -23,7 +24,8 @@ import {
   selectGroupPresetAvatar,
   uploadGroup,
   uploadGroupChatImage,
-  getPollResults} from '../controllers/group.controller.js';
+  getPollResults
+} from '../controllers/group.controller.js';
 import { authenticateToken } from '../middleware/auth.middleware.js';
 import { uploadImage, handleMulterError } from '../middleware/upload.middleware.js';
 import { asyncHandler } from '../utils/error.util.js';
@@ -60,8 +62,9 @@ router.post('/:groupId/join', asyncHandler(joinGroup));
 router.post('/:groupId/leave', asyncHandler(leaveGroup));
 
 // Group messages
-router.get('/:groupId/messages', asyncHandler(getGroupMessages));
-router.post('/:groupId/messages', asyncHandler(sendGroupMessage));
+router.get('/:groupId/messages', getGroupMessages);
+router.get('/:groupId/participants/keys', getGroupParticipantPublicKeys);
+router.post('/:groupId/messages', uploadImage.single('image'), sendGroupMessage);
 
 // Group chat image upload
 router.post('/:groupId/upload-image', uploadImage.single('image'), asyncHandler(uploadGroupChatImage), handleMulterError);

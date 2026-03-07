@@ -7,6 +7,7 @@ import { authService } from '@/services/auth.service';
 import { DEGREE_TYPE_OPTIONS, DegreeType } from '@/types/auth.types';
 import { useTheme } from '@/contexts/ThemeContext';
 import { generateUserKeyPair, encryptPrivateKey } from '@/utils/e2ee.utils';
+import './signup.css';
 
 export default function SignupPage() {
   const router = useRouter();

@@ -863,9 +863,23 @@ export const getGroupMessages = async (req: Request, res: Response) => {
             ) r
           ),
           '[]'::json
-        ) as reactions
+        ) as reactions,
+        sk.aes_key_encrypted as user_session_key,
+        (
+          SELECT json_build_object(
+            'message_id', pm.message_id,
+            'encrypted_content', pm.encrypted_content,
+            'content_iv', pm.content_iv,
+            'content_auth_tag', pm.content_auth_tag,
+            'sender', json_build_object('name', pu.name)
+          )
+          FROM chat_messages pm
+          LEFT JOIN users pu ON pm.sender_id = pu.user_id
+          WHERE pm.message_id = cm.parent_message_id
+        ) as parent_message
       FROM chat_messages cm
       LEFT JOIN users u ON cm.sender_id = u.user_id
+      LEFT JOIN chat_session_keys sk ON cm.key_id = sk.session_key_id AND sk.encrypted_for_user_id = $2
       WHERE cm.group_id = $1
       ${before ? 'AND cm.created_at < $4' : ''}
       AND cm.is_deleted = false
@@ -901,7 +915,8 @@ export const sendGroupMessage = async (req: Request, res: Response) => {
     mediaSize,
     mediaMimeType,
     thumbnailUrl,
-    keyId
+    keyId,
+    parentMessageId
   } = req.body;
 
   if (!userId) {
@@ -936,8 +951,9 @@ export const sendGroupMessage = async (req: Request, res: Response) => {
       thumbnail_url,
       is_anonymous,
       anonymous_identity_id,
-      key_id
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, false, NULL, $11)
+      key_id,
+      parent_message_id
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, false, NULL, $11, $12)
     RETURNING *`,
     [
       groupId,
@@ -950,36 +966,50 @@ export const sendGroupMessage = async (req: Request, res: Response) => {
       mediaSize,
       mediaMimeType,
       thumbnailUrl,
-      keyId
+      keyId,
+      parentMessageId
     ]
   );
 
-  const message = result.rows[0];
+  const messageId = result.rows[0].message_id;
 
-  // Emit socket event
+  // Emit socket event with full message (including parent details)
   if (io) {
-    const userInfo = await pool.query(
-      'SELECT name, gender, dp_url FROM users WHERE user_id = $1',
-      [userId]
+    const fullMessage = await pool.query(
+      `SELECT 
+        cm.*,
+        jsonb_build_object(
+          'user_id', u.user_id,
+          'name', u.name,
+          'roll_no', u.roll_no,
+          'display_gender', u.gender,
+          'dp_url', u.dp_url,
+          'is_anonymous', false
+        ) as sender,
+        (
+          SELECT json_build_object(
+            'message_id', pm.message_id,
+            'encrypted_content', pm.encrypted_content,
+            'content_iv', pm.content_iv,
+            'content_auth_tag', pm.content_auth_tag,
+            'sender', json_build_object('name', pu.name)
+          )
+          FROM chat_messages pm
+          LEFT JOIN users pu ON pm.sender_id = pu.user_id
+          WHERE pm.message_id = cm.parent_message_id
+        ) as parent_message
+      FROM chat_messages cm
+      LEFT JOIN users u ON cm.sender_id = u.user_id
+      WHERE cm.message_id = $1`,
+      [messageId]
     );
 
-    const senderInfo = {
-      user_id: userId,
-      name: userInfo.rows[0].name,
-      display_gender: userInfo.rows[0].gender,
-      dp_url: userInfo.rows[0].dp_url,
-      is_anonymous: false
-    };
-
-    io.to(`group:${groupId}`).emit('new-group-message', {
-      ...message,
-      sender: senderInfo
-    });
+    io.to(`group:${groupId}`).emit('new-group-message', fullMessage.rows[0]);
   }
 
   res.json({
     success: true,
-    data: message
+    data: result.rows[0]
   });
 };
 
@@ -1133,7 +1163,7 @@ export const createPoll = async (req: Request, res: Response) => {
        WHERE group_id = $1
          AND poll_type = $2
          AND status = 'active'
-         AND ($3::UUID IS NULL OR target_user_id = $3::UUID)`,
+         AND($3:: UUID IS NULL OR target_user_id = $3:: UUID)`,
       [groupId, poll_type, target_user_id || null]
     );
     if (dupCheck.rows.length > 0) {
@@ -1152,11 +1182,11 @@ export const createPoll = async (req: Request, res: Response) => {
 
     // 5. Insert the poll
     const pollResult = await client.query(
-      `INSERT INTO polls (
+      `INSERT INTO polls(
         group_id, created_by, target_user_id, poll_type,
         title, description, total_voters, expires_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-      RETURNING *`,
+      ) VALUES($1, $2, $3, $4, $5, $6, $7, $8)
+      RETURNING * `,
       [
         groupId,
         userId,
@@ -1175,7 +1205,7 @@ export const createPoll = async (req: Request, res: Response) => {
     if (poll_type === 'General') {
       for (let i = 0; i < options.length; i++) {
         await client.query(
-          `INSERT INTO poll_options (poll_id, option_text, option_order) VALUES ($1, $2, $3)`,
+          `INSERT INTO poll_options(poll_id, option_text, option_order) VALUES($1, $2, $3)`,
           [poll.poll_id, options[i], i]
         );
       }
@@ -1190,7 +1220,7 @@ export const createPoll = async (req: Request, res: Response) => {
       pollWithOptions = { ...poll, options: optsRes.rows };
     }
 
-    io.to(`group:${groupId}`).emit('new-poll', pollWithOptions);
+    io.to(`group: ${groupId}`).emit('new-poll', pollWithOptions);
 
     res.status(201).json({
       success: true,
@@ -1232,17 +1262,17 @@ export const getGroupPolls = async (req: Request, res: Response) => {
     let queryText = `
       SELECT 
         p.*,
-        u.name as creator_name,
-        u.roll_no as creator_roll_no,
-        tu.name as target_name,
-        tu.roll_no as target_roll_no,
-        EXISTS (
-          SELECT 1 FROM votes v 
+      u.name as creator_name,
+      u.roll_no as creator_roll_no,
+      tu.name as target_name,
+      tu.roll_no as target_roll_no,
+      EXISTS(
+        SELECT 1 FROM votes v 
           WHERE v.poll_id = p.poll_id 
           AND v.user_id = $2
-        ) as has_voted,
-        (
-          SELECT vote_value FROM votes v 
+      ) as has_voted,
+      (
+        SELECT vote_value FROM votes v 
           WHERE v.poll_id = p.poll_id 
           AND v.user_id = $2
         ) as user_vote
@@ -1294,7 +1324,7 @@ export const getGroupPolls = async (req: Request, res: Response) => {
       success: true,
       data: pollsWithOptions
     });
-  } 
+  }
   catch (error: any) {
     console.error('Error fetching group polls:', error);
     throw error;
@@ -1346,7 +1376,7 @@ export const voteOnPoll = async (req: Request, res: Response) => {
         [pollId]
       );
       await client.query('COMMIT');
-      io.to(`group:${groupId}`).emit('poll-expired', { poll_id: pollId, group_id: groupId });
+      io.to(`group:${groupId} `).emit('poll-expired', { poll_id: pollId, group_id: groupId });
       throw new ApiError(400, 'This poll has expired');
     }
     // Target of a kick poll cannot vote on their own removal
@@ -1362,12 +1392,12 @@ export const voteOnPoll = async (req: Request, res: Response) => {
       const optRes = await client.query(`SELECT 1 FROM poll_options WHERE poll_id = $1 AND option_id = $2`, [pollId, option_id]);
       if (optRes.rows.length === 0) throw new ApiError(400, 'Invalid option_id');
       upsertResult = await client.query(
-        `INSERT INTO votes (poll_id, user_id, option_id)
-         VALUES ($1, $2, $3)
-         ON CONFLICT (poll_id, user_id)
+        `INSERT INTO votes(poll_id, user_id, option_id)
+  VALUES($1, $2, $3)
+         ON CONFLICT(poll_id, user_id)
            WHERE user_id IS NOT NULL
          DO UPDATE SET option_id = EXCLUDED.option_id, voted_at = NOW()
-         RETURNING (xmax = 0) AS inserted`,
+  RETURNING(xmax = 0) AS inserted`,
         [pollId, userId, option_id]
       );
       voteWasNew = upsertResult.rows[0]?.inserted ?? true;
@@ -1376,12 +1406,12 @@ export const voteOnPoll = async (req: Request, res: Response) => {
         throw new ApiError(400, 'vote_value must be a boolean (true = yes, false = no)');
       }
       upsertResult = await client.query(
-        `INSERT INTO votes (poll_id, user_id, vote_value)
-         VALUES ($1, $2, $3)
-         ON CONFLICT (poll_id, user_id)
+        `INSERT INTO votes(poll_id, user_id, vote_value)
+  VALUES($1, $2, $3)
+         ON CONFLICT(poll_id, user_id)
            WHERE user_id IS NOT NULL
          DO UPDATE SET vote_value = EXCLUDED.vote_value, voted_at = NOW()
-         RETURNING (xmax = 0) AS inserted`,
+  RETURNING(xmax = 0) AS inserted`,
         [pollId, userId, vote_value]
       );
       voteWasNew = upsertResult.rows[0]?.inserted ?? true;
@@ -1393,10 +1423,10 @@ export const voteOnPoll = async (req: Request, res: Response) => {
     // 6. Read final poll state
     const finalPoll = await query(
       `SELECT p.*,
-              u.name  AS creator_name,
-              tu.name AS target_name
+    u.name  AS creator_name,
+      tu.name AS target_name
        FROM polls p
-       JOIN  users u  ON p.created_by      = u.user_id
+       JOIN  users u  ON p.created_by = u.user_id
        LEFT JOIN users tu ON p.target_user_id = tu.user_id
        WHERE p.poll_id = $1`,
       [pollId]
@@ -1404,7 +1434,7 @@ export const voteOnPoll = async (req: Request, res: Response) => {
     const updatedPoll = finalPoll.rows[0];
 
     // 7. Emit socket events
-    io.to(`group:${groupId}`).emit('poll-updated', updatedPoll);
+    io.to(`group:${groupId} `).emit('poll-updated', updatedPoll);
 
     res.json({
       success: true,
@@ -1470,16 +1500,16 @@ export const cancelPoll = async (req: Request, res: Response) => {
     await client.query(
       `UPDATE polls
        SET status = 'cancelled',
-           cancelled_by = $1,
-           cancellation_reason = $2,
-           updated_at = NOW()
+    cancelled_by = $1,
+    cancellation_reason = $2,
+    updated_at = NOW()
        WHERE poll_id = $3`,
       [userId, reason?.trim() || null, pollId]
     );
 
     await client.query('COMMIT');
 
-    io.to(`group:${groupId}`).emit('poll-cancelled', {
+    io.to(`group:${groupId} `).emit('poll-cancelled', {
       poll_id: pollId,
       group_id: groupId,
       cancelled_by: userId,
@@ -1537,7 +1567,7 @@ export const executePoll = async (req: Request, res: Response) => {
     const poll = pollRow.rows[0];
 
     if (poll.status !== 'passed') {
-      throw new ApiError(400, `Poll must be in 'passed' status to execute (current: ${poll.status})`);
+      throw new ApiError(400, `Poll must be in 'passed' status to execute(current: ${poll.status})`);
     }
     if (poll.is_executed) {
       throw new ApiError(400, 'This poll has already been executed');
@@ -1569,14 +1599,14 @@ export const executePoll = async (req: Request, res: Response) => {
 
     if (fp?.is_executed) {
       if (fp.poll_type === 'kick_member' && fp.target_user_id) {
-        io.to(`group:${groupId}`).emit('member-removed', {
+        io.to(`group:${groupId} `).emit('member-removed', {
           group_id: groupId,
           user_id: fp.target_user_id,
           reason: 'poll_manual_execute',
           poll_id: pollId,
         });
       }
-      io.to(`group:${groupId}`).emit('poll-executed', {
+      io.to(`group:${groupId} `).emit('poll-executed', {
         poll_id: pollId,
         group_id: groupId,
         poll_type: fp.poll_type,
@@ -1649,7 +1679,7 @@ export const uploadGroupPicture = async (req: Request, res: Response) => {
     const uploadResult = await uploadToCloudinary(
       req.file.buffer,
       'group_pictures',
-      `group_${groupId}_${Date.now()}`
+      `group_${groupId}_${Date.now()} `
     );
 
     // Update database with new image URL
@@ -1657,14 +1687,14 @@ export const uploadGroupPicture = async (req: Request, res: Response) => {
       `UPDATE groups 
        SET group_dp_url = $1, updated_at = NOW()
        WHERE group_id = $2
-       RETURNING *`,
+  RETURNING * `,
       [uploadResult.secure_url, groupId]
     );
 
     await client.query('COMMIT');
 
     // Emit socket event for real-time update
-    io.to(`group-${groupId}`).emit('group-updated', updateResult.rows[0]);
+    io.to(`group - ${groupId} `).emit('group-updated', updateResult.rows[0]);
 
     res.json({
       success: true,
@@ -1733,14 +1763,14 @@ export const deleteGroupPicture = async (req: Request, res: Response) => {
       `UPDATE groups 
        SET group_dp_url = NULL, updated_at = NOW()
        WHERE group_id = $1
-       RETURNING *`,
+  RETURNING * `,
       [groupId]
     );
 
     await client.query('COMMIT');
 
     // Emit socket event for real-time update
-    io.to(`group-${groupId}`).emit('group-updated', updateResult.rows[0]);
+    io.to(`group - ${groupId} `).emit('group-updated', updateResult.rows[0]);
 
     res.json({
       success: true,
@@ -1840,14 +1870,14 @@ export const selectGroupPresetAvatar = async (req: Request, res: Response) => {
       `UPDATE groups 
        SET group_dp_url = $1, updated_at = NOW()
        WHERE group_id = $2
-       RETURNING *`,
+  RETURNING * `,
       [avatarUrl, groupId]
     );
 
     await client.query('COMMIT');
 
     // Emit socket event for real-time update
-    io.to(`group-${groupId}`).emit('group-updated', updateResult.rows[0]);
+    io.to(`group - ${groupId} `).emit('group-updated', updateResult.rows[0]);
 
     res.json({
       success: true,
@@ -1897,7 +1927,7 @@ export const uploadGroupChatImage = async (req: Request, res: Response) => {
 
     // Upload to Cloudinary in chat_images folder with unique ID
     const randomStr = Math.random().toString(36).substring(2, 10);
-    const uniqueId = `group_${groupId}_${userId}_${Date.now()}_${randomStr}`;
+    const uniqueId = `group_${groupId}_${userId}_${Date.now()}_${randomStr} `;
     const result = await uploadToCloudinary(
       req.file.buffer,
       'chat_images',
@@ -1922,3 +1952,44 @@ export const uploadGroupChatImage = async (req: Request, res: Response) => {
     throw new ApiError(500, 'Failed to upload image');
   }
 };
+
+// Get public keys of all participants in a group
+export async function getGroupParticipantPublicKeys(req: Request, res: Response) {
+  try {
+    const userId = req.user?.userId;
+    const { groupId } = req.params;
+
+    if (!userId) throw new ApiError(401, 'Unauthorized');
+
+    // Check if user is a member
+    const memberCheck = await pool.query(
+      `SELECT 1 FROM group_members WHERE group_id = $1 AND user_id = $2`,
+      [groupId, userId]
+    );
+
+    if (memberCheck.rows.length === 0) {
+      throw new ApiError(403, 'Access denied to this group');
+    }
+
+    // Get public keys of all members
+    const result = await pool.query(
+      `SELECT u.user_id, uek.public_key, u.name
+       FROM group_members gm
+       JOIN users u ON gm.user_id = u.user_id
+       JOIN user_encryption_keys uek ON u.user_id = uek.user_id
+       WHERE gm.group_id = $1`,
+      [groupId]
+    );
+
+    res.json({
+      success: true,
+      data: {
+        participants: result.rows
+      }
+    });
+  } catch (error) {
+    console.error('[E2EE] Get group participant public keys error:', error);
+    if (error instanceof ApiError) throw error;
+    throw new ApiError(500, 'Failed to fetch group public keys');
+  }
+}

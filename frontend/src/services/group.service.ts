@@ -254,6 +254,7 @@ export const groupService = {
     mediaMimeType?: string;
     thumbnailUrl?: string;
     keyId?: string;
+    parentMessageId?: string;
   }) => {
     const token = localStorage.getItem('accessToken');
     const response = await fetch(`${API_URL}/${groupId}/messages`, {
@@ -329,7 +330,7 @@ export const groupService = {
   voteOnPoll: async (groupId: string, pollId: string, voteValue?: boolean, optionId?: string) => {
     const token = localStorage.getItem('accessToken');
     // const body: any = {};
-    const body: {vote_value?: boolean; option_id?: string} = {};
+    const body: { vote_value?: boolean; option_id?: string } = {};
     if (typeof voteValue === 'boolean') body.vote_value = voteValue;
     if (optionId) body.option_id = optionId;
     const response = await fetch(`${API_URL}/${groupId}/polls/${pollId}/vote`, {
@@ -423,6 +424,24 @@ export const groupService = {
     if (!response.ok) {
       const error = await response.json();
       throw new Error(error.message || 'Failed to upload image');
+    }
+
+    return response.json();
+  },
+
+  // Get public keys of all participants in a group
+  getGroupParticipantPublicKeys: async (groupId: string) => {
+    const token = localStorage.getItem('accessToken');
+    const response = await fetch(`${API_URL}/${groupId}/participants/keys`, {
+      headers: {
+        'Authorization': token ? `Bearer ${token}` : '',
+      },
+      credentials: 'include',
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message || 'Failed to fetch group public keys');
     }
 
     return response.json();
