@@ -155,7 +155,7 @@
 
 ## Message Management
 - **Message Editing**: Edit sent messages with edit history [Done]
-- **Message Deletion**: Delete messages for self or everyone [little complex]
+- **Message Deletion**: Delete messages for self or everyone [Done]
 - **Message Reactions**: React to messages with emojis (👍, ❤️, 😂, etc.) [Done]
 - **Reply/Quote**: Reply to specific messages with threading [Done]
 
@@ -176,3 +176,7 @@
 - **End-to-End Encryption**: Full E2EE for all messages (Signal Protocol)
 - **Encryption Verification**: Verify encryption keys with users
 
+## Message Status & Tracking
+- **Message Delivery Status**: Sent, delivered, read indicators
+- **Typing Indicators**: Enhanced typing indicators with names in groups
+- **Online Indicators**: Green dot for online users

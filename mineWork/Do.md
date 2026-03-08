@@ -1,11 +1,6 @@
 
 # ############## ToAdd ####################
 
-## Message Status & Tracking
-- **Message Delivery Status**: Sent, delivered, read indicators
-- **Typing Indicators**: Enhanced typing indicators with names in groups
-- **Online Indicators**: Green dot for online users
-
 ## Security & Privacy Enhancements
 - **Account Deletion**: Permanent account deletion with data removal
 - **Message Pagination**: Load messages in batches for performance
