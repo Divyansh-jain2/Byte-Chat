@@ -87,3 +87,13 @@ export interface TokenPayload {
   iat?: number;
   exp?: number;
 }
+
+export interface SessionData {
+  userId: string;
+  rollNo: string;
+  email?: string; // or: email: string | undefined;
+  createdAt: string;
+  lastActivity: string;
+  ipAddress: string;
+  userAgent: string;
+}

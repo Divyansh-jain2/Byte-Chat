@@ -3,8 +3,11 @@ import * as crypto from 'crypto';
 import { pool } from '../lib/db.js';
 import { ApiError } from '../utils/error.util.js';
 import { io } from '../index.js';
-import { emitToConversation } from '../socket/index.js';
+import { emitToConversation, isUserOnline } from '../socket/index.js';
 import { uploadToCloudinary } from '../utils/cloudinary.util.js';
+import { cacheMessage } from '../services/messageCache.service.js';
+import { queueOfflineMessage } from '../services/offlineMessage.service.js';
+import { incrementUnread, resetUnread } from '../services/unread.service.js';
 
 /**
  * REGULAR CHAT CONTROLLER
@@ -458,6 +461,10 @@ export async function getMessages(req: Request, res: Response) {
       before ? [conversationId, userId, limit, before] : [conversationId, userId, limit]
     );
 
+    // Redis Messaging Layer
+    // 1. Reset unread count for this user in this chat
+    await resetUnread(userId, conversationId as string);
+
     res.json({
       success: true,
       data: {
@@ -624,6 +631,21 @@ export async function sendMessage(req: Request, res: Response) {
         sender: senderInfo,
         is_my_message: false,
       });
+    }
+
+    // Redis Messaging Layer
+    const fullMessage = message; // Basic message object from DB insert
+
+    // 1. Cache the message for quick loading
+    await cacheMessage(conversationId, fullMessage);
+
+    // 2. Track unread count for recipient
+    await incrementUnread(otherUserId, conversationId);
+
+    // 3. Queue for offline delivery if needed
+    const online = await isUserOnline(otherUserId);
+    if (!online) {
+      await queueOfflineMessage(otherUserId, fullMessage);
     }
 
     // console.log(`💬 Regular message sent in conversation ${conversationId}`);

@@ -1,88 +1,71 @@
 
-## Authentication Layer
+## Messaging Performance
 
-Used during **login / API auth middleware**.
-
-1. `session:{sessionId}`
-2. `rate_limit:{userId}:{endpoint}:{minute}`
-3. `login_attempts:{ip}:{hour}`
+10. `message_cache:{chatId}:recent`
+11. `offline_messages:{userId}`
+12. `unread_counts:{userId}:{chatId}`
 
 Integration:
 
 ```text
-Auth API
- ├─ login
- ├─ middleware verify session
- └─ rate limiter
+message sent
+ ├─ save DB
+ ├─ LPUSH message_cache
+ ├─ INCR unread_counts
+ └─ if offline → offline_messages
 ```
 
-Session & Auth (String type)
-    // Key format: session:{sessionId}
-    // Value: JSON string with user data
-        // {
-        // "userId": "uuid",
-        // "rollNo": "B23XX",
-        // "createdAt": "timestamp",
-        // "expiresAt": "timestamp",
-        // "device": "web/mobile"
-        // }
-    // TTL: 7 days
+Message Queue & Caching
+    // Key: offline_messages:{userId}
+    // Type: List of message JSON
+    // Max length: 100 messages
+    // Used for: Store messages when user offline
 
-    // Key: rate_limit:{userId}:{endpoint}:{minute}
-    // Value: Integer counter
-    // TTL: 60 seconds
-    // Used: Rate limiting per minute
-
-    // Key: login_attempts:{ip}:{hour}
+    // Key: unread_counts:{userId}:{chatId}
     // Type: Integer counter
+    // Used for: Badge counts
+
+    // Key: message_cache:{chatId}:recent
+    // Type: List (LRU capped at 50 messages)
+    // Value: JSON of recent messages
     // TTL: 1 hour
-    // Used for: Brute force protection
+    // Used for: Quick load of recent chat
 
+## **MESSAGE QUEUE & CACHING**
+### Offline Messages Queue
+Key: offline_messages:{userId}
+Type: List
+TTL: None (cleared when user comes online)
+Value: JSON serialized message objects
 
-### 1.1 Primary Session Store
-```redis
-Key: session:{sessionId}
-Type: Hash
-TTL: 7 days (604800 seconds)
-Fields:
-  - userId: UUID
-  - rollNo: string
-  - email: string
-  - createdAt: timestamp
-  - lastActivity: timestamp
-  - ipAddress: string
-  - userAgent: string
+Purpose: Store messages for offline users
 
 Example:
-HSET session:abc123 userId "uuid-123" rollNo "b23001" email "user@example.com"
-EXPIRE session:abc123 604800
-```
+LPUSH offline_messages:uuid-123 '{"messageId":"msg-1","senderId":"uuid-456","content":"encrypted..."}'
+LRANGE offline_messages:uuid-123 0 -1
+LTRIM offline_messages:uuid-123 0 0  // Keep only latest
 
-### 1.2 API Rate Limiting
-```redis
-Key: rate_limit:{userId}:{endpoint}:{minute}
+### Unread Message Counters
+Key: unread_counts:{userId}:{chatId}
 Type: String (counter)
-TTL: 60 seconds
-Value: request count
+TTL: None
+Value: unread message count
 
-Purpose: Prevent API abuse (e.g., max 100 requests/minute)
-
-Example:
-INCR rate_limit:uuid-123:/api/messages:1706342400
-EXPIRE rate_limit:uuid-123:/api/messages:1706342400 60
-```
-
-### 1.3 Failed Login Attempts
-```redis
-Key: login_attempts:{ip}:{hour}
-Type: String (counter)
-TTL: 1 hour (3600 seconds)
-Value: attempt count
-
-Purpose: Block IPs after 5 failed login attempts
+Purpose: Track unread messages per chat
 
 Example:
-INCR login_attempts:192.168.1.1:1706342400
-EXPIRE login_attempts:192.168.1.1:1706342400 3600
-GET login_attempts:192.168.1.1:1706342400
-```
+INCR unread_counts:uuid-123:chat-456
+SET unread_counts:uuid-123:chat-456 0  // Mark as read
+
+### Recent Messages Cache
+Key: message_cache:{chatId}:recent
+Type: List (LRU - max 50 messages)
+TTL: None
+Value: JSON serialized message objects
+
+Purpose: Cache recent messages to reduce DB queries
+
+Example:
+LPUSH message_cache:chat-456:recent '{"messageId":"msg-1","content":"..."}'
+LTRIM message_cache:chat-456:recent 0 49  // Keep only 50
+LRANGE message_cache:chat-456:recent 0 19  // Get 20 recent

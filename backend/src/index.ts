@@ -70,6 +70,9 @@ app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
 // Routes
+import { rateLimiter } from './middleware/rateLimiter.js';
+app.use('/api', rateLimiter);
+
 app.use('/api/auth', authRoutes);
 app.use('/api/test', testRoutes);
 app.use('/api/profile', profileRoutes);

@@ -1,0 +1,288 @@
+
+# 1. `message_cache:{chatId}:recent`
+
+Purpose: **fast loading of recent messages**
+
+Instead of querying DB every time a chat opens.
+
+### Redis structure
+
+```text
+Key: message_cache:{chatId}:recent
+Type: List
+Max length: 50
+TTL: optional (1 hour recommended)
+Value: JSON message
+```
+
+Example:
+
+```redis
+LPUSH message_cache:chat123:recent "{message}"
+LTRIM message_cache:chat123:recent 0 49
+```
+
+---
+
+### Redis helper
+
+`src/services/messageCache.service.ts`
+
+```ts
+import redis from "../config/redis";
+
+export async function cacheMessage(chatId: string, message: any) {
+  const key = `message_cache:${chatId}:recent`;
+
+  await redis.lpush(key, JSON.stringify(message));
+  await redis.ltrim(key, 0, 49);
+  await redis.expire(key, 3600);
+}
+
+export async function getCachedMessages(chatId: string) {
+  const key = `message_cache:${chatId}:recent`;
+
+  const messages = await redis.lrange(key, 0, 19);
+
+  return messages.map(m => JSON.parse(m)).reverse();
+}
+```
+
+---
+
+### When used
+
+```text
+user opens chat
+      ↓
+check Redis cache
+      ↓
+if exists → return instantly
+else → query DB
+```
+
+---
+
+# 2. `offline_messages:{userId}`
+
+Purpose: **store messages for offline users**
+
+Instead of losing messages when user socket is disconnected.
+
+---
+
+### Redis structure
+
+```text
+Key: offline_messages:{userId}
+Type: List
+Max length: 100
+Value: JSON message
+```
+
+Example:
+
+```redis
+LPUSH offline_messages:uuid123 "{message}"
+LTRIM offline_messages:uuid123 0 99
+```
+
+---
+
+### Redis helper
+
+`src/services/offlineMessage.service.ts`
+
+```ts
+import redis from "../config/redis";
+
+export async function queueOfflineMessage(userId: string, message: any) {
+  const key = `offline_messages:${userId}`;
+
+  await redis.lpush(key, JSON.stringify(message));
+  await redis.ltrim(key, 0, 99);
+}
+
+export async function getOfflineMessages(userId: string) {
+  const key = `offline_messages:${userId}`;
+
+  const messages = await redis.lrange(key, 0, -1);
+
+  await redis.del(key);
+
+  return messages.map(m => JSON.parse(m));
+}
+```
+
+---
+
+### When used
+
+```text
+message sent
+      ↓
+check if receiver online
+      ↓
+if offline → queue message
+```
+
+Check online using:
+
+```ts
+SISMEMBER online_users userId
+```
+
+---
+
+# 3. `unread_counts:{userId}:{chatId}`
+
+Purpose: **badge counts + unread messages**
+
+Example:
+
+```text
+Chat list screen
+ ├ Chat A (2 unread)
+ ├ Chat B (5 unread)
+```
+
+---
+
+### Redis structure
+
+```text
+Key: unread_counts:{userId}:{chatId}
+Type: String (counter)
+Value: integer
+```
+
+Example:
+
+```redis
+INCR unread_counts:user123:chat456
+SET unread_counts:user123:chat456 0
+```
+
+---
+
+### Redis helper
+
+`src/services/unread.service.ts`
+
+```ts
+import redis from "../config/redis";
+
+export async function incrementUnread(userId: string, chatId: string) {
+  const key = `unread_counts:${userId}:${chatId}`;
+
+  await redis.incr(key);
+}
+
+export async function resetUnread(userId: string, chatId: string) {
+  const key = `unread_counts:${userId}:${chatId}`;
+
+  await redis.set(key, 0);
+}
+
+export async function getUnread(userId: string, chatId: string) {
+  const key = `unread_counts:${userId}:${chatId}`;
+
+  const count = await redis.get(key);
+
+  return Number(count || 0);
+}
+```
+
+---
+
+# 4. Full Message Flow
+
+When message is sent:
+
+```text
+User sends message
+        ↓
+store message in DB
+        ↓
+cache message in Redis
+        ↓
+check receiver online
+        ↓
+if offline → store offline queue
+        ↓
+increment unread counter
+        ↓
+broadcast to room
+```
+
+---
+
+# 5. Backend Example Flow
+
+```ts
+async function handleMessage(chatId, senderId, receiverId, message) {
+
+  await saveMessageToDB(message);
+
+  await cacheMessage(chatId, message);
+
+  const isOnline = await redis.sismember("online_users", receiverId);
+
+  if (!isOnline) {
+    await queueOfflineMessage(receiverId, message);
+  }
+
+  await incrementUnread(receiverId, chatId);
+
+  broadcastMessage(chatId, message);
+}
+```
+
+---
+
+# 6. Chat Open Flow
+
+```text
+user opens chat
+      ↓
+reset unread count
+      ↓
+fetch cached messages
+      ↓
+if empty → load from DB
+```
+
+Example:
+
+```ts
+await resetUnread(userId, chatId);
+
+const messages = await getCachedMessages(chatId);
+```
+
+---
+
+# 7. Redis Keys After This Layer
+
+Your Redis now supports **complete real-time messaging**:
+
+```
+session:{sessionId}
+rate_limit:{userId}:{endpoint}:{minute}
+login_attempts:{ip}:{hour}
+
+ws_auth:{socketId}
+
+user_socket:{userId}
+socket_user:{socketId}
+
+online_users
+
+room:{chatId}
+
+typing:{chatId}:{userId}
+
+message_cache:{chatId}:recent
+offline_messages:{userId}
+unread_counts:{userId}:{chatId}
+```

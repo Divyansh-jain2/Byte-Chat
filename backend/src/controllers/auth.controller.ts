@@ -15,6 +15,9 @@ import {
 import { sendOTPEmail } from '../utils/email.util.js';
 import type { SignupRequest, VerifyOTPRequest, LoginRequest, ForgotPasswordRequest, ResetPasswordRequest } from '../types/auth.types.js';
 import { config } from '../config/index.js';
+import { redis } from '../lib/redis.js';
+import { createSession, deleteSession } from '../services/session.service.js';
+import { v4 as uuidv4 } from 'uuid';
 
 /**
  * SIGNUP - Step 1: Create user and send OTP
@@ -346,6 +349,23 @@ export async function login(req: Request, res: Response) {
   try {
     const { rollNo, password } = req.body as LoginRequest;
 
+    // Login Protection: Check attempts
+    const hour = Math.floor(Date.now() / 3600000);
+    const ip = req.ip || req.socket.remoteAddress || 'unknown';
+    const attemptKey = `login_attempts:${ip}:${hour}`;
+
+    const attempts = await redis.incr(attemptKey);
+    if (attempts === 1) {
+      await redis.expire(attemptKey, 3600);
+    }
+
+    if (attempts > 5) {
+      return res.status(429).json({
+        success: false,
+        message: 'Too many login attempts. Please try again in an hour.'
+      });
+    }
+
     // Validate inputs
     if (!rollNo || !password) {
       return res.status(400).json({
@@ -460,12 +480,17 @@ export async function login(req: Request, res: Response) {
       [user.user_id, refreshTokenHash]
     );
 
-    // Set refresh token as HTTP-only cookie
-    res.cookie('refreshToken', refreshToken, {
-      httpOnly: true,
-      secure: config.server.nodeEnv === 'production',
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+    // Clear login attempts on success
+    await redis.del(attemptKey);
+
+    // Create Redis Session
+    const sessionId = uuidv4();
+    await createSession(sessionId, {
+      userId: user.user_id,
+      rollNo: user.roll_no,
+      email: rollNo.includes('@') ? rollNo : "", // or fetch email from DB if needed
+      ipAddress: ip,
+      userAgent: req.get('user-agent') || 'unknown'
     });
 
     return res.status(200).json({
@@ -473,6 +498,7 @@ export async function login(req: Request, res: Response) {
       message: 'Login successful',
       data: {
         accessToken,
+        sessionId, // Return sessionId to client
         user: {
           userId: user.user_id,
           rollNo: user.roll_no,
@@ -759,6 +785,12 @@ export async function logout(req: Request, res: Response) {
           console.error('Audit log error:', auditError);
         }
       }
+    }
+
+    // Clear Redis Session if provided in headers or cookies (if you use cookies)
+    const sessionId = req.headers['x-session-id'] as string;
+    if (sessionId) {
+      await deleteSession(sessionId);
     }
 
     // Clear cookie

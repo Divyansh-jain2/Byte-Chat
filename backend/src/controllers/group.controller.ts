@@ -49,6 +49,10 @@ import { ApiError } from '../utils/error.util.js';
 import { uploadToCloudinary, deleteFromCloudinary, extractPublicId, getDefaultGroupDP } from '../utils/cloudinary.util.js';
 import { getAvatarUrl, isValidPresetAvatar, getRandomAvatar } from '../utils/avatar.util.js';
 import { io } from '../index.js';
+import { isUserOnline } from '../socket/index.js';
+import { cacheMessage } from '../services/messageCache.service.js';
+import { queueOfflineMessage } from '../services/offlineMessage.service.js';
+import { incrementUnread, resetUnread } from '../services/unread.service.js';
 import multer from 'multer';
 
 // Create a new group (public or private)
@@ -890,6 +894,10 @@ export const getGroupMessages = async (req: Request, res: Response) => {
       before ? [groupId, userId, limit, before] : [groupId, userId, limit]
     );
 
+    // Redis Messaging Layer
+    // 1. Reset unread count for this user in this group
+    await resetUnread(userId, groupId as string);
+
     res.json({
       success: true,
       data: {
@@ -1005,6 +1013,32 @@ export const sendGroupMessage = async (req: Request, res: Response) => {
     );
 
     io.to(`group:${groupId}`).emit('new-group-message', fullMessage.rows[0]);
+  }
+
+  // Redis Messaging Layer
+  const groupMessage = result.rows[0];
+
+  // 1. Cache the message
+  await cacheMessage(groupId as string, groupMessage);
+
+  // 2. Track for other members
+  // Fetch all members of the group
+  const members = await pool.query(
+    'SELECT user_id FROM group_members WHERE group_id = $1 AND user_id != $2',
+    [groupId, userId]
+  );
+
+  for (const member of members.rows) {
+    const memberId = member.user_id;
+
+    // Increment unread count
+    await incrementUnread(memberId, groupId as string);
+
+    // Queue for offline delivery if needed
+    const online = await isUserOnline(memberId);
+    if (!online) {
+      await queueOfflineMessage(memberId, groupMessage);
+    }
   }
 
   res.json({

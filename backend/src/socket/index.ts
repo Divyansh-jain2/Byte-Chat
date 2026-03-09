@@ -2,6 +2,13 @@ import { Server as SocketServer } from 'socket.io';
 import type { Server as HTTPServer } from 'http';
 import jwt from 'jsonwebtoken';
 import { config } from '../config/index.js';
+import { getSession } from '../services/session.service.js';
+import { storeWsAuth, getWsAuth, deleteWsAuth } from '../services/wsAuth.service.js';
+import { mapUserSocket, removeSocketMapping, getUserSockets } from '../services/socketRouting.service.js';
+import { addOnlineUser, removeOnlineUser } from '../services/presence.service.js';
+import { joinRoom, leaveRoom, removeSocketFromAllRooms, getRoomSockets } from '../services/room.service.js';
+import { setTyping } from '../services/typing.service.js';
+import { getOfflineMessages } from '../services/offlineMessage.service.js';
 
 interface UserSocket {
   userId: string;
@@ -15,9 +22,6 @@ interface JwtPayload {
 
 let _io: SocketServer | null = null; // module-level singleton
 
-const userSockets = new Map<string, Set<string>>(); // userId -> Set of socketIds
-const socketUsers = new Map<string, string>(); // socketId -> userId
-
 export function initializeSocket(httpServer: HTTPServer) {
   const io = new SocketServer(httpServer, {
     cors: {
@@ -27,36 +31,71 @@ export function initializeSocket(httpServer: HTTPServer) {
   });
 
   // Authentication middleware
-  io.use((socket, next) => {
-    const token = socket.handshake.auth.token || socket.handshake.headers.authorization?.split(' ')[1];
-
-    if (!token) {
-      return next(new Error('Authentication error: No token provided'));
-    }
-
+  io.use(async (socket, next) => {
     try {
-      const decoded = jwt.verify(token, config.jwt.accessSecret) as JwtPayload;
-      socket.data.userId = decoded.userId;
-      next();
+      const token = socket.handshake.auth.token || socket.handshake.headers.authorization?.split(' ')[1];
+      const sessionId = socket.handshake.auth.sessionId || socket.handshake.headers['x-session-id'];
+
+      // 1. Try Session ID (Redis)
+      if (sessionId) {
+        const session = await getSession(sessionId);
+        if (session && session.userId) {
+          socket.data.userId = session.userId;
+          socket.data.sessionId = sessionId;
+
+          // Store temporary WebSocket auth in Redis
+          await storeWsAuth(socket.id, {
+            userId: session.userId,
+            sessionId: sessionId,
+            authenticatedAt: Date.now()
+          });
+
+          return next();
+        }
+      }
+
+      // 2. Fallback to JWT
+      if (token) {
+        const decoded = jwt.verify(token, config.jwt.accessSecret) as JwtPayload;
+        socket.data.userId = decoded.userId;
+
+        // Even for JWT, we store temporary auth to keep the pattern consistent
+        await storeWsAuth(socket.id, {
+          userId: decoded.userId,
+          authenticatedAt: Date.now()
+        });
+
+        return next();
+      }
+
+      return next(new Error('Authentication error: No valid session or token provided'));
     } catch (error: any) {
       console.error('Socket authentication error:', error.message);
       if (error.name === 'TokenExpiredError') {
         return next(new Error('Token expired'));
       }
-      return next(new Error('Invalid token'));
+      return next(new Error('Invalid authentication'));
     }
   });
 
-  io.on('connection', (socket) => {
+  io.on('connection', async (socket) => {
     const userId = socket.data.userId;
     // console.log(`User ${userId} connected with socket ${socket.id}`);
 
-    // Track user's socket connections
-    if (!userSockets.has(userId)) {
-      userSockets.set(userId, new Set());
+    // Track user's socket connections in Redis
+    await mapUserSocket(userId, socket.id);
+
+    // Add to global online presence
+    await addOnlineUser(userId);
+
+    // Deliver offline messages
+    const offlineMessages = await getOfflineMessages(userId);
+    if (offlineMessages.length > 0) {
+      //   console.log(`📡 Delivering ${offlineMessages.length} offline messages to ${userId}`);
+      offlineMessages.forEach((msg) => {
+        socket.emit('offline-messages', msg);
+      });
     }
-    userSockets.get(userId)!.add(socket.id);
-    socketUsers.set(socket.id, userId);
 
     // Join user's personal room
     socket.join(`user:${userId}`);
@@ -104,7 +143,10 @@ export function initializeSocket(httpServer: HTTPServer) {
     });
 
     // Handle message read status
-    socket.on('message-read', ({ conversationId, messageId }: { conversationId: string; messageId: string }) => {
+    socket.on('message-read', async ({ conversationId, messageId }: { conversationId: string; messageId: string }) => {
+      const auth = await getWsAuth(socket.id);
+      if (!auth) return socket.emit('error', 'Unauthenticated socket');
+
       socket.to(`conversation:${conversationId}`).emit('message-status-updated', {
         messageId,
         status: 'read',
@@ -112,19 +154,52 @@ export function initializeSocket(httpServer: HTTPServer) {
       });
     });
 
+    // Chat Room Events
+    socket.on('join_chat', async (chatId) => {
+      await joinRoom(chatId, socket.id);
+      //   console.log(`Socket ${socket.id} joined chat room ${chatId}`);
+    });
+
+    socket.on('leave_chat', async (chatId) => {
+      await leaveRoom(chatId, socket.id);
+      //   console.log(`Socket ${socket.id} left chat room ${chatId}`);
+    });
+
+    // Typing Indicators
+    socket.on('typing', async (chatId) => {
+      await setTyping(chatId, userId);
+
+      // Broadcast typing status to active members in the room
+      const roomSockets = await getRoomSockets(chatId);
+      roomSockets.forEach((sId) => {
+        if (sId !== socket.id) {
+          _io?.to(sId).emit('user-typing', {
+            chatId,
+            userId,
+          });
+        }
+      });
+    });
+
     // Handle disconnection
-    socket.on('disconnect', () => {
+    socket.on('disconnect', async () => {
       // console.log(`User ${userId} disconnected from socket ${socket.id}`);
 
-      // Remove socket from tracking
-      const userSocketSet = userSockets.get(userId);
-      if (userSocketSet) {
-        userSocketSet.delete(socket.id);
-        if (userSocketSet.size === 0) {
-          userSockets.delete(userId);
-        }
+      // Clean up Redis rooms
+      await removeSocketFromAllRooms(socket.id);
+
+      // Clean up Redis routing
+      await removeSocketMapping(socket.id);
+
+      // Check if user has any other active connections
+      const remainingSockets = await getUserSockets(userId);
+      if (remainingSockets.length === 0) {
+        // No more connections, remove from global online presence
+        await removeOnlineUser(userId);
       }
-      socketUsers.delete(socket.id);
+
+      // Clean up Redis auth
+      await deleteWsAuth(socket.id);
     });
   });
 
@@ -168,6 +243,7 @@ export function emitToGroup(ioOrGroupId: SocketServer | null | string, groupIdOr
 }
 
 // Check if user is online
-export function isUserOnline(userId: string): boolean {
-  return userSockets.has(userId) && userSockets.get(userId)!.size > 0;
+export async function isUserOnline(userId: string): Promise<boolean> {
+  const sockets = await getUserSockets(userId);
+  return sockets.length > 0;
 }
