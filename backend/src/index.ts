@@ -17,6 +17,7 @@ import anonymousChatRoutes from './routes/anonymous-chat.routes.js';
 import groupRoutes from './routes/group.routes.js';
 import blockReportRoutes from './routes/block-report.routes.js';
 import messageManagementRoutes from './routes/message-management.routes.js';
+import notificationRoutes from './routes/notification.routes.js';
 import { errorHandler } from './utils/error.util.js';
 import { initializeSocket } from './socket/index.js';
 
@@ -83,6 +84,7 @@ app.use('/api/anonymous-chat', anonymousChatRoutes); // Separate anonymous chat 
 app.use('/api/groups', groupRoutes); // Group routes
 app.use('/api/moderation', blockReportRoutes); // Block and report routes
 app.use('/api/messages', messageManagementRoutes); // Message management routes
+app.use('/api/notifications', notificationRoutes); // Notifications
 
 // Health check
 app.get('/health', (req: Request, res: Response) => {
@@ -140,6 +142,16 @@ httpServer.listen(PORT, () => {
       // 2. Notify clients and handle socket side-effects
       for (const poll of result.rows) {
         const roomId = `group:${poll.group_id}`;
+
+        // Clear Redis cache when poll ends 
+        try {
+          // Import inline here is avoided by importing redis at top or using the existing redis connection
+          // We have connectRedis and redis exported from lib/redis.js, already imported at top of index.ts
+          await redis.del(`poll_live:${poll.poll_id}`);
+          await redis.del(`user_voted:${poll.poll_id}`);
+        } catch (redisErr) {
+          console.error('[Poll Sweeper] Error clearing redis cache:', redisErr);
+        }
 
         // Always notify the group that the poll state changed
         io.to(roomId).emit('poll-updated', poll);

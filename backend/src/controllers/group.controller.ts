@@ -53,7 +53,10 @@ import { isUserOnline } from '../socket/index.js';
 import { cacheMessage } from '../services/messageCache.service.js';
 import { queueOfflineMessage } from '../services/offlineMessage.service.js';
 import { incrementUnread, resetUnread } from '../services/unread.service.js';
+import { pushNotification } from '../services/notification.service.js';
+import { initPollCache, votePoll, getLivePoll } from '../services/pollCache.service.js';
 import multer from 'multer';
+import { redis } from '../lib/redis.js';
 
 // Create a new group (public or private)
 export const createGroup = async (req: Request, res: Response) => {
@@ -472,6 +475,13 @@ export const addMemberToGroup = async (req: Request, res: Response) => {
       ) VALUES ($1, $2, false, false, $3, $4)`,
       [groupId, user_id, is_anonymous, anonymousIdentityId]
     );
+
+    await pushNotification(user_id, {
+      type: "group_invite",
+      groupId,
+      createdBy: adminUserId,
+      timestamp: Date.now()
+    });
 
     await client.query('COMMIT');
 
@@ -1095,6 +1105,22 @@ export const promoteMemberToAdmin = async (req: Request, res: Response) => {
       [groupId, memberId]
     );
 
+    // memberCheck has user_id or we need to query user_id?
+    // Oh, wait, the parameter is `memberId` which might be group_members.member_id or user_id.
+    // Let's get user_id from memberCheck to be safe.
+    const memberUserIdResult = await client.query(
+      `SELECT user_id FROM group_members WHERE group_id = $1 AND member_id = $2`,
+      [groupId, memberId]
+    );
+    if (memberUserIdResult.rows.length > 0) {
+      await pushNotification(memberUserIdResult.rows[0].user_id, {
+        type: "admin_promoted",
+        groupId,
+        createdBy: userId,
+        timestamp: Date.now()
+      });
+    }
+
     await client.query('COMMIT');
 
     res.json({
@@ -1252,6 +1278,25 @@ export const createPoll = async (req: Request, res: Response) => {
     if (poll_type === 'General') {
       const optsRes = await client.query(`SELECT * FROM poll_options WHERE poll_id = $1 ORDER BY option_order`, [poll.poll_id]);
       pollWithOptions = { ...poll, options: optsRes.rows };
+    }
+
+    // Initialize Redis cache for this poll
+    await initPollCache(poll.poll_id, poll);
+
+    // Send notifications to all other group members
+    const groupMembersRes = await client.query(
+      'SELECT user_id FROM group_members WHERE group_id = $1 AND user_id != $2',
+      [groupId, userId]
+    );
+    for (const row of groupMembersRes.rows) {
+      await pushNotification(row.user_id, {
+        type: "poll_created",
+        pollId: poll.poll_id,
+        pollType: poll_type,
+        groupId,
+        createdBy: userId,
+        timestamp: Date.now()
+      });
     }
 
     io.to(`group: ${groupId}`).emit('new-poll', pollWithOptions);
@@ -1435,6 +1480,18 @@ export const voteOnPoll = async (req: Request, res: Response) => {
         [pollId, userId, option_id]
       );
       voteWasNew = upsertResult.rows[0]?.inserted ?? true;
+
+      // Register the voter in Redis (user_voted set) so double-voting is blocked
+      // at the cache layer too. We use vote_value=true as a canonical sentinel —
+      // General polls use options not yes/no, so only the set membership matters.
+      try {
+        await votePoll(pollId as string, userId, true);
+      } catch (cacheError: any) {
+        if (cacheError.message === 'User already voted') {
+          throw new ApiError(400, 'You have already voted on this poll');
+        }
+        console.error('Redis vote cache error (General poll):', cacheError);
+      }
     } else {
       if (typeof vote_value !== 'boolean') {
         throw new ApiError(400, 'vote_value must be a boolean (true = yes, false = no)');
@@ -1449,6 +1506,16 @@ export const voteOnPoll = async (req: Request, res: Response) => {
         [pollId, userId, vote_value]
       );
       voteWasNew = upsertResult.rows[0]?.inserted ?? true;
+
+      // Update Redis Live Cache
+      try {
+        await votePoll(pollId as string, userId, vote_value);
+      } catch (cacheError: any) {
+        if (cacheError.message === "User already voted") {
+          throw new ApiError(400, "You have already voted on this poll");
+        }
+        console.error("Redis vote cache error:", cacheError);
+      }
     }
 
     // 5. Commit — stats trigger updates counters only. Status resolution happens at expiry.
@@ -1466,6 +1533,14 @@ export const voteOnPoll = async (req: Request, res: Response) => {
       [pollId]
     );
     const updatedPoll = finalPoll.rows[0];
+
+    // Fetch live votes from Redis if available, fallback to DB
+    const liveVotes = await getLivePoll(pollId as string);
+    if (liveVotes && Object.keys(liveVotes).length > 0) {
+      updatedPoll.votes_for = parseInt(liveVotes.votesFor ?? '0') || 0;
+      updatedPoll.votes_against = parseInt(liveVotes.votesAgainst ?? '0') || 0;
+      updatedPoll.total_voters = parseInt(liveVotes.totalVoters ?? '0') || 0;
+    }
 
     // 7. Emit socket events
     io.to(`group:${groupId} `).emit('poll-updated', updatedPoll);
@@ -1542,6 +1617,10 @@ export const cancelPoll = async (req: Request, res: Response) => {
     );
 
     await client.query('COMMIT');
+
+    // Remove from Redis Live Cache
+    await redis.del(`poll_live:${pollId as string}`);
+    await redis.del(`user_voted:${pollId as string}`);
 
     io.to(`group:${groupId} `).emit('poll-cancelled', {
       poll_id: pollId,
@@ -1626,6 +1705,10 @@ export const executePoll = async (req: Request, res: Response) => {
     );
 
     await client.query('COMMIT');
+
+    // Remove from Redis Live Cache
+    await redis.del(`poll_live:${pollId as string}`);
+    await redis.del(`user_voted:${pollId as string}`);
 
     // Read final state and emit socket events
     const finalRow = await query(`SELECT * FROM polls WHERE poll_id = $1`, [pollId]);
@@ -2027,3 +2110,33 @@ export async function getGroupParticipantPublicKeys(req: Request, res: Response)
     throw new ApiError(500, 'Failed to fetch group public keys');
   }
 }
+
+/**
+ * GET /api/groups/:groupId/online-count
+ * Returns { onlineCount: number } — how many members of this group are currently online (from Redis).
+ */
+export const getGroupOnlineCount = async (req: Request, res: Response) => {
+  const { groupId } = req.params;
+  const userId = req.user?.userId;
+  if (!userId) throw new ApiError(401, 'Unauthorized');
+
+  // Verify membership
+  const memberCheck = await pool.query(
+    'SELECT 1 FROM group_members WHERE group_id = $1 AND user_id = $2',
+    [groupId, userId]
+  );
+  if (memberCheck.rows.length === 0) throw new ApiError(403, 'You are not a member of this group');
+
+  // Get all member user_ids
+  const membersResult = await pool.query(
+    'SELECT user_id FROM group_members WHERE group_id = $1',
+    [groupId]
+  );
+
+  // Check each against Redis online_users set
+  const { isUserOnline } = await import('../services/presence.service.js');
+  const checks = await Promise.all(membersResult.rows.map(r => isUserOnline(r.user_id)));
+  const onlineCount = checks.filter(Boolean).length;
+
+  res.json({ success: true, data: { onlineCount, totalMembers: membersResult.rows.length } });
+};

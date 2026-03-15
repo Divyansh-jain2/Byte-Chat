@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useEffect, useState, useRef, useMemo } from 'react';
+import React, { createContext, useContext, useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
 
 interface SocketContextType {
@@ -11,6 +11,8 @@ interface SocketContextType {
   joinGroup: (groupId: string) => void;
   leaveGroup: (groupId: string) => void;
   sendTyping: (conversationId: string, isTyping: boolean) => void;
+  /** Register a handler for offline messages delivered on reconnect */
+  onOfflineMessages: (handler: (msg: unknown) => void) => () => void;
 }
 
 const SocketContext = createContext<SocketContextType>({
@@ -21,6 +23,7 @@ const SocketContext = createContext<SocketContextType>({
   joinGroup: () => {},
   leaveGroup: () => {},
   sendTyping: () => {},
+  onOfflineMessages: () => () => {},
 });
 
 export const useSocket = () => useContext(SocketContext);
@@ -64,6 +67,19 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
+  /**
+   * Register a handler for offline messages delivered by the backend on reconnect.
+   * Returns an unsubscribe function so callers can clean up in useEffect.
+   */
+  const onOfflineMessages = useCallback((handler: (msg: unknown) => void) => {
+    const socket = socketRef.current;
+    if (!socket) return () => {};
+    socket.on('offline-messages', handler);
+    return () => {
+      socket.off('offline-messages', handler);
+    };
+  }, []);
+
   const contextValue = useMemo(() => ({
     getSocket: () => socketRef.current,
     isConnected,
@@ -87,7 +103,8 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       const s = socketRef.current;
       if (s && isConnected) s.emit('typing', { conversationId, isTyping });
     },
-  }), [isConnected]);
+    onOfflineMessages,
+  }), [isConnected, onOfflineMessages]);
 
   return (
     <SocketContext.Provider value={contextValue}>

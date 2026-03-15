@@ -4,6 +4,7 @@ import "./globals.css";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import { SocketProvider } from "@/contexts/SocketContext";
 import { ToastProvider } from "@/contexts/ToastContext";
+import { NotificationProvider } from "@/contexts/NotificationContext";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -35,9 +36,11 @@ export default function RootLayout({
       >
         <ThemeProvider>
           <SocketProvider>
-            <ToastProvider>
-              {children}
-            </ToastProvider>
+            <NotificationProvider>
+              <ToastProvider>
+                {children}
+              </ToastProvider>
+            </NotificationProvider>
           </SocketProvider>
         </ThemeProvider>
       </body>

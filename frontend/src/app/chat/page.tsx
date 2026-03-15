@@ -1,20 +1,27 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-// import { useRouter, useSearchParams } from 'next/navigation';
+import { useEffect, useState, useMemo } from 'react';
 import Link from 'next/link';
 import { chatService } from '@/services/chat.service';
 import anonymousChatService from '@/services/anonymous-chat.service';
 import type { Conversation, ChatRequest } from '@/types/chat.types';
 import Image from 'next/image';
+import { usePresence } from '@/hooks/usePresence';
 
 export default function ChatPage() {
-  // const router = useRouter();
-  // const searchParams = useSearchParams();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [chatRequests, setChatRequests] = useState<ChatRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'conversations' | 'requests'>('conversations');
+
+  // Collect other-user IDs for presence tracking
+  const otherUserIds = useMemo(
+    () => conversations
+      .filter(c => !c.is_anonymous && c.other_user_id)
+      .map(c => c.other_user_id as string),
+    [conversations]
+  );
+  const onlineUsers = usePresence(otherUserIds);
 
   useEffect(() => {
     fetchConversations();
@@ -165,8 +172,17 @@ export default function ChatPage() {
                       {conv.is_anonymous ? '?' : conv.other_user_name.charAt(0).toUpperCase()}
                     </div>
                   )}
+                  {/* Unread badge */}
                   {conv.unread_count > 0 && (
                     <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full text-white text-xs flex items-center justify-center font-bold" style={{ background: 'var(--pink)' }}>{conv.unread_count}</span>
+                  )}
+                  {/* Online dot — only for non-anonymous, known user */}
+                  {!conv.is_anonymous && conv.other_user_id && onlineUsers.has(conv.other_user_id) && (
+                    <span
+                      className="absolute bottom-0 right-0 w-3.5 h-3.5 rounded-full border-2 border-white"
+                      style={{ background: '#22C55E' }}
+                      title="Online"
+                    />
                   )}
                 </div>
                 <div className="flex-1 min-w-0">
@@ -177,11 +193,14 @@ export default function ChatPage() {
                     </span>
                     <span className="text-xs shrink-0 ml-2" style={{ color: 'var(--muted)' }}>{formatTime(conv.last_message_time || conv.created_at)}</span>
                   </div>
-                  {conv.last_message_preview && (
+                  {/* Online label OR last message preview */}
+                  {!conv.is_anonymous && conv.other_user_id && onlineUsers.has(conv.other_user_id) ? (
+                    <p className="text-xs font-medium" style={{ color: '#22C55E' }}>● Online</p>
+                  ) : conv.last_message_preview ? (
                     <p className="text-sm truncate" style={{ color: 'var(--muted)' }}>
                       {conv.last_message_type === 'text' ? '🔒 Encrypted message' : '📎 Attachment'}
                     </p>
-                  )}
+                  ) : null}
                 </div>
               </Link>
             ))}

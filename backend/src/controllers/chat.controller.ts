@@ -8,6 +8,7 @@ import { uploadToCloudinary } from '../utils/cloudinary.util.js';
 import { cacheMessage } from '../services/messageCache.service.js';
 import { queueOfflineMessage } from '../services/offlineMessage.service.js';
 import { incrementUnread, resetUnread } from '../services/unread.service.js';
+import { isUserOnline as isOnlineRedis } from '../services/presence.service.js';
 
 /**
  * REGULAR CHAT CONTROLLER
@@ -1268,4 +1269,35 @@ export async function uploadChatImage(req: Request, res: Response) {
     if (error instanceof ApiError) throw error;
     throw new ApiError(500, 'Failed to upload image');
   }
+}
+
+/**
+ * PRESENCE CHECK
+ * POST /api/chat/presence
+ * Body: { userIds: string[] }
+ * Returns { presence: { [userId]: boolean } } built from the Redis online_users set.
+ */
+export async function getPresence(req: Request, res: Response) {
+  const userId = req.user?.userId;
+  if (!userId) throw new ApiError(401, 'Unauthorized');
+
+  const { userIds } = req.body as { userIds?: string[] };
+  if (!Array.isArray(userIds) || userIds.length === 0) {
+    return res.json({ success: true, data: { presence: {} } });
+  }
+
+  // Clamp to 200 IDs per request to avoid abuse
+  const ids = userIds.slice(0, 200);
+
+  const results = await Promise.all(ids.map(async (id) => ({
+    id,
+    online: await isOnlineRedis(id)
+  })));
+
+  const presence: Record<string, boolean> = {};
+  for (const { id, online } of results) {
+    presence[id] = online;
+  }
+
+  res.json({ success: true, data: { presence } });
 }

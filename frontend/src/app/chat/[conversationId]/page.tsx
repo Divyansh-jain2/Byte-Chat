@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { chatService } from '@/services/chat.service';
@@ -12,6 +12,7 @@ import { Theme } from 'emoji-picker-react';
 import Image from 'next/image';
 import MessageBubble from '@/components/MessageBubble';
 import { messageManagementService } from '@/services/message-management.service';
+import { usePresence } from '@/hooks/usePresence';
 import {
   encryptMessageAES,
   decryptMessageAES,
@@ -70,6 +71,14 @@ export default function ChatWindowPage() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messageInputRef = useRef<HTMLInputElement>(null);
+
+  // Track presence of the other user — only for non-anonymous chats
+  const otherUserIds = useMemo(
+    () => (!isAnonymous && otherUser?.user_id ? [otherUser.user_id] : []),
+    [isAnonymous, otherUser?.user_id]
+  );
+  const onlineUsers = usePresence(otherUserIds);
+  const isOtherOnline = !isAnonymous && !!otherUser?.user_id && onlineUsers.has(otherUser.user_id);
 
   useEffect(() => {
     scrollToBottom();
@@ -963,19 +972,42 @@ export default function ChatWindowPage() {
         </button>
 
         <div className="flex items-center gap-3 flex-1 min-w-0">
-          {(isAnonymous || !otherUser?.dp_url) ? (
-            <div className="w-10 h-10 rounded-full shrink-0 flex items-center justify-center text-white font-bold" style={{ background: isAnonymous ? 'var(--grad-mystery)' : 'var(--grad-romance)' }}>
-              {isAnonymous ? '?' : (otherUser?.name?.[0]?.toUpperCase() || 'U')}
-            </div>
-          ) : (
-            <Image src={otherUser.dp_url} alt={otherUser.name} width={40} height={40} className="w-10 h-10 rounded-full object-cover ring-2 ring-white/40 shrink-0" />
-          )}
+          {/* Avatar with online dot */}
+          <div className="relative shrink-0">
+            {(isAnonymous || !otherUser?.dp_url) ? (
+              <div className="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold" style={{ background: isAnonymous ? 'var(--grad-mystery)' : 'var(--grad-romance)' }}>
+                {isAnonymous ? '?' : (otherUser?.name?.[0]?.toUpperCase() || 'U')}
+              </div>
+            ) : (
+              <Image src={otherUser.dp_url} alt={otherUser.name} width={40} height={40} className="w-10 h-10 rounded-full object-cover ring-2 ring-white/40" />
+            )}
+            {/* Green online dot */}
+            {isOtherOnline && (
+              <span
+                className="absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white"
+                style={{ background: '#22C55E' }}
+              />
+            )}
+          </div>
+
           <div className="min-w-0">
             <h2 className="font-bold truncate flex items-center gap-2" style={{ color: 'var(--heading)' }}>
               {otherUser?.name || 'Unknown'}
               {isAnonymous && <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: 'rgba(168,85,247,.15)', color: 'var(--purple)' }}>Anon</span>}
             </h2>
-            {!isAnonymous && otherUser?.roll_no && <p className="text-xs" style={{ color: 'var(--muted)' }}>{otherUser.roll_no}</p>}
+            {/* Online/Offline status line */}
+            {!isAnonymous && (
+              isOtherOnline ? (
+                <p className="text-xs font-medium flex items-center gap-1" style={{ color: '#22C55E' }}>
+                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+                  Online
+                </p>
+              ) : (
+                <p className="text-xs" style={{ color: 'var(--muted)' }}>
+                  {otherUser?.roll_no || 'Offline'}
+                </p>
+              )
+            )}
             {isAnonymous && otherUser?.gender && <p className="text-xs" style={{ color: 'var(--muted)' }}>{otherUser.gender}</p>}
           </div>
         </div>

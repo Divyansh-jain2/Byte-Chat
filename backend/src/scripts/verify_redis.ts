@@ -8,6 +8,8 @@ import { setTyping, isTyping, getTypingUsers } from '../services/typing.service.
 import { cacheMessage, getCachedMessages } from '../services/messageCache.service.js';
 import { queueOfflineMessage, getOfflineMessages } from '../services/offlineMessage.service.js';
 import { incrementUnread, resetUnread, getUnread } from '../services/unread.service.js';
+import { pushNotification, getNotifications, getNotificationCount, resetNotificationCount } from '../services/notification.service.js';
+import { initPollCache, votePoll, getLivePoll } from '../services/pollCache.service.js';
 import { v4 as uuidv4 } from 'uuid';
 
 async function runTests() {
@@ -187,6 +189,36 @@ async function runTests() {
         await resetUnread(uUserId, uChatId);
         const resetCount = await getUnread(uUserId, uChatId);
         console.log(`📉 Reset Count: ${resetCount === 0 ? "✅ Success" : "❌ Failed"}`);
+
+        // 15. Notification Logic Check
+        console.log("🔔 Testing Notifications...");
+        const nUserId = "test-user-notifications";
+        const notification = { type: "poll_created", groupId: "test-group", createdBy: "test-creator" };
+        await pushNotification(nUserId, notification);
+        const notifications = await getNotifications(nUserId);
+        const nUnreadCount = await getNotificationCount(nUserId);
+        console.log(`📥 Notification Received: ${notifications.some((n: any) => n.type === "poll_created") ? "✅ Success" : "❌ Failed"}`);
+        console.log(`📈 Notification Count: ${nUnreadCount === 1 ? "✅ Success" : "❌ Failed"}`);
+        await resetNotificationCount(nUserId);
+        const nResetCount = await getNotificationCount(nUserId);
+        console.log(`📉 Reset Notification Count: ${nResetCount === 0 ? "✅ Success" : "❌ Failed"}`);
+
+        // 16. Poll Live Cache Logic Check
+        console.log("🗳️  Testing Live Poll Cache...");
+        const pPollId = "test-poll-123";
+        const pTestUserId = "test-user-voter";
+        await initPollCache(pPollId, { votes_for: 0, votes_against: 0, total_voters: 0, expires_at: new Date(Date.now() + 100000) });
+        await votePoll(pPollId, pTestUserId, true);
+        const pLivePoll = await getLivePoll(pPollId);
+        console.log(`📊 Live Poll Cache: ${pLivePoll.votesFor === '1' && pLivePoll.totalVoters === '1' ? "✅ Success" : "❌ Failed"}`);
+        try {
+            await votePoll(pPollId, pTestUserId, false);
+            console.log(`🚫 Double Voting Prevention: ❌ Failed`);
+        } catch (e: any) {
+            console.log(`🚫 Double Voting Prevention: ${e.message === "User already voted" ? "✅ Success" : "❌ Failed"}`);
+        }
+        await redis.del(`poll_live:${pPollId}`);
+        await redis.del(`user_voted:${pPollId}`);
 
         console.log("\n✨ All core Redis logic verified!");
     } catch (error) {

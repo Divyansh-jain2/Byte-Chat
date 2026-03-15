@@ -1,11 +1,11 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-// import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import type { Group } from '@/types/chat.types';
 import { groupService } from '@/services/group.service';
 import Image from 'next/image';
+import { useGroupPresence } from '@/hooks/useGroupPresence';
 
 interface MyGroup extends Group {
   is_admin: boolean;
@@ -13,6 +13,19 @@ interface MyGroup extends Group {
   is_anonymous: boolean;
   joined_at: string;
 }
+
+/** Small inline badge showing live online member count for a group */
+function GroupOnlineBadge({ groupId }: { groupId: string }) {
+  const { onlineCount } = useGroupPresence(groupId);
+  if (onlineCount === 0) return null;
+  return (
+    <span className="flex items-center gap-1 font-medium" style={{ color: '#22C55E' }}>
+      <span className="inline-block w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+      {onlineCount} online
+    </span>
+  );
+}
+
 
 export default function MyGroupsPage() {
   // const router = useRouter();
@@ -162,6 +175,7 @@ export default function MyGroupsPage() {
 
                 <div className="flex items-center justify-between text-xs mb-4 pt-3 border-t" style={{ borderColor: 'var(--border-light)', color: 'var(--muted)' }}>
                   <span>👤 {group.member_count} / {group.max_members} members</span>
+                  <GroupOnlineBadge groupId={group.group_id} />
                   <span>Joined {new Date(group.joined_at).toLocaleDateString()}</span>
                 </div>
 

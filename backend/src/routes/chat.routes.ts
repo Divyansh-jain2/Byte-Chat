@@ -16,7 +16,8 @@ import {
     unblockUser,
     reportUser,
     getParticipantPublicKeys,
-    storeSessionKeys
+    storeSessionKeys,
+    getPresence
 } from '../controllers/chat.controller.js';
 
 /**
@@ -58,5 +59,8 @@ router.post('/report', reportUser);
 // E2EE
 router.get('/:conversationId/participants/keys', getParticipantPublicKeys);
 router.post('/keys', storeSessionKeys);
+
+// Presence (Redis online_users set)
+router.post('/presence', getPresence);
 
 export default router;

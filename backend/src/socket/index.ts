@@ -85,8 +85,9 @@ export function initializeSocket(httpServer: HTTPServer) {
     // Track user's socket connections in Redis
     await mapUserSocket(userId, socket.id);
 
-    // Add to global online presence
+    // Add to global online presence and notify all clients
     await addOnlineUser(userId);
+    io.emit('user-online', { userId });
 
     // Deliver offline messages
     const offlineMessages = await getOfflineMessages(userId);
@@ -196,6 +197,7 @@ export function initializeSocket(httpServer: HTTPServer) {
       if (remainingSockets.length === 0) {
         // No more connections, remove from global online presence
         await removeOnlineUser(userId);
+        io.emit('user-offline', { userId });
       }
 
       // Clean up Redis auth

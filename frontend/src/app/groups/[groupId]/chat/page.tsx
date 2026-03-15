@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
@@ -23,6 +23,7 @@ import {
   importKeyFromBase64
 } from '@/utils/e2ee.utils';
 import { chatService } from '@/services/chat.service';
+import { useGroupPresence } from '@/hooks/useGroupPresence';
 
 // Dynamic import for emoji picker (client-side only)
 const EmojiPicker = dynamic(() => import('emoji-picker-react'), { ssr: false });
@@ -72,6 +73,9 @@ export default function GroupChatPage() {
   const userStr = typeof window !== 'undefined' ? localStorage.getItem('user') : null;
   const currentUser = userStr ? JSON.parse(userStr) : null;
   const currentUserId = currentUser?.user_id || currentUser?.userId;
+
+  // Real-time online member count for this group
+  const { onlineCount, totalMembers } = useGroupPresence(groupId);
 
   // E2EE: Initialize session key
   const fetchAndDecryptConversationKey = useCallback(async (msgs: GroupMessage[]) => {
@@ -735,9 +739,16 @@ export default function GroupChatPage() {
             👥
           </div>
           <div>
-            <p className="font-semibold text-sm" style={{ color: 'var(--heading)' }}>Group Chat</p>
-            <p className="text-xs" style={{ color: 'var(--muted)' }}>
-              {messages.length > 0 ? `${messages.length} messages` : 'No messages yet'}
+            <p className="font-semibold text-sm" style={{ color: 'var(--heading)' }}>{group?.group_name || 'Group Chat'}</p>
+            <p className="text-xs flex items-center gap-1" style={{ color: 'var(--muted)' }}>
+              {onlineCount > 0 ? (
+                <>
+                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+                  <span style={{ color: '#22C55E' }}>{onlineCount} online</span>
+                  <span className="opacity-50">·</span>
+                </>
+              ) : null}
+              {totalMembers > 0 ? `${totalMembers} members` : `${messages.length} messages`}
             </p>
           </div>
         </div>
