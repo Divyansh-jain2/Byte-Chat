@@ -1,0 +1,92 @@
+### 1. `room:{chatId}`
+
+**Purpose:**
+Track **all socket connections currently inside a chat** (DM or group).
+
+**Type:**
+`SET` of `socketIds`
+
+**Example**
+
+```text
+room:chat123
+ ├ socketA
+ ├ socketB
+ └ socketC
+```
+
+**Used for**
+
+* **Message broadcast**
+* **Typing broadcast**
+* **Poll updates**
+* **Realtime events**
+
+**Flow**
+
+```text
+user opens chat
+↓
+SADD room:{chatId} socketId
+↓
+user leaves chat
+↓
+SREM room:{chatId} socketId
+```
+
+**Example usage**
+
+```text
+new message
+↓
+get sockets from room:chat123
+↓
+emit message to all sockets
+```
+
+---
+
+### 2. `typing:{chatId}:{userId}`
+
+**Purpose:**
+Temporary key to indicate **a user is currently typing in a chat**.
+
+**Type:**
+`String`
+
+**TTL:**
+`5 seconds`
+
+**Example**
+
+```text
+typing:chat123:user456 = timestamp
+```
+
+**Used for**
+
+* Showing **"User is typing..."**
+* Removing typing indicator automatically
+
+**Flow**
+
+```text
+user starts typing
+↓
+SET typing:{chatId}:{userId}
+↓
+EXPIRE 5 seconds
+↓
+broadcast typing event
+```
+
+If user stops typing → Redis key **auto expires** → indicator disappears.
+
+---
+
+### Quick Summary
+
+| Key                        | Handles                | Used For                   |
+| -------------------------- | ---------------------- | -------------------------- |
+| `room:{chatId}`            | sockets in chat        | message broadcasting       |
+| `typing:{chatId}:{userId}` | temporary typing state | "user typing..." indicator |
