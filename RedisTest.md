@@ -69,30 +69,6 @@ docker exec -it redis redis-cli
 
 ---
 
-## 3. Chat Rooms & Typing
-
-### `room:{chatId}`
-- **Type**: Set
-- **Purpose**: Tracks which users are actively looking at a specific chat screen.
-- **Trigger**: User opens a specific 1v1 or group chat.
-- **How to Test**:
-  1. Click on a chat in the sidebar.
-  2. **Monitor Output**: `SADD room:<chatId> <userId>`.
-  3. Click away to another chat.
-  4. **Monitor Output**: `SREM room:<chatId> <userId>`.
-
-### `typing:{chatId}:{userId}`
-- **Type**: String (Timestamp)
-- **Purpose**: Indicates a user is currently typing in a chat.
-- **Trigger**: User types in the message input box.
-- **TTL**: 5 seconds.
-- **How to Test**:
-  1. Start typing a message.
-  2. **Monitor Output**: `SET typing:<chatId>:<userId> "<timestamp>" EX 5`.
-  3. **CLI Check**: `KEYS typing:<chatId>:*` to see who is typing.
-
----
-
 ## 4. Messaging Performance
 
 ### `message_cache:{chatId}:recent`
