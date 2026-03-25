@@ -32,7 +32,7 @@ type EmojiData = { emoji: string };
 export default function ChatWindowPage() {
   const router = useRouter();
   const params = useParams();
-  const { getSocket, isConnected, joinConversation, leaveConversation } = useSocket();
+  const { getSocket, isConnected, joinConversation, leaveConversation, sendTyping } = useSocket();
   const conversationId = params.conversationId as string;
   const toast = useToast();
   const socket = getSocket();
@@ -61,6 +61,8 @@ export default function ChatWindowPage() {
   const emojiPickerRef = useRef<HTMLDivElement>(null);
   const fetchingRef = useRef(false); // Prevent duplicate fetches
   const lastFetchRef = useRef(0); // Track last fetch time
+  const [isOtherTyping, setIsOtherTyping] = useState(false);
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // E2EE States
   const [sessionKey, setSessionKey] = useState<CryptoKey | null>(null);
@@ -423,6 +425,10 @@ export default function ChatWindowPage() {
 
     if ((!newMessage.trim() && !selectedImage) || sending || isBlocked) return;
 
+    // Send typing stopped event
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    sendTyping(conversationId, false);
+
     try {
       setSending(true);
 
@@ -606,6 +612,22 @@ export default function ChatWindowPage() {
     setShowEmojiPicker(false);
   };
 
+  const handleMessageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setNewMessage(e.target.value);
+    
+    if (isConnected) {
+      sendTyping(conversationId, true);
+      
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+      }
+      
+      typingTimeoutRef.current = setTimeout(() => {
+        sendTyping(conversationId, false);
+      }, 2000);
+    }
+  };
+
   const formatTime = (dateString: string) => {
     const date = new Date(dateString);
     const now = new Date();
@@ -782,8 +804,12 @@ export default function ChatWindowPage() {
     };
 
     const handleTyping = ({ userId, isTyping }: { userId: string; isTyping: boolean }) => {
-      // Handle typing indicator (optional)
-      console.log(`User ${userId} is ${isTyping ? 'typing' : 'not typing'}`);
+      const userStr = localStorage.getItem('user');
+      const currentUserId = userStr ? JSON.parse(userStr).user_id : null;
+      if (userId !== currentUserId) {
+        setIsOtherTyping(isTyping);
+      }
+      // console.log(`User ${userId} is ${isTyping ? 'typing' : 'not typing'}`);
     };
 
     const handleIdentityRevealed = () => {
@@ -1100,6 +1126,15 @@ export default function ChatWindowPage() {
                 />
               );
             })}
+            {isOtherTyping && (
+              <div className="flex animate-fade-in my-2">
+                <div className="glass-strong rounded-2xl px-4 py-3 flex gap-1 bg-white/5 items-center w-fit">
+                  <span className="typing-dot" style={{ background: 'var(--muted)', width: 6, height: 6, borderRadius: '50%' }} />
+                  <span className="typing-dot" style={{ background: 'var(--muted)', width: 6, height: 6, borderRadius: '50%' }} />
+                  <span className="typing-dot" style={{ background: 'var(--muted)', width: 6, height: 6, borderRadius: '50%' }} />
+                </div>
+              </div>
+            )}
             <div ref={messagesEndRef} />
           </>
         )}
@@ -1152,7 +1187,7 @@ export default function ChatWindowPage() {
               <button type="button" onClick={() => setShowEmojiPicker(!showEmojiPicker)} disabled={sending || uploadingImage} className="w-9 h-9 rounded-xl glass flex items-center justify-center shrink-0 transition-all hover:scale-110 disabled:opacity-50" style={{ color: 'var(--muted)' }}>
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
               </button>
-              <input ref={messageInputRef} type="text" value={newMessage} onChange={(e) => setNewMessage(e.target.value)} placeholder="Type a message…" className="input-romance flex-1 py-2.5" disabled={sending || uploadingImage} />
+              <input ref={messageInputRef} type="text" value={newMessage} onChange={handleMessageChange} placeholder="Type a message…" className="input-romance flex-1 py-2.5" disabled={sending || uploadingImage} />
               <button type="submit" disabled={(!newMessage.trim() && !selectedImage) || sending || uploadingImage} className="w-10 h-10 rounded-xl btn-romance flex items-center justify-center shrink-0 disabled:opacity-50">
                 {(sending || uploadingImage) ? (
                   <svg className="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" /></svg>

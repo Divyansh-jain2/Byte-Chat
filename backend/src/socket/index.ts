@@ -135,11 +135,42 @@ export function initializeSocket(httpServer: HTTPServer) {
     });
 
     // Handle typing indicator
-    socket.on('typing', ({ conversationId, isTyping }: { conversationId: string; isTyping: boolean }) => {
-      socket.to(`conversation:${conversationId}`).emit('user-typing', {
+    socket.on('typing', async (payload) => {
+      // payload could be a string (chatId) or an object { conversationId, isTyping }
+      let chatId = '';
+      let isUserTyping = true; // default to true if using the simple string format
+
+      if (typeof payload === 'string') {
+        chatId = payload;
+      } else if (payload && typeof payload === 'object') {
+        chatId = payload.conversationId || payload.chatId;
+        isUserTyping = payload.isTyping !== undefined ? payload.isTyping : true;
+      }
+
+      if (!chatId) return;
+
+      // Update Redis status if typing
+      if (isUserTyping) {
+        await setTyping(chatId, userId);
+      }
+
+      // Broadcast to standard conversation room
+      socket.to(`conversation:${chatId}`).emit('user-typing', {
         userId,
-        conversationId,
-        isTyping,
+        conversationId: chatId,
+        isTyping: isUserTyping,
+      });
+      
+      // Also broadcast to generic chat room for backward compatibility
+      const roomSockets = await getRoomSockets(chatId);
+      roomSockets.forEach((sId) => {
+        if (sId !== socket.id) {
+          _io?.to(sId).emit('user-typing', {
+            chatId,
+            userId,
+            isTyping: isUserTyping,
+          });
+        }
       });
     });
 
@@ -166,21 +197,7 @@ export function initializeSocket(httpServer: HTTPServer) {
       //   console.log(`Socket ${socket.id} left chat room ${chatId}`);
     });
 
-    // Typing Indicators
-    socket.on('typing', async (chatId) => {
-      await setTyping(chatId, userId);
 
-      // Broadcast typing status to active members in the room
-      const roomSockets = await getRoomSockets(chatId);
-      roomSockets.forEach((sId) => {
-        if (sId !== socket.id) {
-          _io?.to(sId).emit('user-typing', {
-            chatId,
-            userId,
-          });
-        }
-      });
-    });
 
     // Handle disconnection
     socket.on('disconnect', async () => {
