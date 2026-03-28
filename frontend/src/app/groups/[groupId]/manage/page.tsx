@@ -193,7 +193,7 @@ export default function ManageGroupPage() {
               {/* Avatar */}
               {member.dp_url ? (
                 <Image src={member.dp_url} alt={member.name} width={44} height={44}
-                  className="rounded-xl object-cover shrink-0 w-11 h-11" />
+                      className="rounded-xl object-cover shrink-0 w-11 h-11" unoptimized />
               ) : (
                 <div className="w-11 h-11 rounded-xl flex items-center justify-center text-white font-bold text-base shrink-0"
                   style={{ background: member.is_anonymous ? 'var(--grad-mystery)' : 'var(--grad-romance)' }}>
@@ -277,7 +277,7 @@ export default function ManageGroupPage() {
                   <div key={user.user_id} className="glass rounded-2xl p-3 flex items-center gap-3">
                     {user.dp_url ? (
                       <Image src={user.dp_url} alt={user.name} width={40} height={40}
-                        className="rounded-xl object-cover w-10 h-10 shrink-0" />
+                        className="rounded-xl object-cover w-10 h-10 shrink-0" unoptimized />
                     ) : (
                       <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold shrink-0"
                         style={{ background: 'var(--grad-romance)' }}>

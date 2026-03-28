@@ -161,7 +161,7 @@ export default function GroupDetailsPage() {
             <div className="flex items-center gap-3 min-w-0">
               {group.group_dp_url ? (
                 <Image src={group.group_dp_url} alt={group.group_name} width={40} height={40}
-                  className="w-10 h-10 rounded-xl object-cover ring-2 ring-white/20 shrink-0" />
+                  className="w-10 h-10 rounded-xl object-cover ring-2 ring-white/20 shrink-0" unoptimized />
               ) : (
                 <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold shrink-0"
                   style={{ background: 'var(--grad-ocean)' }}>
@@ -195,7 +195,7 @@ export default function GroupDetailsPage() {
             <div className="flex items-center gap-4">
               {group.group_dp_url ? (
                 <Image src={group.group_dp_url} alt={group.group_name} width={72} height={72}
-                  className="w-18 h-18 rounded-2xl object-cover ring-2 ring-white/20 shrink-0" />
+                  className="w-18 h-18 rounded-2xl object-cover ring-2 ring-white/20 shrink-0" unoptimized />
               ) : (
                 <div className="w-18 h-18 rounded-2xl flex items-center justify-center text-3xl font-bold text-white shrink-0"
                   style={{ background: 'var(--grad-ocean)', width: 72, height: 72 }}>
@@ -278,7 +278,7 @@ export default function GroupDetailsPage() {
                   <div className="flex items-center gap-3">
                     {member.dp_url && !member.is_anonymous ? (
                       <Image src={member.dp_url} alt={member.name} width={44} height={44}
-                        className="w-11 h-11 rounded-full object-cover ring-2 ring-white/20 shrink-0" />
+                        className="w-11 h-11 rounded-full object-cover ring-2 ring-white/20 shrink-0" unoptimized />
                     ) : (
                       <div className="w-11 h-11 rounded-full flex items-center justify-center text-white font-bold text-base shrink-0"
                         style={{ background: member.is_anonymous ? 'var(--grad-mystery)' : 'var(--grad-romance)' }}>

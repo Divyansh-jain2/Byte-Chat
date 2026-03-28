@@ -168,7 +168,8 @@ export default function ViewProfile() {
                 <Image src={profile.dp_url} alt={profile.name} width={96} height={96}
                   className="w-24 h-24 rounded-2xl object-cover border-4 shadow-xl"
                   style={{ borderColor: 'var(--glass-bg)' }}
-                  priority={true} />
+                  priority={true}
+                  unoptimized />
               ) : (
                 <div className="w-24 h-24 rounded-2xl flex items-center justify-center text-white text-3xl font-bold border-4 shadow-xl"
                   style={{ background: 'var(--grad-romance)', borderColor: 'var(--glass-bg)' }}>

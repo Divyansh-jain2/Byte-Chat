@@ -358,7 +358,15 @@ export default function ChatPage() {
               <div key={request.request_id} className="glass-card rounded-2xl p-4 flex items-center gap-4">
                 <div className="shrink-0">
                   {request.sender_dp_url ? (
-                    <Image src={request.sender_dp_url} alt={request.sender_display_name} width={48} height={48} className="w-12 h-12 rounded-full object-cover" priority={index < 3} />
+                    <Image
+                      src={request.sender_dp_url}
+                      alt={request.sender_display_name}
+                      width={48}
+                      height={48}
+                      className="w-12 h-12 rounded-full object-cover"
+                      priority={index < 3}
+                      unoptimized
+                    />
                   ) : (
                     <div className="w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-lg" style={{ background: request.request_type === 'anonymous' ? 'var(--grad-mystery)' : 'var(--grad-romance)' }}>
                       {request.sender_display_name.charAt(0).toUpperCase()}

@@ -1067,7 +1067,14 @@ export default function ChatWindowPage() {
                 {isAnonymous ? '?' : (otherUser?.name?.[0]?.toUpperCase() || 'U')}
               </div>
             ) : (
-              <Image src={otherUser.dp_url} alt={otherUser.name} width={40} height={40} className="w-10 h-10 rounded-full object-cover ring-2 ring-white/40" />
+              <Image
+                src={otherUser.dp_url}
+                alt={otherUser.name}
+                width={40}
+                height={40}
+                className="w-10 h-10 rounded-full object-cover ring-2 ring-white/40"
+                unoptimized
+              />
             )}
             {/* Green online dot */}
             {isOtherOnline && (
