@@ -23,35 +23,37 @@ export const anonymousController = {
           ai.created_at,
           ai.target_user_id,
           ai.group_id,
-          CASE 
-            WHEN ai.target_user_id IS NOT NULL THEN (
-              SELECT json_build_object(
-                'user_id', u.user_id,
-                'name', u.name,
-                'roll_no', u.roll_no,
-                'dp_url', u.dp_url
-              )
-              FROM users u WHERE u.user_id = ai.target_user_id
+          CASE
+            WHEN ai.target_user_id IS NOT NULL AND tu.user_id IS NOT NULL THEN json_build_object(
+              'user_id', tu.user_id,
+              'name', tu.name,
+              'roll_no', tu.roll_no,
+              'dp_url', tu.dp_url
             )
             ELSE NULL
           END as target_user,
-          CASE 
-            WHEN ai.group_id IS NOT NULL THEN (
-              SELECT json_build_object(
-                'group_id', g.group_id,
-                'group_name', g.group_name,
-                'is_public', g.is_public
-              )
-              FROM groups g WHERE g.group_id = ai.group_id
+          CASE
+            WHEN ai.group_id IS NOT NULL AND g.group_id IS NOT NULL THEN json_build_object(
+              'group_id', g.group_id,
+              'group_name', g.group_name,
+              'is_public', g.is_public
             )
             ELSE NULL
           END as target_group,
-          CASE 
-            WHEN ai.conversation_id IS NOT NULL THEN ai.conversation_id
-            ELSE NULL
-          END as conversation_id
+          cc.conversation_id
          FROM anonymous_identities ai
+         LEFT JOIN users tu ON tu.user_id = ai.target_user_id
+         LEFT JOIN groups g ON g.group_id = ai.group_id
+         LEFT JOIN chat_conversations cc
+           ON cc.conversation_id = ai.conversation_id
+           AND (cc.user1_id = ai.user_id OR cc.user2_id = ai.user_id)
          WHERE ai.user_id = $1
+         AND ai.is_active = true
+         AND ai.is_revealed = false
+         AND (
+           (ai.target_user_id IS NOT NULL AND cc.conversation_id IS NOT NULL)
+           OR (ai.group_id IS NOT NULL AND g.group_id IS NOT NULL)
+         )
          ORDER BY ai.created_at DESC`,
         [userId]
       );

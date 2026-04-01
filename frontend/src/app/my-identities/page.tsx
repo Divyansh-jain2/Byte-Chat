@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useToast } from '@/contexts/ToastContext';
 import { getMyAnonymousIdentities, revealAnonymousIdentity, AnonymousIdentity } from '@/services/anonymous.service';
+import { shouldUnoptimizeImage } from '@/services/image.service';
 import Image from 'next/image';
 
 export default function MyAnonymousIdentities() {
@@ -33,7 +34,11 @@ export default function MyAnonymousIdentities() {
       const response = await getMyAnonymousIdentities();
 
       if (response.success) {
-        setIdentities(response.data);
+        const validIdentities = response.data.filter((identity) => (
+          Boolean(identity.group_id && identity.target_group) ||
+          Boolean(identity.conversation_id && identity.target_user_id && identity.target_user)
+        ));
+        setIdentities(validIdentities);
       } else {
         setError(response.message || 'Failed to fetch identities');
         toast.error(response.message || 'Failed to fetch identities');
@@ -342,6 +347,7 @@ export default function MyAnonymousIdentities() {
                         width={36}
                         height={36}
                         className="rounded-full object-cover ring-2 ring-white/20"
+                        unoptimized={shouldUnoptimizeImage(identity.target_user.dp_url)}
                       />
                       <div className="min-w-0">
                         <p className="font-semibold text-sm truncate" style={{ color: 'var(--heading)' }}>

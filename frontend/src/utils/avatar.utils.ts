@@ -6,6 +6,13 @@
 // Total number of preset avatars available
 const TOTAL_AVATARS = 61;
 
+const DEFAULT_AVATAR_IDS = {
+  male: 'avatars/avatar-01',
+  female: 'avatars/avatar-02',
+  other: 'avatars/avatar-03',
+  group: 'avatars/avatar-04',
+} as const;
+
 /**
  * Generate array of all available avatar public IDs
  * @returns Array of avatar public IDs (e.g., ['avatars/avatar-01', 'avatars/avatar-02', ...])
@@ -32,6 +39,24 @@ export const getAvatarUrl = (
   }
   
   return `https://res.cloudinary.com/${cloudName}/image/upload/${transformations}/${publicId}.svg`;
+};
+
+export const getDefaultAvatarUrl = (gender?: string | null): string => {
+  const normalizedGender = gender?.toLowerCase();
+
+  if (normalizedGender === 'female') {
+    return getAvatarUrl(DEFAULT_AVATAR_IDS.female);
+  }
+
+  if (normalizedGender === 'male') {
+    return getAvatarUrl(DEFAULT_AVATAR_IDS.male);
+  }
+
+  return getAvatarUrl(DEFAULT_AVATAR_IDS.other);
+};
+
+export const getDefaultGroupAvatarUrl = (): string => {
+  return getAvatarUrl(DEFAULT_AVATAR_IDS.group);
 };
 
 /**

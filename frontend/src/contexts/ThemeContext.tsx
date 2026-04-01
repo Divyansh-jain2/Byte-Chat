@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import { createContext, useContext, useEffect, useSyncExternalStore, ReactNode } from 'react';
 
 type Theme = 'light' | 'dark';
 
@@ -11,43 +11,41 @@ interface ThemeContextType {
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
-// export function ThemeProvider({ children }: { children: ReactNode }) {
-//   const [theme, setTheme] = useState<Theme>('light');
-//   const [mounted, setMounted] = useState(false);
+const themeListeners = new Set<() => void>();
 
-//   useEffect(() => {
-//     setMounted(true);
-//     const savedTheme = localStorage.getItem('theme') as Theme | null;
-//     const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-//     const initialTheme = savedTheme || (prefersDark ? 'dark' : 'light');
-//     setTheme(initialTheme);
-//     document.documentElement.classList.toggle('dark', initialTheme === 'dark');
-//   }, []);
+const resolveBrowserTheme = (): Theme => {
+  const savedTheme = localStorage.getItem('theme') as Theme | null;
+  if (savedTheme) {
+    return savedTheme;
+  }
 
-//   const toggleTheme = () => {
-//     const newTheme = theme === 'light' ? 'dark' : 'light';
-//     setTheme(newTheme);
-//     localStorage.setItem('theme', newTheme);
-//     document.documentElement.classList.toggle('dark', newTheme === 'dark');
-//   };
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+};
 
-//   // Always provide the context, even when not mounted
-//   return (
-//     <ThemeContext.Provider value={{ theme, toggleTheme }}>
-//       {children}
-//     </ThemeContext.Provider>
-//   );
-// }
+const getServerTheme = (): Theme => 'light';
+
+const getClientTheme = (): Theme => {
+  if (typeof window === 'undefined') {
+    return getServerTheme();
+  }
+
+  return resolveBrowserTheme();
+};
+
+const subscribeToTheme = (listener: () => void) => {
+  themeListeners.add(listener);
+
+  return () => {
+    themeListeners.delete(listener);
+  };
+};
+
+const notifyThemeListeners = () => {
+  themeListeners.forEach((listener) => listener());
+};
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const getInitialTheme = (): Theme => {
-    if (typeof window === 'undefined') return 'light';
-    const saved = localStorage.getItem('theme') as Theme | null;
-    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-    return saved || (prefersDark ? 'dark' : 'light');
-  };
-
-  const [theme, setTheme] = useState<Theme>(getInitialTheme);
+  const theme = useSyncExternalStore(subscribeToTheme, getClientTheme, getServerTheme);
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark');
@@ -55,7 +53,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   }, [theme]);
 
   const toggleTheme = () => {
-    setTheme(prev => (prev === 'light' ? 'dark' : 'light'));
+    const nextTheme: Theme = theme === 'light' ? 'dark' : 'light';
+    localStorage.setItem('theme', nextTheme);
+    notifyThemeListeners();
   };
 
   return (

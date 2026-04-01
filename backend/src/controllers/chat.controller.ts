@@ -9,276 +9,13 @@ import { cacheMessage } from '../services/messageCache.service.js';
 import { queueOfflineMessage } from '../services/offlineMessage.service.js';
 import { incrementUnread, resetUnread } from '../services/unread.service.js';
 import { isUserOnline as isOnlineRedis } from '../services/presence.service.js';
-import { pushNotification } from '../services/notification.service.js';
-import { cacheKeys, CACHE_TTL_SECONDS, getCacheJSON, setCacheJSON } from '../utils/cache.util.js';
-import { getUserProfileCached } from '../services/userProfileCache.service.js';
-import { sendConditionalJson } from '../utils/httpCache.util.js';
-import { getEitherBlockedStatusCached, setEitherBlockedStatusCached } from '../services/blockCache.service.js';
-import {
-  buildMessageDedupeToken,
-  completeMessageDedupToken,
-  getEncryptedSessionKeyCached,
-  primeEncryptedSessionKeyCache,
-  reserveMessageDedupToken,
-} from '../services/messageDeliveryOptimization.service.js';
-import {
-  buildMessagesPageCacheKey,
-  bumpMessagesCacheVersion,
-  getCachedMessagesPage,
-  getMessagesCacheVersion,
-  setCachedMessagesPage,
-} from '../services/messagePaginationCache.service.js';
+import { getAnonymousMessages } from './anonymous-chat.controller.js';
 
 /**
  * REGULAR CHAT CONTROLLER
  * Handles all regular (non-anonymous) chat operations
  * For anonymous chat, see anonymous-chat.controller.ts
  */
-
-const CONVERSATION_LIST_CACHE_METRIC = 'conversation_list';
-
-function cursorToString(value: unknown): string | null {
-  if (value instanceof Date) {
-    return value.toISOString();
-  }
-  if (typeof value === 'string' && value.length > 0) {
-    return value;
-  }
-  return null;
-}
-
-async function fetchRegularConversationsFromDb(userId: string): Promise<Array<Record<string, unknown>>> {
-  const result = await pool.query(
-    `SELECT 
-      cc.*,
-      CASE 
-        WHEN cc.user1_id = $1 THEN u2.user_id
-        ELSE u1.user_id
-      END as other_user_id,
-      CASE 
-        WHEN cc.user1_id = $1 THEN u2.name
-        ELSE u1.name
-      END as other_user_name,
-      CASE 
-        WHEN cc.user1_id = $1 THEN u2.dp_url
-        ELSE u1.dp_url
-      END as other_user_dp,
-      CASE 
-        WHEN cc.user1_id = $1 THEN u2.gender
-        ELSE u1.gender
-      END as other_user_gender,
-      lm.encrypted_content as last_message_preview,
-      lm.message_type as last_message_type,
-      lm.created_at as last_message_time,
-      (SELECT COUNT(*) FROM message_status ms
-       JOIN chat_messages cm ON ms.message_id = cm.message_id
-       WHERE cm.conversation_id = cc.conversation_id
-       AND ms.user_id = $1
-       AND ms.status != 'read'
-       AND cm.sender_id != $1) as unread_count
-    FROM chat_conversations cc
-    LEFT JOIN users u1 ON cc.user1_id = u1.user_id
-    LEFT JOIN users u2 ON cc.user2_id = u2.user_id
-    LEFT JOIN LATERAL (
-      SELECT * FROM chat_messages
-      WHERE conversation_id = cc.conversation_id
-      ORDER BY created_at DESC
-      LIMIT 1
-    ) lm ON true
-    WHERE (cc.user1_id = $1 OR cc.user2_id = $1)
-    AND cc.is_blocked = false
-    AND (cc.is_anonymous = false OR cc.is_anonymous IS NULL)
-    AND cc.anonymous_initiator_id IS NULL
-    ORDER BY cc.last_message_at DESC`,
-    [userId]
-  );
-
-  return result.rows as Array<Record<string, unknown>>;
-}
-
-async function warmRegularConversationCacheForUsers(userIds: Array<string | null | undefined>): Promise<void> {
-  const uniqueUserIds = Array.from(
-    new Set(userIds.filter((id): id is string => Boolean(id)).map((id) => String(id)))
-  );
-
-  await Promise.all(
-    uniqueUserIds.map(async (uid) => {
-      try {
-        const rows = await fetchRegularConversationsFromDb(uid);
-        await setCacheJSON(
-          cacheKeys.userConversations(uid),
-          rows,
-          CACHE_TTL_SECONDS.USER_CONVERSATIONS
-        );
-      } catch {
-        // Fail open - write-through refresh is best-effort.
-      }
-    })
-  );
-}
-
-async function fetchRegularMessagesPage(params: {
-  conversationId: string;
-  userId: string;
-  limit: number;
-  before: string | null;
-  searchQuery: string;
-}): Promise<Array<Record<string, unknown>>> {
-  const queryParams: Array<string | number> = [params.conversationId, params.userId, params.limit];
-
-  let beforeClause = '';
-  if (params.before) {
-    queryParams.push(params.before);
-    beforeClause = `AND cm.created_at < $${queryParams.length}`;
-  }
-
-  let searchClause = '';
-  if (params.searchQuery.length > 0) {
-    queryParams.push(params.searchQuery);
-    const searchParam = queryParams.length;
-    searchClause = `
-      AND (
-        cm.encrypted_content ILIKE '%' || $${searchParam} || '%'
-        OR u.name ILIKE '%' || $${searchParam} || '%'
-        OR u.roll_no ILIKE '%' || $${searchParam} || '%'
-        OR cm.message_type ILIKE '%' || $${searchParam} || '%'
-      )`;
-  }
-
-  const result = await pool.query(
-    `SELECT
-      cm.*,
-      (cm.sender_id = $2) as is_my_message,
-      CASE
-        WHEN cm.sender_id != $2 THEN jsonb_build_object(
-          'user_id', u.user_id,
-          'name', u.name,
-          'roll_no', u.roll_no,
-          'display_gender', u.gender,
-          'dp_url', u.dp_url,
-          'is_anonymous', false
-        )
-        ELSE null
-      END as sender,
-      CASE
-        WHEN cm.parent_message_id IS NOT NULL THEN jsonb_build_object(
-          'message_id', pm.message_id,
-          'encrypted_content', pm.encrypted_content,
-          'content_iv', pm.content_iv,
-          'content_auth_tag', pm.content_auth_tag,
-          'sender', jsonb_build_object(
-            'name', pu.name
-          )
-        )
-        ELSE null
-      END as parent_message,
-      COALESCE(
-        (
-          SELECT json_agg(
-            json_build_object(
-              'emoji', r.emoji,
-              'count', r.count,
-              'users', r.users
-            )
-          )
-          FROM (
-            SELECT
-              mr.emoji,
-              COUNT(*)::int as count,
-              json_agg(
-                json_build_object(
-                  'user_id', ru.user_id,
-                  'name', ru.name
-                ) ORDER BY mr.created_at
-              ) as users
-            FROM message_reactions mr
-            JOIN users ru ON mr.user_id = ru.user_id
-            WHERE mr.message_id = cm.message_id
-            GROUP BY mr.emoji
-          ) r
-        ),
-        '[]'::json
-      ) as reactions,
-      sk.aes_key_encrypted as user_session_key
-    FROM chat_messages cm
-    LEFT JOIN users u ON cm.sender_id = u.user_id
-    LEFT JOIN chat_messages pm ON cm.parent_message_id = pm.message_id
-    LEFT JOIN users pu ON pm.sender_id = pu.user_id
-    LEFT JOIN chat_session_keys sk ON cm.key_id = sk.session_key_id AND sk.encrypted_for_user_id = $2
-    WHERE cm.conversation_id = $1
-    ${beforeClause}
-    ${searchClause}
-    AND cm.is_deleted = false
-    AND cm.deleted_for_everyone = false
-    AND NOT ($2::uuid = ANY(COALESCE(cm.deleted_for_user_ids, ARRAY[]::uuid[])))
-    ORDER BY cm.created_at DESC
-    LIMIT $3`,
-    queryParams
-  );
-
-  return result.rows as Array<Record<string, unknown>>;
-}
-
-async function preCacheNextMessagesPage(params: {
-  conversationId: string;
-  userId: string;
-  limit: number;
-  searchQuery: string;
-  nextCursor: string;
-  version: number;
-}): Promise<void> {
-  const nextCacheKey = buildMessagesPageCacheKey({
-    conversationId: params.conversationId,
-    userId: params.userId,
-    limit: params.limit,
-    before: params.nextCursor,
-    searchQuery: params.searchQuery,
-    version: params.version,
-  });
-
-  const existing = await getCachedMessagesPage(nextCacheKey);
-  if (existing) {
-    return;
-  }
-
-  const nextRowsDesc = await fetchRegularMessagesPage({
-    conversationId: params.conversationId,
-    userId: params.userId,
-    limit: params.limit,
-    before: params.nextCursor,
-    searchQuery: params.searchQuery,
-  });
-
-  const nextHasMore = nextRowsDesc.length === params.limit;
-  const nextOldestRow = nextRowsDesc[nextRowsDesc.length - 1];
-  const nextNextCursor = nextHasMore ? cursorToString(nextOldestRow?.created_at) : null;
-
-  await setCachedMessagesPage(nextCacheKey, {
-    messages: [...nextRowsDesc].reverse(),
-    hasMore: nextHasMore,
-    nextCursor: nextNextCursor,
-  });
-}
-
-async function isEitherUserBlocked(userA: string, userB: string): Promise<boolean> {
-  const cached = await getEitherBlockedStatusCached(userA, userB);
-  if (cached !== null) {
-    return cached;
-  }
-
-  const blockCheck = await pool.query(
-    `SELECT EXISTS(
-      SELECT 1 FROM user_blocks
-      WHERE (blocker_id = $1 AND blocked_id = $2)
-         OR (blocker_id = $2 AND blocked_id = $1)
-    ) as is_blocked`,
-    [userA, userB]
-  );
-
-  const isBlocked = Boolean(blockCheck.rows[0]?.is_blocked);
-  await setEitherBlockedStatusCached(userA, userB, isBlocked);
-  return isBlocked;
-}
 
 // Get or create regular conversation (non-anonymous only)
 export async function getOrCreateConversation(req: Request, res: Response) {
@@ -300,8 +37,16 @@ export async function getOrCreateConversation(req: Request, res: Response) {
     }
 
     // Check if users are blocked
-    const isBlocked = await isEitherUserBlocked(String(userId), String(otherUserId));
-    if (isBlocked) {
+    const blockCheck = await pool.query(
+      `SELECT EXISTS(
+        SELECT 1 FROM user_blocks 
+        WHERE (blocker_id = $1 AND blocked_id = $2) 
+           OR (blocker_id = $2 AND blocked_id = $1)
+      ) as is_blocked`,
+      [userId, otherUserId]
+    );
+
+    if (blockCheck.rows[0].is_blocked) {
       throw new ApiError(403, 'Cannot message this user');
     }
 
@@ -311,12 +56,14 @@ export async function getOrCreateConversation(req: Request, res: Response) {
 
     // console.log(`💬 Creating/finding regular conversation between User ${userId} and User ${otherUserId}`);
 
-    let conversationCreated = false;
-
-    // Check for existing regular conversation (no anonymous initiator)
+    // Reuse any existing conversation between the two users.
+    // Some databases enforce one conversation row per pair regardless of anonymity,
+    // so trying to create a new "regular" one can fail with a duplicate key error.
     let conversation = await pool.query(
       `SELECT * FROM chat_conversations 
-       WHERE user1_id = $1 AND user2_id = $2 AND anonymous_initiator_id IS NULL`,
+       WHERE user1_id = $1 AND user2_id = $2
+       ORDER BY created_at DESC
+       LIMIT 1`,
       [user1Id, user2Id]
     );
 
@@ -332,7 +79,6 @@ export async function getOrCreateConversation(req: Request, res: Response) {
           ) VALUES ($1, $2, false, NULL, true) RETURNING *`,
           [user1Id, user2Id]
         );
-        conversationCreated = true;
 
         // console.log(`✅ NEW regular conversation created: ${conversation.rows[0].conversation_id}`);
       }
@@ -341,10 +87,12 @@ export async function getOrCreateConversation(req: Request, res: Response) {
         if (insertError.code === '23505') {
           // console.log(`⚠️ Race condition detected - fetching existing regular conversation`);
 
-          // Fetch the conversation that was just created by the other request
+          // Fetch whichever conversation row already exists for this user pair.
           conversation = await pool.query(
             `SELECT * FROM chat_conversations 
-             WHERE user1_id = $1 AND user2_id = $2 AND anonymous_initiator_id IS NULL`,
+             WHERE user1_id = $1 AND user2_id = $2
+             ORDER BY created_at DESC
+             LIMIT 1`,
             [user1Id, user2Id]
           );
 
@@ -360,15 +108,15 @@ export async function getOrCreateConversation(req: Request, res: Response) {
       // console.log(`✓ Found existing regular conversation: ${conversation.rows[0].conversation_id}`);
     }
 
+    if (!conversation.rows[0]) {
+      throw new ApiError(500, 'Conversation lookup failed after creation');
+    }
+
     // console.log(`✅ Regular conversation created/retrieved:`, {
     //   conversationId: conversation.rows[0].conversation_id,
     //   user1Id,
     //   user2Id
     // });
-
-    if (conversationCreated) {
-      await warmRegularConversationCacheForUsers([String(userId), String(otherUserId)]);
-    }
 
     res.status(200).json({
       success: true,
@@ -522,8 +270,6 @@ export async function respondToChatRequest(req: Request, res: Response) {
           [conversation.conversation_id]
         );
       }
-
-      await warmRegularConversationCacheForUsers([String(chatRequest.sender_id), String(userId)]);
     }
 
     res.json({
@@ -551,38 +297,56 @@ export async function getConversations(req: Request, res: Response) {
       throw new ApiError(401, 'Unauthorized');
     }
 
-    const conversationsCacheKey = cacheKeys.userConversations(String(userId));
-    const cachedConversations = await getCacheJSON<Array<Record<string, unknown>>>(
-      conversationsCacheKey,
-      CONVERSATION_LIST_CACHE_METRIC
-    );
-
-    if (cachedConversations) {
-      return sendConditionalJson(req, res, {
-        success: true,
-        data: cachedConversations
-      }, {
-        maxAgeSeconds: 15,
-        cacheStatus: 'HIT'
-      });
-    }
-
-    const rows = await fetchRegularConversationsFromDb(String(userId));
-
-    await setCacheJSON(
-      conversationsCacheKey,
-      rows,
-      CACHE_TTL_SECONDS.USER_CONVERSATIONS
+    const result = await pool.query(
+      `SELECT 
+        cc.*,
+        CASE 
+          WHEN cc.user1_id = $1 THEN u2.user_id
+          ELSE u1.user_id
+        END as other_user_id,
+        CASE 
+          WHEN cc.user1_id = $1 THEN u2.name
+          ELSE u1.name
+        END as other_user_name,
+        CASE 
+          WHEN cc.user1_id = $1 THEN u2.dp_url
+          ELSE u1.dp_url
+        END as other_user_dp,
+        CASE 
+          WHEN cc.user1_id = $1 THEN u2.gender
+          ELSE u1.gender
+        END as other_user_gender,
+        lm.encrypted_content as last_message_preview,
+        lm.message_type as last_message_type,
+        lm.created_at as last_message_time,
+        (SELECT COUNT(*) FROM message_status ms
+         JOIN chat_messages cm ON ms.message_id = cm.message_id
+         WHERE cm.conversation_id = cc.conversation_id
+         AND ms.user_id = $1
+         AND ms.status != 'read'
+         AND cm.sender_id != $1) as unread_count
+      FROM chat_conversations cc
+      LEFT JOIN users u1 ON cc.user1_id = u1.user_id
+      LEFT JOIN users u2 ON cc.user2_id = u2.user_id
+      LEFT JOIN LATERAL (
+        SELECT * FROM chat_messages
+        WHERE conversation_id = cc.conversation_id
+        ORDER BY created_at DESC
+        LIMIT 1
+      ) lm ON true
+      WHERE (cc.user1_id = $1 OR cc.user2_id = $1)
+      AND cc.is_blocked = false
+      AND (cc.is_anonymous = false OR cc.is_anonymous IS NULL)
+      AND cc.anonymous_initiator_id IS NULL
+      ORDER BY cc.last_message_at DESC`,
+      [userId]
     );
 
     // console.log(`[MSGES] Fetched ${result.rows.length} regular conversations for user ${userId}`);
 
-    return sendConditionalJson(req, res, {
+    res.json({
       success: true,
-      data: rows
-    }, {
-      maxAgeSeconds: 15,
-      cacheStatus: 'MISS'
+      data: result.rows
     });
   }
   catch (error) {
@@ -597,43 +361,46 @@ export async function getMessages(req: Request, res: Response) {
   try {
     const userId = req.user?.userId;
     const { conversationId } = req.params;
-    const { limit = 50, before, q, prefetchNext = '1' } = req.query;
+    const { limit = 50, before } = req.query;
 
     if (!userId) {
       throw new ApiError(401, 'Unauthorized');
     }
 
-    // Check if user is part of regular conversation
+    // Check if user is part of the conversation first, then route based on its actual type.
     const convCheck = await pool.query(
       `SELECT * FROM chat_conversations 
        WHERE conversation_id = $1 
-       AND (user1_id = $2 OR user2_id = $2)
-       AND (is_anonymous = false OR is_anonymous IS NULL)
-       AND anonymous_initiator_id IS NULL`,
+       AND (user1_id = $2 OR user2_id = $2)`,
       [conversationId, userId]
     );
 
     if (convCheck.rows.length === 0) {
-      // console.log('[DEBUG] getMessages 403 - user not in regular conversation:', { conversationId, userId });
+      console.log('[DEBUG] getMessages 403 - user not in conversation:', { conversationId, userId });
       throw new ApiError(403, 'Access denied to this conversation');
     }
 
     const conversation = convCheck.rows[0];
 
+    if (conversation.is_anonymous && conversation.anonymous_initiator_id) {
+      console.warn('[WARN] Regular messages requested for anonymous conversation, falling back to anonymous fetch:', {
+        conversationId,
+        userId,
+        anonymous_initiator_id: conversation.anonymous_initiator_id
+      });
+      return getAnonymousMessages(req, res);
+    }
+
     // Get other user info (always show real profile in regular chats)
     const otherUserId = conversation.user1_id === userId ? conversation.user2_id : conversation.user1_id;
 
-    const otherUserInfo = await getUserProfileCached(String(otherUserId));
-    if (!otherUserInfo) {
-      throw new ApiError(404, 'Other user not found');
-    }
+    const otherUserInfo = await pool.query(
+      `SELECT user_id, name, roll_no, gender, dp_url FROM users WHERE user_id = $1`,
+      [otherUserId]
+    );
 
     const otherUserData = {
-      user_id: otherUserInfo.user_id,
-      name: otherUserInfo.name,
-      roll_no: otherUserInfo.roll_no,
-      gender: otherUserInfo.gender,
-      dp_url: otherUserInfo.dp_url,
+      ...otherUserInfo.rows[0],
       is_anonymous: false
     };
 
@@ -642,73 +409,85 @@ export async function getMessages(req: Request, res: Response) {
     //   roll_no: otherUserInfo.rows[0].roll_no
     // });
 
-    const parsedLimit = Math.min(Math.max(Number(limit) || 50, 1), 100);
-    const searchQuery = typeof q === 'string' ? q.trim() : '';
-    const beforeCursor = typeof before === 'string' && before.trim().length > 0 ? before.trim() : null;
+    // Get messages with real sender info and reactions
+    const result = await pool.query(
+      `SELECT 
+        cm.*,
+        (cm.sender_id = $2) as is_my_message,
+        CASE 
+          WHEN cm.sender_id != $2 THEN jsonb_build_object(
+            'user_id', u.user_id,
+            'name', u.name,
+            'roll_no', u.roll_no,
+            'display_gender', u.gender,
+            'dp_url', u.dp_url,
+            'is_anonymous', false
+          )
+          ELSE null
+        END as sender,
+        CASE
+          WHEN cm.parent_message_id IS NOT NULL THEN jsonb_build_object(
+            'message_id', pm.message_id,
+            'encrypted_content', pm.encrypted_content,
+            'content_iv', pm.content_iv,
+            'content_auth_tag', pm.content_auth_tag,
+            'sender', jsonb_build_object(
+              'name', pu.name
+            )
+          )
+          ELSE null
+        END as parent_message,
+        COALESCE(
+          (
+            SELECT json_agg(
+              json_build_object(
+                'emoji', r.emoji,
+                'count', r.count,
+                'users', r.users
+              )
+            )
+            FROM (
+              SELECT 
+                mr.emoji,
+                COUNT(*)::int as count,
+                json_agg(
+                  json_build_object(
+                    'user_id', ru.user_id,
+                    'name', ru.name
+                  ) ORDER BY mr.created_at
+                ) as users
+              FROM message_reactions mr
+              JOIN users ru ON mr.user_id = ru.user_id
+              WHERE mr.message_id = cm.message_id
+              GROUP BY mr.emoji
+            ) r
+          ),
+          '[]'::json
+        ) as reactions,
+        sk.aes_key_encrypted as user_session_key
+      FROM chat_messages cm
+      LEFT JOIN users u ON cm.sender_id = u.user_id
+      LEFT JOIN chat_messages pm ON cm.parent_message_id = pm.message_id
+      LEFT JOIN users pu ON pm.sender_id = pu.user_id
+      LEFT JOIN chat_session_keys sk ON cm.key_id = sk.session_key_id AND sk.encrypted_for_user_id = $2
+      WHERE cm.conversation_id = $1
+      ${before ? 'AND cm.created_at < $4' : ''}
+      AND cm.is_deleted = false
+      AND cm.deleted_for_everyone = false
+      AND NOT ($2::uuid = ANY(COALESCE(cm.deleted_for_user_ids, ARRAY[]::uuid[])))
+      ORDER BY cm.created_at DESC
+      LIMIT $3`,
+      before ? [conversationId, userId, limit, before] : [conversationId, userId, limit]
+    );
 
-    const cacheVersion = await getMessagesCacheVersion(String(conversationId));
-    const cacheKey = buildMessagesPageCacheKey({
-      conversationId: String(conversationId),
-      userId: String(userId),
-      limit: parsedLimit,
-      before: beforeCursor,
-      searchQuery,
-      version: cacheVersion,
-    });
-
-    let pagePayload = await getCachedMessagesPage(cacheKey);
-
-    if (!pagePayload) {
-      const rowsDesc = await fetchRegularMessagesPage({
-        conversationId: String(conversationId),
-        userId: String(userId),
-        limit: parsedLimit,
-        before: beforeCursor,
-        searchQuery,
-      });
-
-      const hasMore = rowsDesc.length === parsedLimit;
-      const oldestRow = rowsDesc[rowsDesc.length - 1];
-      const nextCursor = hasMore ? cursorToString(oldestRow?.created_at) : null;
-
-      pagePayload = {
-        messages: [...rowsDesc].reverse(),
-        hasMore,
-        nextCursor,
-      };
-
-      await setCachedMessagesPage(cacheKey, pagePayload);
-    }
-
-    if (!beforeCursor && searchQuery.length === 0) {
-      // Mark all incoming messages in this conversation as read for current user only on latest-page reads.
-      await pool.query(
-        `UPDATE message_status ms
-         SET status = 'read', read_at = NOW()
-         FROM chat_messages cm
-         WHERE ms.message_id = cm.message_id
-           AND ms.user_id = $1
-           AND cm.conversation_id = $2
-           AND cm.sender_id != $1
-           AND ms.status != 'read'`,
-        [userId, conversationId]
-      );
-
-      // Redis Messaging Layer
-      // 1. Reset unread count for this user in this chat
+    // Redis unread state should not block opening the chat.
+    try {
       await resetUnread(userId, conversationId as string);
-      await warmRegularConversationCacheForUsers([String(userId)]);
-    }
-
-    const shouldPrecacheNext = String(prefetchNext) !== '0' && String(prefetchNext).toLowerCase() !== 'false';
-    if (shouldPrecacheNext && pagePayload.hasMore && pagePayload.nextCursor) {
-      void preCacheNextMessagesPage({
-        conversationId: String(conversationId),
-        userId: String(userId),
-        limit: parsedLimit,
-        searchQuery,
-        nextCursor: pagePayload.nextCursor,
-        version: cacheVersion,
+    } catch (unreadError) {
+      console.error('[WARN] Failed to reset unread count:', {
+        conversationId,
+        userId,
+        unreadError
       });
     }
 
@@ -716,9 +495,7 @@ export async function getMessages(req: Request, res: Response) {
       success: true,
       data: {
         conversation: conversation,
-        messages: pagePayload.messages,
-        hasMore: pagePayload.hasMore,
-        nextCursor: pagePayload.nextCursor,
+        messages: result.rows.reverse(),
         otherUser: otherUserData
       }
     });
@@ -749,8 +526,7 @@ export async function sendMessage(req: Request, res: Response) {
       mediaMimeType,
       thumbnailUrl,
       keyId,
-      parentMessageId,
-      clientMessageId
+      parentMessageId
     } = req.body;
 
     if (!userId) {
@@ -780,55 +556,17 @@ export async function sendMessage(req: Request, res: Response) {
     const conv = convCheck.rows[0];
     const otherUserId = conv.user1_id === userId ? conv.user2_id : conv.user1_id;
 
-    const isBlocked = await isEitherUserBlocked(String(userId), String(otherUserId));
-    if (isBlocked) {
+    const blockCheck = await pool.query(
+      `SELECT EXISTS(
+        SELECT 1 FROM user_blocks 
+        WHERE (blocker_id = $1 AND blocked_id = $2) 
+           OR (blocker_id = $2 AND blocked_id = $1)
+      ) as is_blocked`,
+      [userId, otherUserId]
+    );
+
+    if (blockCheck.rows[0].is_blocked) {
       throw new ApiError(403, 'Cannot send message - user is blocked');
-    }
-
-    const dedupeInput: {
-      scope: string;
-      senderId: string;
-      encryptedContent: string;
-      contentIv: string;
-      contentAuthTag: string;
-      clientMessageId?: string;
-      parentMessageId?: string;
-      messageType?: string;
-    } = {
-      scope: `conversation:${conversationId}`,
-      senderId: String(userId),
-      encryptedContent: String(encryptedContent),
-      contentIv: String(contentIv),
-      contentAuthTag: String(contentAuthTag),
-    };
-
-    if (typeof clientMessageId === 'string' && clientMessageId.length > 0) {
-      dedupeInput.clientMessageId = clientMessageId;
-    }
-    if (parentMessageId) {
-      dedupeInput.parentMessageId = String(parentMessageId);
-    }
-    if (typeof messageType === 'string' && messageType.length > 0) {
-      dedupeInput.messageType = messageType;
-    }
-
-    const dedupeToken = buildMessageDedupeToken(dedupeInput);
-
-    const dedupeState = await reserveMessageDedupToken(dedupeToken);
-    if (!dedupeState.reserved && dedupeState.existingMessageId) {
-      const existing = await pool.query(
-        'SELECT * FROM chat_messages WHERE message_id = $1',
-        [dedupeState.existingMessageId]
-      );
-
-      if (existing.rows.length > 0) {
-        return res.status(200).json({
-          success: true,
-          message: 'Duplicate message ignored',
-          duplicate: true,
-          data: existing.rows[0]
-        });
-      }
     }
 
     // Insert message
@@ -867,7 +605,6 @@ export async function sendMessage(req: Request, res: Response) {
     );
 
     const message = result.rows[0];
-    await completeMessageDedupToken(dedupeToken, String(message.message_id));
 
     // Update conversation last_message_at
     await pool.query(
@@ -875,22 +612,18 @@ export async function sendMessage(req: Request, res: Response) {
       [conversationId]
     );
 
-    await bumpMessagesCacheVersion(String(conversationId));
-
-    await warmRegularConversationCacheForUsers([String(userId), String(otherUserId)]);
-
     // Emit socket event with real sender info
     if (io) {
-      const userInfo = await getUserProfileCached(String(userId));
-      if (!userInfo) {
-        throw new ApiError(404, 'Sender not found');
-      }
+      const userInfo = await pool.query(
+        'SELECT name, gender, dp_url FROM users WHERE user_id = $1',
+        [userId]
+      );
 
       const senderInfo = {
         user_id: userId,
-        name: userInfo.name,
-        display_gender: userInfo.gender,
-        dp_url: userInfo.dp_url,
+        name: userInfo.rows[0].name,
+        display_gender: userInfo.rows[0].gender,
+        dp_url: userInfo.rows[0].dp_url,
         is_anonymous: false,
       };
 
@@ -910,31 +643,17 @@ export async function sendMessage(req: Request, res: Response) {
             )
             ELSE null
           END as parent_message,
-          NULL::text as user_session_key
+          sk.aes_key_encrypted as user_session_key
         FROM chat_messages cm
         LEFT JOIN chat_messages pm ON cm.parent_message_id = pm.message_id
         LEFT JOIN users pu ON pm.sender_id = pu.user_id
+        LEFT JOIN chat_session_keys sk ON cm.key_id = sk.session_key_id AND sk.encrypted_for_user_id != $2
         WHERE cm.message_id = $1`,
-        [message.message_id]
+        [message.message_id, userId]
       );
-
-      const recipientSessionKey = keyId
-        ? await getEncryptedSessionKeyCached(String(keyId), String(otherUserId), async () => {
-          const keyResult = await pool.query(
-            `SELECT aes_key_encrypted
-             FROM chat_session_keys
-             WHERE session_key_id = $1 AND encrypted_for_user_id = $2
-             LIMIT 1`,
-            [keyId, otherUserId]
-          );
-
-          return keyResult.rows[0]?.aes_key_encrypted ?? null;
-        })
-        : null;
 
       emitToConversation(io, conversationId, 'new-message', {
         ...fullMessageResult.rows[0],
-        user_session_key: recipientSessionKey,
         sender: senderInfo,
         is_my_message: false,
       });
@@ -952,18 +671,8 @@ export async function sendMessage(req: Request, res: Response) {
     // 3. Queue for offline delivery if needed
     const online = await isUserOnline(otherUserId);
     if (!online) {
-      await queueOfflineMessage(otherUserId, fullMessage, dedupeToken);
+      await queueOfflineMessage(otherUserId, fullMessage);
     }
-
-    // 4. Push a notification entry so it appears in Notification Center
-    await pushNotification(otherUserId, {
-      type: 'new_message',
-      conversationId,
-      message: 'You received a new message',
-      senderId: userId,
-      messageType,
-      timestamp: Date.now(),
-    });
 
     // console.log(`💬 Regular message sent in conversation ${conversationId}`);
 
@@ -1001,26 +710,20 @@ export async function getParticipantPublicKeys(req: Request, res: Response) {
 
     const { user1_id, user2_id, is_anonymous } = convCheck.rows[0];
 
-      const cacheKey = cacheKeys.conversationPublicKeys(String(conversationId));
-      let participants = await getCacheJSON<Array<Record<string, unknown>>>(cacheKey);
-
-      if (!participants) {
-        const result = await pool.query(
-          `SELECT uek.user_id, uek.public_key, u.name
-           FROM user_encryption_keys uek
-           JOIN users u ON uek.user_id = u.user_id
-           JOIN chat_conversations cc ON uek.user_id = cc.user1_id OR uek.user_id = cc.user2_id
-           WHERE cc.conversation_id = $1`,
-          [conversationId]
-        );
-        participants = result.rows;
-        await setCacheJSON(cacheKey, participants, CACHE_TTL_SECONDS.USER_PUBLIC_KEYS);
-      }
+    // Fetch public keys for both users
+    const result = await pool.query(
+      `SELECT uek.user_id, uek.public_key, u.name
+       FROM user_encryption_keys uek
+       JOIN users u ON uek.user_id = u.user_id
+       JOIN chat_conversations cc ON uek.user_id = cc.user1_id OR uek.user_id = cc.user2_id
+       WHERE cc.conversation_id = $1`,
+      [conversationId]
+    );
 
     res.json({
       success: true,
       data: {
-          participants,
+        participants: result.rows,
         isAnonymous: !!is_anonymous
       }
     });
@@ -1069,12 +772,6 @@ export async function storeSessionKeys(req: Request, res: Response) {
             k.userId,
             k.keyVersion || 1
           ]
-        );
-
-        await primeEncryptedSessionKeyCache(
-          String(sessionKeyGroupId),
-          String(k.userId),
-          String(k.encryptedKey)
         );
       }
 
@@ -1182,25 +879,6 @@ export async function deleteMessage(req: Request, res: Response) {
       );
     }
 
-    const conversationId = msgCheck.rows[0].conversation_id;
-    if (conversationId) {
-      await bumpMessagesCacheVersion(String(conversationId));
-    }
-
-    if (conversationId) {
-      const convUsers = await pool.query(
-        `SELECT user1_id, user2_id FROM chat_conversations WHERE conversation_id = $1`,
-        [conversationId]
-      );
-
-      if (convUsers.rows.length > 0) {
-        await warmRegularConversationCacheForUsers([
-          String(convUsers.rows[0].user1_id),
-          String(convUsers.rows[0].user2_id),
-        ]);
-      }
-    }
-
     res.json({
       success: true,
       message: 'Message deleted successfully'
@@ -1268,8 +946,6 @@ export async function blockUser(req: Request, res: Response) {
       [userId, conversationId]
     );
 
-    await warmRegularConversationCacheForUsers([String(userId), String(otherUserId)]);
-
     // Emit socket event to notify other user
     emitToConversation(io, conversationId, 'user-blocked', {
       blockedBy: userId,
@@ -1327,8 +1003,6 @@ export async function unblockUser(req: Request, res: Response) {
        WHERE conversation_id = $1`,
       [conversationId]
     );
-
-    await warmRegularConversationCacheForUsers([String(userId), String(otherUserId)]);
 
     res.json({
       success: true,
@@ -1481,15 +1155,15 @@ export async function reportUser(req: Request, res: Response) {
     }
 
     // Get reporter and reported user info for detailed logging
-    const reporterInfo = await getUserProfileCached(String(userId));
-    if (!reporterInfo) {
-      throw new ApiError(404, 'Reporter not found');
-    }
+    const reporterInfo = await pool.query(
+      'SELECT user_id, name, roll_no, branch, dp_url FROM users WHERE user_id = $1',
+      [userId]
+    );
 
-    const reportedInfo = await getUserProfileCached(String(actualReportedUserId));
-    if (!reportedInfo) {
-      throw new ApiError(404, 'Reported user not found');
-    }
+    const reportedInfo = await pool.query(
+      'SELECT user_id, name, roll_no, gender, branch, dp_url, bio FROM users WHERE user_id = $1',
+      [actualReportedUserId]
+    );
 
     // Get message details if messageId provided
     let messageDetails = null;

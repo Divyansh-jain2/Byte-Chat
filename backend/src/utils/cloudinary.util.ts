@@ -1,6 +1,6 @@
 import { v2 as cloudinary } from 'cloudinary';
 import { ApiError } from './error.util.js';
-import { getRandomAvatar, getAvatarUrl } from './avatar.util.js';
+import { getDefaultAvatarId, getDefaultGroupAvatarId, getAvatarUrl } from './avatar.util.js';
 
 const cloudName = process.env.CLOUD_NAME;
 const apiKey = process.env.CLOUD_API_KEY;
@@ -130,9 +130,7 @@ export const extractPublicId = (url: string): string | null => {
  * @returns Default avatar URL (now uses random preset avatar)
  */
 export const getDefaultAvatar = (gender: string): string => {
-  // Return a random preset avatar instead of hardcoded defaults
-  const randomAvatarId = getRandomAvatar();
-  return getAvatarUrl(randomAvatarId);
+  return getAvatarUrl(getDefaultAvatarId(gender));
 };
 
 /**
@@ -140,8 +138,5 @@ export const getDefaultAvatar = (gender: string): string => {
  * @returns Default group DP URL (now uses random preset avatar)
  */
 export const getDefaultGroupDP = (): string => {
-  // Return a random preset avatar instead of hardcoded default
-  const randomAvatarId = getRandomAvatar();
-  return getAvatarUrl(randomAvatarId);
+  return getAvatarUrl(getDefaultGroupAvatarId());
 };
-

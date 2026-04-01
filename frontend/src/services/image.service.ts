@@ -1,7 +1,9 @@
 import axios from 'axios';
 import { User as AuthUser } from '@/types/auth.types';
 import { Group as ChatGroup } from '@/types/chat.types';
-import { API_BASE_URL, getApiUrl } from './api.config';
+import { getDefaultAvatarUrl, getDefaultGroupAvatarUrl } from '@/utils/avatar.utils';
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
 
 export interface ImageUploadResponse {
   success: boolean;
@@ -17,23 +19,14 @@ export interface ImageUploadResponse {
  * Get default avatar URL based on gender
  */
 export const getDefaultAvatar = (gender: string): string => {
-  const cloudName = process.env.NEXT_PUBLIC_CLOUD_NAME;
-  
-  if (gender?.toLowerCase() === 'female') {
-    return `https://res.cloudinary.com/${cloudName}/image/upload/v1770722710/syqrnws7rzkjxxvullsa.jpg`;
-  }
-  
-  return `https://res.cloudinary.com/${cloudName}/image/upload/v1770722710/ahvxgdh0shutx72okak0.jpg`;
+  return getDefaultAvatarUrl(gender);
 };
 
 /**
  * Get default group display picture
  */
 export const getDefaultGroupDP = (): string => {
-  const cloudName = process.env.NEXT_PUBLIC_CLOUD_NAME;
-  // Using a placeholder service for default group image
-  // You can replace this with your own Cloudinary image URL
-  return `https://res.cloudinary.com/${cloudName}/image/upload/v1770723323/iuq8s6kfm6sufdws7nrr.jpg`;
+  return getDefaultGroupAvatarUrl();
 };
 
 
@@ -41,19 +34,20 @@ export const getDefaultGroupDP = (): string => {
  * Upload profile picture
  */
 export const uploadProfilePicture = async (
-  file: File
+  file: File,
+  token: string
 ): Promise<ImageUploadResponse> => {
   const formData = new FormData();
   formData.append('image', file);
 
   const response = await axios.post(
-    getApiUrl('/api/profile/upload-picture'),
+    `${API_URL}/api/profile/upload-picture`,
     formData,
     {
       headers: {
         'Content-Type': 'multipart/form-data',
+        Authorization: `Bearer ${token}`,
       },
-      withCredentials: true,
     }
   );
 
@@ -63,11 +57,15 @@ export const uploadProfilePicture = async (
 /**
  * Delete profile picture (reset to default)
  */
-export const deleteProfilePicture = async (): Promise<ImageUploadResponse> => {
+export const deleteProfilePicture = async (
+  token: string
+): Promise<ImageUploadResponse> => {
   const response = await axios.delete(
-    getApiUrl('/api/profile/delete-picture'),
+    `${API_URL}/api/profile/delete-picture`,
     {
-      withCredentials: true,
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
     }
   );
 
@@ -79,19 +77,20 @@ export const deleteProfilePicture = async (): Promise<ImageUploadResponse> => {
  */
 export const uploadGroupPicture = async (
   groupId: string,
-  file: File
+  file: File,
+  token: string
 ): Promise<ImageUploadResponse> => {
   const formData = new FormData();
   formData.append('image', file);
 
   const response = await axios.post(
-    getApiUrl(`/api/groups/${groupId}/upload-picture`),
+    `${API_URL}/api/groups/${groupId}/upload-picture`,
     formData,
     {
       headers: {
         'Content-Type': 'multipart/form-data',
+        Authorization: `Bearer ${token}`,
       },
-      withCredentials: true,
     }
   );
 
@@ -102,12 +101,15 @@ export const uploadGroupPicture = async (
  * Delete group picture
  */
 export const deleteGroupPicture = async (
-  groupId: string
+  groupId: string,
+  token: string
 ): Promise<ImageUploadResponse> => {
   const response = await axios.delete(
-    getApiUrl(`/api/groups/${groupId}/delete-picture`),
+    `${API_URL}/api/groups/${groupId}/delete-picture`,
     {
-      withCredentials: true,
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
     }
   );
 
@@ -125,6 +127,19 @@ export const getUserAvatar = (dpUrl: string | null, gender: string): string => {
 };
 
 /**
+ * Next/Image cannot optimize remote SVGs unless dangerouslyAllowSVG is enabled.
+ * Mark known SVG avatar URLs as unoptimized instead.
+ */
+export const shouldUnoptimizeImage = (url?: string | null): boolean => {
+  if (!url) {
+    return false;
+  }
+
+  const normalizedUrl = url.toLowerCase();
+  return normalizedUrl.includes('/svg') || normalizedUrl.endsWith('.svg');
+};
+
+/**
  * Get group display picture with default fallback
  */
 export const getGroupDP = (dpUrl: string | null | undefined): string => {
@@ -138,16 +153,17 @@ export const getGroupDP = (dpUrl: string | null | undefined): string => {
  * Select preset avatar for profile
  */
 export const selectPresetAvatar = async (
-  avatarId: string
+  avatarId: string,
+  token: string
 ): Promise<ImageUploadResponse> => {
   const response = await axios.post(
-    `${API_BASE_URL}/api/profile/select-avatar`,
+    `${API_URL}/api/profile/select-avatar`,
     { avatarId },
     {
       headers: {
         'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
       },
-      withCredentials: true,
     }
   );
 
@@ -159,16 +175,17 @@ export const selectPresetAvatar = async (
  */
 export const selectGroupPresetAvatar = async (
   groupId: string,
-  avatarId: string
+  avatarId: string,
+  token: string
 ): Promise<ImageUploadResponse> => {
   const response = await axios.post(
-    `${API_BASE_URL}/api/groups/${groupId}/select-avatar`,
+    `${API_URL}/api/groups/${groupId}/select-avatar`,
     { avatarId },
     {
       headers: {
         'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
       },
-      withCredentials: true,
     }
   );
 

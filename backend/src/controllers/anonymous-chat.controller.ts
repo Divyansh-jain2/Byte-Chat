@@ -4,17 +4,7 @@ import { ApiError } from '../utils/error.util.js';
 import { io } from '../index.js';
 import { emitToConversation } from '../socket/index.js';
 import { uploadToCloudinary } from '../utils/cloudinary.util.js';
-import { pushNotification } from '../services/notification.service.js';
-import { resetUnread } from '../services/unread.service.js';
-import { getUserProfileCached, getUserGenderCached } from '../services/userProfileCache.service.js';
-import { queueOfflineMessage } from '../services/offlineMessage.service.js';
-import { isUserOnline } from '../socket/index.js';
-import {
-  buildMessageDedupeToken,
-  completeMessageDedupToken,
-  getEncryptedSessionKeyCached,
-  reserveMessageDedupToken,
-} from '../services/messageDeliveryOptimization.service.js';
+import { getMessages as getRegularMessages } from './chat.controller.js';
 
 /**
  * ANONYMOUS CHAT CONTROLLER
@@ -62,10 +52,10 @@ export async function createAnonymousConversation(req: Request, res: Response) {
     // console.log(`🎭 Creating/finding anonymous conversation: User ${userId} → User ${otherUserId}`);
 
     // Get user's gender
-    const userGender = await getUserGenderCached(String(userId));
-    if (!userGender) {
-      throw new ApiError(404, 'User not found');
-    }
+    const userInfo = await pool.query(
+      'SELECT gender FROM users WHERE user_id = $1',
+      [userId]
+    );
 
     // Check if anonymous identity already exists for this user targeting the other user
     const existingAnonIdentity = await pool.query(
@@ -90,7 +80,7 @@ export async function createAnonymousConversation(req: Request, res: Response) {
           userId,
           otherUserId,
           `anon_${Math.random().toString(36).substring(2, 15)}`,
-          userGender
+          userInfo.rows[0].gender
         ]
       );
       anonymousIdentityId = anonIdentity.rows[0].identity_id;
@@ -275,7 +265,7 @@ export async function getAnonymousConversations(req: Request, res: Response) {
 
 // Get messages for anonymous conversation
 export async function getAnonymousMessages(req: Request, res: Response) {
-  // console.log('[DEBUG] getAnonymousMessages hit:', { conversationId: req.params.conversationId, userId: req.user?.userId });
+  console.log('[DEBUG] getAnonymousMessages hit:', { conversationId: req.params.conversationId, userId: req.user?.userId });
   try {
     const userId = req.user?.userId;
     const { conversationId } = req.params;
@@ -300,6 +290,17 @@ export async function getAnonymousMessages(req: Request, res: Response) {
     }
 
     const conversation = convCheck.rows[0];
+
+    if (!conversation.is_anonymous || !conversation.anonymous_initiator_id) {
+      console.warn('[WARN] Anonymous messages requested for non-anonymous conversation, falling back to regular fetch:', {
+        conversationId,
+        userId,
+        is_anonymous: conversation.is_anonymous,
+        anonymous_initiator_id: conversation.anonymous_initiator_id
+      });
+      return getRegularMessages(req, res);
+    }
+
     const otherUserId = conversation.user1_id === userId ? conversation.user2_id : conversation.user1_id;
 
     let otherUserData;
@@ -311,45 +312,39 @@ export async function getAnonymousMessages(req: Request, res: Response) {
       [conversation.anonymous_initiator_id]
     );
 
-    if (anonIdentity.rows.length > 0) {
-      const initiatorId = anonIdentity.rows[0].user_id;
+    if (anonIdentity.rows.length === 0) {
+      console.warn('[WARN] Missing anonymous identity for conversation, falling back to regular fetch:', {
+        conversationId,
+        userId,
+        anonymous_initiator_id: conversation.anonymous_initiator_id
+      });
+      return getRegularMessages(req, res);
+    }
 
-      // If current user is NOT the initiator, they are the receiver
-      if (initiatorId !== userId) {
-        // Receiver sees anonymous info (random_string which can be customized)
-        otherUserData = {
-          user_id: null,
-          name: anonIdentity.rows[0].random_string,
-          roll_no: null,
-          gender: anonIdentity.rows[0].display_gender,
-          dp_url: null,
-          is_anonymous: true,
-          identity_id: anonIdentity.rows[0].identity_id
-        };
-        // console.log(`🎭 Receiver viewing anonymous sender:`, {
-        //   anonString: anonIdentity.rows[0].random_string,
-        //   gender: anonIdentity.rows[0].display_gender,
-        //   anonymousInitiatorId: conversation.anonymous_initiator_id
-        // });
-      } else {
-        // Initiator (sender) sees real profile
-        const otherUserInfo = await getUserProfileCached(String(otherUserId));
-        if (!otherUserInfo) {
-          throw new ApiError(404, 'Other user not found');
-        }
-        otherUserData = {
-          user_id: otherUserInfo.user_id,
-          name: otherUserInfo.name,
-          roll_no: otherUserInfo.roll_no,
-          gender: otherUserInfo.gender,
-          dp_url: otherUserInfo.dp_url,
-          is_anonymous: false
-        };
-        // console.log(`🎭 Sender viewing receiver (real profile):`, {
-        //   name: otherUserInfo.rows[0].name,
-        //   roll_no: otherUserInfo.rows[0].roll_no
-        // });
-      }
+    const initiatorId = anonIdentity.rows[0].user_id;
+
+    // If current user is NOT the initiator, they are the receiver
+    if (initiatorId !== userId) {
+      // Receiver sees anonymous info (random_string which can be customized)
+      otherUserData = {
+        user_id: null,
+        name: anonIdentity.rows[0].random_string,
+        roll_no: null,
+        gender: anonIdentity.rows[0].display_gender,
+        dp_url: null,
+        is_anonymous: true,
+        identity_id: anonIdentity.rows[0].identity_id
+      };
+    } else {
+      // Initiator (sender) sees real profile
+      const otherUserInfo = await pool.query(
+        `SELECT user_id, name, roll_no, gender, dp_url FROM users WHERE user_id = $1`,
+        [otherUserId]
+      );
+      otherUserData = {
+        ...otherUserInfo.rows[0],
+        is_anonymous: false
+      };
     }
 
     // Get messages with sender info (respect anonymity) and reactions
@@ -439,20 +434,6 @@ export async function getAnonymousMessages(req: Request, res: Response) {
       before ? [conversationId, userId, before, limit] : [conversationId, userId, limit]
     );
 
-    await pool.query(
-      `UPDATE message_status ms
-       SET status = 'read', read_at = NOW()
-       FROM chat_messages cm
-       WHERE ms.message_id = cm.message_id
-         AND ms.user_id = $1
-         AND cm.conversation_id = $2
-         AND cm.sender_id != $1
-         AND ms.status != 'read'`,
-      [userId, conversationId]
-    );
-
-    await resetUnread(userId, conversationId as string);
-
     res.json({
       success: true,
       data: {
@@ -484,8 +465,7 @@ export async function sendAnonymousMessage(req: Request, res: Response) {
       mediaMimeType,
       thumbnailUrl,
       keyId,
-      parentMessageId,
-      clientMessageId
+      parentMessageId
     } = req.body;
 
     if (!userId) {
@@ -531,53 +511,6 @@ export async function sendAnonymousMessage(req: Request, res: Response) {
     }
 
     const conversation = convCheck.rows[0];
-    const otherUserId = conversation.user1_id === userId ? conversation.user2_id : conversation.user1_id;
-
-    const dedupeInput: {
-      scope: string;
-      senderId: string;
-      encryptedContent: string;
-      contentIv: string;
-      contentAuthTag: string;
-      clientMessageId?: string;
-      parentMessageId?: string;
-      messageType?: string;
-    } = {
-      scope: `anon-conversation:${conversationId}`,
-      senderId: String(userId),
-      encryptedContent: String(encryptedContent),
-      contentIv: String(contentIv),
-      contentAuthTag: String(contentAuthTag),
-    };
-
-    if (typeof clientMessageId === 'string' && clientMessageId.length > 0) {
-      dedupeInput.clientMessageId = clientMessageId;
-    }
-    if (parentMessageId) {
-      dedupeInput.parentMessageId = String(parentMessageId);
-    }
-    if (typeof messageType === 'string' && messageType.length > 0) {
-      dedupeInput.messageType = messageType;
-    }
-
-    const dedupeToken = buildMessageDedupeToken(dedupeInput);
-
-    const dedupeState = await reserveMessageDedupToken(dedupeToken);
-    if (!dedupeState.reserved && dedupeState.existingMessageId) {
-      const existing = await pool.query(
-        'SELECT * FROM chat_messages WHERE message_id = $1',
-        [dedupeState.existingMessageId]
-      );
-
-      if (existing.rows.length > 0) {
-        return res.status(200).json({
-          success: true,
-          message: 'Duplicate message ignored',
-          duplicate: true,
-          data: existing.rows[0]
-        });
-      }
-    }
     let anonymousIdentityId: string;
 
     if (conversation.existing_identity_id) {
@@ -591,6 +524,8 @@ export async function sendAnonymousMessage(req: Request, res: Response) {
       );
     } else {
       // Create new identity for receiver
+      const otherUserId = conversation.user1_id === userId ? conversation.user2_id : conversation.user1_id;
+
       const newIdentity = await pool.query(
         `INSERT INTO anonymous_identities (
           user_id, target_user_id, random_string, display_gender, conversation_id
@@ -644,7 +579,6 @@ export async function sendAnonymousMessage(req: Request, res: Response) {
     );
 
     const message = result.rows[0];
-    await completeMessageDedupToken(dedupeToken, String(message.message_id));
 
     // Emit socket event with anonymous sender info (fetch from DB for consistency)
     if (io) {
@@ -675,49 +609,21 @@ export async function sendAnonymousMessage(req: Request, res: Response) {
             )
             ELSE null
           END as parent_message,
-          NULL::text as user_session_key
+          sk.aes_key_encrypted as user_session_key
         FROM chat_messages cm
         LEFT JOIN chat_messages pm ON cm.parent_message_id = pm.message_id
         LEFT JOIN users pu ON pm.sender_id = pu.user_id
+        LEFT JOIN chat_session_keys sk ON cm.key_id = sk.session_key_id AND sk.encrypted_for_user_id != $2
         WHERE cm.message_id = $1`,
-        [message.message_id]
+        [message.message_id, userId]
       );
-
-      const recipientSessionKey = keyId
-        ? await getEncryptedSessionKeyCached(String(keyId), String(otherUserId), async () => {
-          const keyResult = await pool.query(
-            `SELECT aes_key_encrypted
-             FROM chat_session_keys
-             WHERE session_key_id = $1 AND encrypted_for_user_id = $2
-             LIMIT 1`,
-            [keyId, otherUserId]
-          );
-          return keyResult.rows[0]?.aes_key_encrypted ?? null;
-        })
-        : null;
 
       emitToConversation(io, conversationId, 'new-message', {
         ...fullMessageResult.rows[0],
-        user_session_key: recipientSessionKey,
         sender: senderInfo,
         is_my_message: false,
       });
     }
-
-    const online = await isUserOnline(String(otherUserId));
-    if (!online) {
-      await queueOfflineMessage(String(otherUserId), message, dedupeToken);
-    }
-
-    await pushNotification(otherUserId, {
-      type: 'new_message',
-      conversationId,
-      message: 'You received a new anonymous message',
-      senderId: userId,
-      messageType,
-      isAnonymous: true,
-      timestamp: Date.now(),
-    });
 
     res.status(201).json({
       success: true,

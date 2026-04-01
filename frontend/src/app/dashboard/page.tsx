@@ -5,17 +5,11 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import type { User, Group } from '@/types/chat.types';
 import { groupService } from '@/services/group.service';
+import { shouldUnoptimizeImage } from '@/services/image.service';
 import { useToast } from '@/contexts/ToastContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import Image from 'next/image';
 import './dashboard.css';
-
-function isSvgLikeUrl(url: string): boolean {
-  const u = url.toLowerCase();
-  // Dicebear returns SVGs from URLs like: /7.x/avataaars/svg?seed=...
-  // Cloudinary preset avatars are also SVGs with a .svg filename.
-  return u.includes('/svg') || u.endsWith('.svg');
-}
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -297,7 +291,7 @@ export default function DashboardPage() {
                         height={112}
                         className="w-28 h-28 rounded-full object-cover ring-4 ring-white/60"
                         priority={index < 4}
-                        unoptimized={isSvgLikeUrl(user.dp_url)}
+                        unoptimized={shouldUnoptimizeImage(user.dp_url)}
                       />
                     ) : (
                       <div className="w-28 h-28 rounded-full flex items-center justify-center text-4xl font-extrabold text-white ring-4 ring-white/40" style={{ background: 'var(--grad-romance)' }}>
@@ -347,6 +341,7 @@ export default function DashboardPage() {
                         height={48}
                         className="w-12 h-12 rounded-xl object-cover shrink-0"
                         priority={index < 4}
+                        unoptimized={shouldUnoptimizeImage(group.group_dp_url)}
                       />
                     ) : (
                       <div className="w-12 h-12 rounded-xl flex items-center justify-center text-xl text-white shrink-0" style={{ background: 'var(--grad-ocean)' }}>

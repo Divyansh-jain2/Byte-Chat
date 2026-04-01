@@ -2,8 +2,6 @@ import { pool } from '../lib/db.js';
 import { ApiError } from '../utils/error.util.js';
 import { uploadToCloudinary, deleteFromCloudinary, extractPublicId, getDefaultAvatar } from '../utils/cloudinary.util.js';
 import { getAvatarUrl, isValidPresetAvatar, getRandomAvatar } from '../utils/avatar.util.js';
-import { cacheKeys, CACHE_TTL_SECONDS, getCacheJSON, setCacheJSON, invalidateUserProfileCache } from '../utils/cache.util.js';
-import { sendConditionalJson } from '../utils/httpCache.util.js';
 import type { Request, Response, NextFunction } from 'express';
 import multer from 'multer';
 
@@ -17,24 +15,11 @@ export const profileController = {
         });
       }
       const userId = req.user.userId;
-
-      const cached = await getCacheJSON<Record<string, unknown>>(cacheKeys.userProfile(userId));
-      if (cached) {
-        return sendConditionalJson(req, res, {
-          success: true,
-          data: cached
-        }, {
-          maxAgeSeconds: 30,
-          cacheStatus: 'HIT'
-        });
-      }
-
       const result = await pool.query(
         `SELECT 
           user_id, roll_no, name, gender, branch, 
-          dp_url, dob, bio, is_verified, 
-          instagram_url, twitter_url, linkedin_url,
-          created_at, updated_at
+          dp_url, dob, bio, is_verified,
+          created_at
          FROM users 
          WHERE user_id = $1`,
         [userId]
@@ -44,22 +29,14 @@ export const profileController = {
         throw new ApiError(404, 'User not found');
       }
 
-      // Format dob as yyyy-MM-dd if present
-      const user = { ...result.rows[0] };
-      if (user.dob instanceof Date) {
-        user.dob = (user.dob.getFullYear() + '-' + String(user.dob.getMonth() + 1).padStart(2, '0') + '-' + String(user.dob.getDate()).padStart(2, '0'))
-;
-      } else if (typeof user.dob === 'string' && user.dob.length > 10) {
-        user.dob = user.dob.slice(0, 10);
-      }
-      await setCacheJSON(cacheKeys.userProfile(userId), user, CACHE_TTL_SECONDS.USER_PROFILE);
-
-      return sendConditionalJson(req, res, {
+      res.json({
         success: true,
-        data: user
-      }, {
-        maxAgeSeconds: 30,
-        cacheStatus: 'MISS'
+        data: {
+          ...result.rows[0],
+          instagram_url: null,
+          twitter_url: null,
+          linkedin_url: null
+        }
       });
     } catch (error) {
       next(error);
@@ -71,34 +48,23 @@ export const profileController = {
     try {
       const { rollNo } = req.params;
       const currentUserId = req.user?.userId;
-      const normalizedRollNo = typeof rollNo === 'string' ? rollNo : String(rollNo || '');
 
-      const rollNoKey = cacheKeys.userProfileByRollNo(normalizedRollNo);
-      let profileData = await getCacheJSON<Record<string, unknown>>(rollNoKey);
-      let cacheStatus: 'HIT' | 'MISS' = 'HIT';
+      const result = await pool.query(
+        `SELECT 
+          user_id, roll_no, name, gender, branch, 
+          dp_url, dob, bio, 
+          instagram_url, twitter_url, linkedin_url,
+          created_at
+         FROM users 
+         WHERE UPPER(roll_no) = UPPER($1) AND is_verified = TRUE AND is_active = TRUE`,
+        [rollNo]
+      );
 
-      if (!profileData) {
-        cacheStatus = 'MISS';
-        const result = await pool.query(
-          `SELECT 
-            user_id, roll_no, name, gender, branch, 
-            dp_url, dob, bio, 
-            instagram_url, twitter_url, linkedin_url,
-            created_at
-           FROM users 
-           WHERE UPPER(roll_no) = UPPER($1) AND is_verified = TRUE AND is_active = TRUE`,
-            [normalizedRollNo]
-        );
-
-        if (result.rows.length === 0) {
-          throw new ApiError(404, 'User not found');
-        }
-
-        profileData = result.rows[0] as Record<string, unknown>;
-        await setCacheJSON(rollNoKey, profileData, CACHE_TTL_SECONDS.USER_PROFILE);
+      if (result.rows.length === 0) {
+        throw new ApiError(404, 'User not found');
       }
 
-      const profileUserId = String(profileData.user_id || '');
+      const profileUserId = result.rows[0].user_id;
 
       // Check if users are blocked (only if viewer is authenticated)
       if (currentUserId && currentUserId !== profileUserId) {
@@ -126,7 +92,7 @@ export const profileController = {
             // Current user blocked this profile
             return res.json({
               success: true,
-              data: profileData,
+              data: result.rows[0],
               blocked: true,
               blockMessage: 'You have blocked this user'
             });
@@ -134,22 +100,9 @@ export const profileController = {
         }
       }
 
-      // Format dob as yyyy-MM-dd if present (using local date components to avoid timezone shift)
-      const user = { ...profileData };
-      if (user.dob instanceof Date) {
-        const year = user.dob.getFullYear();
-        const month = String(user.dob.getMonth() + 1).padStart(2, '0');
-        const day = String(user.dob.getDate()).padStart(2, '0');
-        user.dob = `${year}-${month}-${day}`;
-      } else if (typeof user.dob === 'string' && user.dob.length > 10) {
-        user.dob = user.dob.slice(0, 10);
-      }
-      return sendConditionalJson(req, res, {
+      res.json({
         success: true,
-        data: user
-      }, {
-        maxAgeSeconds: 30,
-        cacheStatus
+        data: result.rows[0]
       });
     } catch (error) {
       next(error);
@@ -310,23 +263,10 @@ export const profileController = {
 
       const result = await pool.query(query, params);
 
-      await invalidateUserProfileCache(userId, result.rows[0]?.roll_no);
-      
-      // Format dob as yyyy-MM-dd if present
-      const user = { ...result.rows[0] };
-      if (user.dob instanceof Date) {
-        const year = user.dob.getFullYear();
-        const month = String(user.dob.getMonth() + 1).padStart(2, '0');
-        const day = String(user.dob.getDate()).padStart(2, '0');
-        user.dob = `${year}-${month}-${day}`;
-      } else if (typeof user.dob === 'string' && user.dob.length > 10) {
-        user.dob = user.dob.slice(0, 10);
-      }
-
       res.json({
         success: true,
         message: 'Profile updated successfully',
-        data: user
+        data: result.rows[0]
       });
     } catch (error) {
       next(error);
@@ -413,20 +353,10 @@ export const profileController = {
 
       const result = await pool.query(query, params);
 
-      await invalidateUserProfileCache(userId, result.rows[0]?.roll_no);
-
-      // Format dob as yyyy-MM-dd if present
-      const user = { ...result.rows[0] };
-      if (user.dob instanceof Date) {
-        user.dob = (user.dob.getFullYear() + '-' + String(user.dob.getMonth() + 1).padStart(2, '0') + '-' + String(user.dob.getDate()).padStart(2, '0'))
-;
-      } else if (typeof user.dob === 'string' && user.dob.length > 10) {
-        user.dob = user.dob.slice(0, 10);
-      }
       res.json({
         success: true,
         message: 'Profile updated successfully',
-        data: user
+        data: result.rows[0]
       });
     } catch (error) {
       next(error);
@@ -442,17 +372,6 @@ export const profileController = {
         });
       }
       const userId = req.user.userId;
-
-      const cached = await getCacheJSON<Record<string, boolean>>(cacheKeys.userProfileStatus(userId));
-      if (cached) {
-        return sendConditionalJson(req, res, {
-          success: true,
-          data: cached
-        }, {
-          maxAgeSeconds: 20,
-          cacheStatus: 'HIT'
-        });
-      }
 
       const result = await pool.query(
         `SELECT 
@@ -470,19 +389,13 @@ export const profileController = {
 
       const status = result.rows[0];
       const isComplete = status.has_dob && status.has_bio && status.has_dp;
-      const data = {
-        ...status,
-        is_complete: isComplete
-      };
 
-      await setCacheJSON(cacheKeys.userProfileStatus(userId), data, CACHE_TTL_SECONDS.USER_PROFILE);
-
-      return sendConditionalJson(req, res, {
+      res.json({
         success: true,
-        data
-      }, {
-        maxAgeSeconds: 20,
-        cacheStatus: 'MISS'
+        data: {
+          ...status,
+          is_complete: isComplete
+        }
       });
     } catch (error) {
       next(error);
@@ -540,24 +453,11 @@ export const profileController = {
         [uploadResult.secure_url, userId]
       );
 
-      await invalidateUserProfileCache(userId, updateResult.rows[0]?.roll_no);
-
-      // Format dob as yyyy-MM-dd if present
-      const user = { ...updateResult.rows[0] };
-      if (user.dob instanceof Date) {
-        const year = user.dob.getFullYear();
-        const month = String(user.dob.getMonth() + 1).padStart(2, '0');
-        const day = String(user.dob.getDate()).padStart(2, '0');
-        user.dob = `${year}-${month}-${day}`;
-      } else if (typeof user.dob === 'string' && user.dob.length > 10) {
-        user.dob = user.dob.slice(0, 10);
-      }
-
       res.json({
         success: true,
         message: 'Profile picture uploaded successfully',
         data: {
-          user,
+          user: updateResult.rows[0],
           imageUrl: uploadResult.secure_url
         }
       });
@@ -609,24 +509,11 @@ export const profileController = {
         [defaultAvatar, userId]
       );
 
-      await invalidateUserProfileCache(userId, updateResult.rows[0]?.roll_no);
-
-      // Format dob as yyyy-MM-dd if present
-      const user = { ...updateResult.rows[0] };
-      if (user.dob instanceof Date) {
-        const year = user.dob.getFullYear();
-        const month = String(user.dob.getMonth() + 1).padStart(2, '0');
-        const day = String(user.dob.getDate()).padStart(2, '0');
-        user.dob = `${year}-${month}-${day}`;
-      } else if (typeof user.dob === 'string' && user.dob.length > 10) {
-        user.dob = user.dob.slice(0, 10);
-      }
-
       res.json({
         success: true,
         message: 'Profile picture deleted and set to default',
         data: {
-          user,
+          user: updateResult.rows[0],
           imageUrl: defaultAvatar
         }
       });
@@ -691,24 +578,11 @@ export const profileController = {
         [avatarUrl, userId]
       );
 
-      await invalidateUserProfileCache(userId, updateResult.rows[0]?.roll_no);
-
-      // Format dob as yyyy-MM-dd if present
-      const user = { ...updateResult.rows[0] };
-      if (user.dob instanceof Date) {
-        const year = user.dob.getFullYear();
-        const month = String(user.dob.getMonth() + 1).padStart(2, '0');
-        const day = String(user.dob.getDate()).padStart(2, '0');
-        user.dob = `${year}-${month}-${day}`;
-      } else if (typeof user.dob === 'string' && user.dob.length > 10) {
-        user.dob = user.dob.slice(0, 10);
-      }
-
       res.json({
         success: true,
         message: 'Avatar selected successfully',
         data: {
-          user,
+          user: updateResult.rows[0],
           imageUrl: avatarUrl
         }
       });

@@ -4,7 +4,14 @@
  */
 
 // Total number of preset avatars available
-const TOTAL_AVATARS = 70;
+const TOTAL_AVATARS = 61;
+
+const DEFAULT_AVATAR_IDS = {
+  male: 'avatars/avatar-01',
+  female: 'avatars/avatar-02',
+  other: 'avatars/avatar-03',
+  group: 'avatars/avatar-04',
+} as const;
 
 /**
  * Generate array of all available avatar public IDs
@@ -29,6 +36,22 @@ export const getRandomAvatar = (): string => {
   const randomIndex = Math.floor(Math.random() * AVATAR_OPTIONS.length);
   return AVATAR_OPTIONS[randomIndex]!;
 };
+
+export const getDefaultAvatarId = (gender?: string | null): string => {
+  const normalizedGender = gender?.toLowerCase();
+
+  if (normalizedGender === 'female') {
+    return DEFAULT_AVATAR_IDS.female;
+  }
+
+  if (normalizedGender === 'male') {
+    return DEFAULT_AVATAR_IDS.male;
+  }
+
+  return DEFAULT_AVATAR_IDS.other;
+};
+
+export const getDefaultGroupAvatarId = (): string => DEFAULT_AVATAR_IDS.group;
 
 /**
  * Validate if a public ID is a valid preset avatar

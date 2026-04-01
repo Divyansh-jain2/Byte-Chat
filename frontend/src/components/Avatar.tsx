@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { getUserAvatar } from '@/services/image.service';
+import { getUserAvatar, shouldUnoptimizeImage } from '@/services/image.service';
 import Image from 'next/image';
 import { useState } from 'react';
 
@@ -49,6 +49,7 @@ export default function Avatar({
         height={200}
         className={`${sizeClass} rounded-full object-cover border-2 border-gray-200`}
         priority={priority}
+        unoptimized={shouldUnoptimizeImage(avatarUrl)}
         onError={(e) => {
           const target = e.target as HTMLImageElement;
           target.src = getUserAvatar(null, gender);
@@ -92,6 +93,7 @@ export function GroupAvatar({ groupDpUrl, groupName,
         height={200}
         className={`${sizeClass} rounded-full object-cover border-2 border-gray-200`}
         priority={priority}
+        unoptimized={shouldUnoptimizeImage(src)}
         onError={() => setSrc(defaultGroupImage)}
       />
     </div>

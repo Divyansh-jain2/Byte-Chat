@@ -292,7 +292,13 @@ export default function ChatWindowPage() {
 
         if (conversationType === 'anonymous') {
           console.log('[DEBUG] Calling anonymous service');
-          response = await anonymousChatService.getAnonymousMessages(conversationId);
+          try {
+            response = await anonymousChatService.getAnonymousMessages(conversationId);
+          } catch (anonymousError: any) {
+            console.warn('[WARN] Anonymous fetch failed, retrying as regular conversation:', anonymousError);
+            response = await chatService.getMessages(conversationId);
+            conversationType = 'regular';
+          }
         } else {
           console.log('[DEBUG] Calling regular service');
           response = await chatService.getMessages(conversationId);
@@ -529,8 +535,8 @@ export default function ChatWindowPage() {
       }
 
       let finalContent = newMessage.trim() || 'Image';
-      let contentIv = 'dummy_iv';
-      let contentAuthTag = 'dummy_tag';
+      let contentIv = '';
+      let contentAuthTag = '';
 
       // E2EE: Encrypt message content
       if (isE2EEReady && sessionKey) {
@@ -723,8 +729,8 @@ export default function ChatWindowPage() {
       }
 
       let finalContent = newContent;
-      let contentIv = 'dummy_iv';
-      let contentAuthTag = 'dummy_tag';
+      let contentIv = '';
+      let contentAuthTag = '';
 
       // E2EE: Encrypt edited message content
       if (isE2EEReady && sessionKey) {
