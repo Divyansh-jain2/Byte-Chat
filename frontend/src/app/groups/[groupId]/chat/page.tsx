@@ -43,11 +43,15 @@ export default function GroupChatPage() {
   const params = useParams();
   const router = useRouter();
   const groupId = params.groupId as string;
-  const { getSocket, isConnected, joinGroup, leaveGroup } = useSocket();
+  const { getSocket, isConnected, joinGroup, leaveGroup, sendTyping } = useSocket();
   const toast = useToast();
   const socket = getSocket();
 
   const [messages, setMessages] = useState<GroupMessage[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<GroupMessage[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
   const [polls, setPolls] = useState<Poll[]>([]);
   const [group, setGroup] = useState<Group | null>(null);
   const [newMessage, setNewMessage] = useState('');
@@ -63,16 +67,23 @@ export default function GroupChatPage() {
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
   const [sessionKey, setSessionKey] = useState<CryptoKey | null>(null);
   const [keyId, setKeyId] = useState<string | null>(null);
-  const [isE2EEReady, setIsE2EEReady] = useState(false);
+  const [, setIsE2EEReady] = useState(false);
   const [userPrivateKey, setUserPrivateKey] = useState<CryptoKey | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messageInputRef = useRef<HTMLInputElement>(null);
   const emojiPickerRef = useRef<HTMLDivElement>(null);
   const pollMenuRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const [typingUsers, setTypingUsers] = useState<string[]>([]);
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const userStr = typeof window !== 'undefined' ? localStorage.getItem('user') : null;
   const currentUser = userStr ? JSON.parse(userStr) : null;
   const currentUserId = currentUser?.user_id || currentUser?.userId;
+  const displayedMessages = useMemo(
+    () => (searchQuery.trim() ? searchResults : messages),
+    [searchQuery, searchResults, messages]
+  );
 
   // Real-time online member count for this group
   const { onlineCount, totalMembers } = useGroupPresence(groupId);
@@ -150,7 +161,7 @@ export default function GroupChatPage() {
 
   const decryptMessages = useCallback(async (msgs: GroupMessage[], aesKey: CryptoKey) => {
     return await Promise.all(msgs.map(async (m) => {
-      let decryptedMsg = { ...m };
+      const decryptedMsg = { ...m };
 
       // Decrypt main content
       if (m.encrypted_content && m.content_iv && m.content_auth_tag) {
@@ -226,6 +237,35 @@ export default function GroupChatPage() {
   }, [groupId, toast, router, fetchAndDecryptConversationKey, decryptMessages]);
 
   useEffect(() => {
+    const query = searchQuery.trim();
+    if (!query) {
+      setSearchResults([]);
+      setSearching(false);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      setSearching(true);
+      try {
+        // Local search for group chats because server-side content is encrypted
+        const lowered = query.toLowerCase();
+        const filtered = messages.filter((m) => {
+          const body = (m.encrypted_content || '').toLowerCase();
+          const senderName = (m.sender?.name || '').toLowerCase();
+          return body.includes(lowered) || senderName.includes(lowered);
+        });
+        setSearchResults(filtered);
+      } catch (error) {
+        console.error('[SEARCH] Failed to search group messages:', error);
+      } finally {
+        setSearching(false);
+      }
+    }, 280);
+
+    return () => clearTimeout(timer);
+  }, [searchQuery, messages]);
+
+  useEffect(() => {
     if (!socket) return;
 
     const handleNewGroupMessage = async (message: GroupMessage) => {
@@ -234,7 +274,7 @@ export default function GroupChatPage() {
       const currentUser = userStr ? JSON.parse(userStr) : null;
       const currentUserId = currentUser?.user_id || currentUser?.userId;
 
-      let processedMessage = { ...message };
+      const processedMessage = { ...message };
 
       // Decrypt main content if session key is ready
       if (sessionKey && message.encrypted_content) {
@@ -281,7 +321,16 @@ export default function GroupChatPage() {
     };
 
     const handlePollUpdated = (poll: Poll) => {
-      setPolls((prev) => prev.map(p => p.poll_id === poll.poll_id ? poll : p));
+      setPolls((prev) => prev.map((existing) => {
+        if (existing.poll_id !== poll.poll_id) return existing;
+        return {
+          ...existing,
+          ...poll,
+          has_voted: poll.has_voted ?? existing.has_voted,
+          user_vote: poll.user_vote ?? existing.user_vote,
+          options: poll.options ?? existing.options,
+        };
+      }));
     };
 
     const handlePollCancelled = (data: { poll_id: string }) => {
@@ -341,6 +390,22 @@ export default function GroupChatPage() {
     socket.on('message:edited', handleMessageEdited);
     socket.on('message:deleted', handleMessageDeleted);
 
+    const handleTyping = ({ userId, isTyping }: { userId: string; isTyping: boolean }) => {
+      const userStr = localStorage.getItem('user');
+      const currentUserId = userStr ? JSON.parse(userStr).user_id : null;
+      if (userId === currentUserId) return;
+
+      setTypingUsers(prev => {
+        if (isTyping) {
+          if (!prev.includes(userId)) return [...prev, userId];
+          return prev;
+        } else {
+          return prev.filter(id => id !== userId);
+        }
+      });
+    };
+    socket.on('user-typing', handleTyping);
+
     return () => {
       socket.off('new-group-message', handleNewGroupMessage);
       socket.off('new-poll', handleNewPoll);
@@ -352,8 +417,9 @@ export default function GroupChatPage() {
       socket.off('message:reaction', handleMessageReaction);
       socket.off('message:edited', handleMessageEdited);
       socket.off('message:deleted', handleMessageDeleted);
+      socket.off('user-typing', handleTyping);
     };
-  }, [socket, fetchMessages, router, toast]);
+  }, [socket, fetchMessages, router, toast, sessionKey]);
 
   const fetchGroup = useCallback(async () => {
     try {
@@ -406,6 +472,30 @@ export default function GroupChatPage() {
     };
   }, [showPollTypeMenu]);
 
+  // Focus search input when search is shown
+  useEffect(() => {
+    if (showSearch) {
+      setTimeout(() => searchInputRef.current?.focus(), 0);
+    }
+  }, [showSearch]);
+
+  // Handle escape key to close search
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && showSearch) {
+        setShowSearch(false);
+      }
+    };
+
+    if (showSearch) {
+      document.addEventListener('keydown', handleKeyDown);
+    }
+
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [showSearch]);
+
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
@@ -429,8 +519,22 @@ export default function GroupChatPage() {
 
   const handleVote = async (pollId: string, voteValue: boolean) => {
     try {
-      await groupService.voteOnPoll(groupId, pollId, voteValue);
-      fetchPolls();
+      const response = await groupService.voteOnPoll(groupId, pollId, voteValue);
+      const updatedPoll = response?.data?.poll as Poll | undefined;
+      const userVote = response?.data?.user_vote as boolean | string | undefined;
+
+      if (updatedPoll) {
+        setPolls((prev) => prev.map((poll) => {
+          if (poll.poll_id !== pollId) return poll;
+          return {
+            ...poll,
+            ...updatedPoll,
+            has_voted: true,
+            user_vote: userVote ?? voteValue,
+            options: updatedPoll.options ?? poll.options,
+          };
+        }));
+      }
     }
     catch (err: unknown) {
       let errorMsg = 'Failed to fetch vote';
@@ -478,6 +582,9 @@ export default function GroupChatPage() {
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if ((!newMessage.trim() && !selectedImage) || sending) return;
+
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    sendTyping(groupId, false);
 
     try {
       setSending(true);
@@ -634,6 +741,22 @@ export default function GroupChatPage() {
     setShowEmojiPicker(false);
   };
 
+  const handleMessageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setNewMessage(e.target.value);
+    
+    if (isConnected) {
+      sendTyping(groupId, true);
+      
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+      }
+      
+      typingTimeoutRef.current = setTimeout(() => {
+        sendTyping(groupId, false);
+      }, 2000);
+    }
+  };
+
   const formatTime = (dateString: string) => {
     const date = new Date(dateString);
     const now = new Date();
@@ -693,7 +816,7 @@ export default function GroupChatPage() {
       console.error('Failed to edit message:', error);
       toast.error('Failed to edit message');
     }
-  }, [fetchMessages, toast]);
+  }, [fetchMessages, toast, sessionKey]);
 
   const handleDelete = useCallback(async (messageId: string, deleteForEveryone: boolean) => {
     try {
@@ -753,6 +876,56 @@ export default function GroupChatPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {showSearch && (
+            <div className="flex items-center gap-1">
+              <input
+                ref={searchInputRef}
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search..."
+                className="input-romance h-8 text-xs w-40"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="p-1 rounded hover:opacity-70 transition-opacity"
+                  style={{ color: 'var(--muted)' }}
+                  title="Clear search"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              )}
+            </div>
+          )}
+          
+          {!showSearch ? (
+            <button
+              onClick={() => setShowSearch(true)}
+              className="w-8 h-8 rounded-lg glass flex items-center justify-center transition-all hover:scale-105"
+              style={{ color: 'var(--body)' }}
+              title="Search messages"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+            </button>
+          ) : (
+            <button
+              onClick={() => { setShowSearch(false); setSearchQuery(''); }}
+              className="w-8 h-8 rounded-lg glass flex items-center justify-center transition-all hover:scale-105"
+              style={{ color: 'var(--body)' }}
+              title="Close search"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          )}
+
           <Link href="/dashboard" className="btn-ghost px-3 py-1.5 text-xs">Dashboard</Link>
         </div>
       </header>
@@ -779,7 +952,22 @@ export default function GroupChatPage() {
                 {poll.poll_type === 'General' ? (
                   <>
                     {poll.status === 'active' ? (
-                      <GeneralPollVoting poll={poll} groupId={groupId} onVoted={fetchPolls} />
+                      <GeneralPollVoting
+                        poll={poll}
+                        groupId={groupId}
+                        onVoted={(updatedPoll, userVote) => {
+                          setPolls((prev) => prev.map((existing) => {
+                            if (existing.poll_id !== poll.poll_id) return existing;
+                            return {
+                              ...existing,
+                              ...updatedPoll,
+                              has_voted: true,
+                              user_vote: userVote,
+                              options: updatedPoll.options ?? existing.options,
+                            };
+                          }));
+                        }}
+                      />
                     ) : (
                       <GeneralPollResults poll={poll} />
                     )}
@@ -804,10 +992,10 @@ export default function GroupChatPage() {
                     </div>
                     {poll.status === 'active' && (
                       <div className="flex gap-2">
-                        <button onClick={() => handleVote(poll.poll_id, true)} disabled={poll.has_voted && poll.user_vote === true}
+                        <button onClick={() => handleVote(poll.poll_id, true)} disabled={!!poll.has_voted}
                           className={`flex-1 py-1.5 rounded-xl text-xs font-bold transition-all ${poll.has_voted && poll.user_vote === true ? 'bg-emerald-500 text-white shadow-lg' : 'bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25'
                             }`}>✓ For</button>
-                        <button onClick={() => handleVote(poll.poll_id, false)} disabled={poll.has_voted && poll.user_vote === false}
+                        <button onClick={() => handleVote(poll.poll_id, false)} disabled={!!poll.has_voted}
                           className={`flex-1 py-1.5 rounded-xl text-xs font-bold transition-all ${poll.has_voted && poll.user_vote === false ? 'bg-red-500 text-white shadow-lg' : 'bg-red-500/15 text-red-400 hover:bg-red-500/25'
                             }`}>✗ Against</button>
                         {(group?.user_is_admin || group?.user_is_owner || poll.created_by === currentUserId) && (
@@ -864,15 +1052,22 @@ export default function GroupChatPage() {
 
         {/* Scrollable Message List */}
         <div className="px-4 py-6 space-y-3 min-h-full flex flex-col justify-end">
-          {messages.length === 0 ? (
+          {searchQuery.trim() && (
+            <div className="text-xs px-2" style={{ color: 'var(--muted)' }}>
+              {searching ? 'Searching…' : `${displayedMessages.length} result(s) for "${searchQuery.trim()}"`}
+            </div>
+          )}
+          {displayedMessages.length === 0 ? (
             <div className="flex-1 flex items-center justify-center opacity-50 py-20">
               <div className="text-center">
                 <div className="text-5xl mb-4">💬</div>
-                <p className="text-sm font-medium" style={{ color: 'var(--muted)' }}>No messages yet. Start the conversation!</p>
+                <p className="text-sm font-medium" style={{ color: 'var(--muted)' }}>
+                  {searchQuery.trim() ? 'No matching messages found.' : 'No messages yet. Start the conversation!'}
+                </p>
               </div>
             </div>
           ) : (
-            messages.map((msg) => {
+            displayedMessages.map((msg) => {
               const isMyMessage = !!msg.is_my_message;
               return (
                 <MessageBubble
@@ -886,6 +1081,23 @@ export default function GroupChatPage() {
                 />
               );
             })
+          )}
+          {!searchQuery.trim() && typingUsers.length > 0 && (
+            <div className="flex animate-fade-in my-2">
+              <div className="glass-strong rounded-2xl px-4 py-3 flex gap-2 bg-white/5 items-center w-fit relative overflow-hidden">
+                <div className="absolute top-0 left-0 w-full h-1 bg-linear-to-r from-cyan-500 to-blue-500" />
+                <div className="flex gap-1">
+                  <span className="typing-dot" style={{ background: 'var(--cyan)', width: 6, height: 6, borderRadius: '50%' }} />
+                  <span className="typing-dot" style={{ background: 'var(--cyan)', width: 6, height: 6, borderRadius: '50%' }} />
+                  <span className="typing-dot" style={{ background: 'var(--cyan)', width: 6, height: 6, borderRadius: '50%' }} />
+                </div>
+                <span className="text-xs font-bold" style={{ color: 'var(--heading)' }}>
+                  {typingUsers.length === 1 
+                    ? `${messages.find(m => m.sender_id === typingUsers[0] || m.sender?.user_id === typingUsers[0])?.sender?.name || 'Someone'} is typing...`
+                    : `${typingUsers.length} people are typing...`}
+                </span>
+              </div>
+            </div>
           )}
           <div ref={messagesEndRef} />
         </div>
@@ -991,7 +1203,7 @@ export default function GroupChatPage() {
             </button>
           </div>
 
-          <input ref={messageInputRef} type="text" value={newMessage} onChange={(e) => setNewMessage(e.target.value)}
+          <input ref={messageInputRef} type="text" value={newMessage} onChange={handleMessageChange}
             placeholder="Type a message…" className="input-romance flex-1 py-3 px-5 rounded-2xl shadow-inner text-sm" />
 
           <button type="submit" disabled={sending || uploadingImage || (!newMessage.trim() && !selectedImage)}
@@ -1006,7 +1218,15 @@ export default function GroupChatPage() {
 
 // ─── Poll Sub-components ────────────────────────────────────────────────────────
 
-function GeneralPollVoting({ poll, groupId, onVoted }: { poll: Poll, groupId: string, onVoted: () => void }) {
+function GeneralPollVoting({
+  poll,
+  groupId,
+  onVoted,
+}: {
+  poll: Poll;
+  groupId: string;
+  onVoted: (updatedPoll: Poll, userVote: string) => void;
+}) {
   const [selected, setSelected] = useState<string>('');
   const [submitting, setSubmitting] = useState(false);
   const toast = useToast();
@@ -1015,9 +1235,12 @@ function GeneralPollVoting({ poll, groupId, onVoted }: { poll: Poll, groupId: st
     if (!selected) { toast.error('Select an option'); return; }
     setSubmitting(true);
     try {
-      await groupService.voteOnPoll(groupId, poll.poll_id, undefined, selected);
+      const response = await groupService.voteOnPoll(groupId, poll.poll_id, undefined, selected);
+      const updatedPoll = response?.data?.poll as Poll | undefined;
+      if (updatedPoll) {
+        onVoted(updatedPoll, selected);
+      }
       toast.success('Vote cast!');
-      onVoted();
     } catch (err: unknown) {
       toast.error((err as { message?: string })?.message || 'Failed to vote');
     } finally {

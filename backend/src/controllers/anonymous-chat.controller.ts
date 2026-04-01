@@ -4,6 +4,8 @@ import { ApiError } from '../utils/error.util.js';
 import { io } from '../index.js';
 import { emitToConversation } from '../socket/index.js';
 import { uploadToCloudinary } from '../utils/cloudinary.util.js';
+import { pushNotification } from '../services/notification.service.js';
+import { resetUnread } from '../services/unread.service.js';
 
 /**
  * ANONYMOUS CHAT CONTROLLER
@@ -264,7 +266,7 @@ export async function getAnonymousConversations(req: Request, res: Response) {
 
 // Get messages for anonymous conversation
 export async function getAnonymousMessages(req: Request, res: Response) {
-  console.log('[DEBUG] getAnonymousMessages hit:', { conversationId: req.params.conversationId, userId: req.user?.userId });
+  // console.log('[DEBUG] getAnonymousMessages hit:', { conversationId: req.params.conversationId, userId: req.user?.userId });
   try {
     const userId = req.user?.userId;
     const { conversationId } = req.params;
@@ -424,6 +426,20 @@ export async function getAnonymousMessages(req: Request, res: Response) {
       before ? [conversationId, userId, before, limit] : [conversationId, userId, limit]
     );
 
+    await pool.query(
+      `UPDATE message_status ms
+       SET status = 'read', read_at = NOW()
+       FROM chat_messages cm
+       WHERE ms.message_id = cm.message_id
+         AND ms.user_id = $1
+         AND cm.conversation_id = $2
+         AND cm.sender_id != $1
+         AND ms.status != 'read'`,
+      [userId, conversationId]
+    );
+
+    await resetUnread(userId, conversationId as string);
+
     res.json({
       success: true,
       data: {
@@ -501,6 +517,7 @@ export async function sendAnonymousMessage(req: Request, res: Response) {
     }
 
     const conversation = convCheck.rows[0];
+    const otherUserId = conversation.user1_id === userId ? conversation.user2_id : conversation.user1_id;
     let anonymousIdentityId: string;
 
     if (conversation.existing_identity_id) {
@@ -514,8 +531,6 @@ export async function sendAnonymousMessage(req: Request, res: Response) {
       );
     } else {
       // Create new identity for receiver
-      const otherUserId = conversation.user1_id === userId ? conversation.user2_id : conversation.user1_id;
-
       const newIdentity = await pool.query(
         `INSERT INTO anonymous_identities (
           user_id, target_user_id, random_string, display_gender, conversation_id
@@ -614,6 +629,16 @@ export async function sendAnonymousMessage(req: Request, res: Response) {
         is_my_message: false,
       });
     }
+
+    await pushNotification(otherUserId, {
+      type: 'new_message',
+      conversationId,
+      message: 'You received a new anonymous message',
+      senderId: userId,
+      messageType,
+      isAnonymous: true,
+      timestamp: Date.now(),
+    });
 
     res.status(201).json({
       success: true,

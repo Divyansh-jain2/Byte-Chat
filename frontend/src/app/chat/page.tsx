@@ -1,18 +1,39 @@
 'use client';
 
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { chatService } from '@/services/chat.service';
 import anonymousChatService from '@/services/anonymous-chat.service';
 import type { Conversation, ChatRequest } from '@/types/chat.types';
 import Image from 'next/image';
 import { usePresence } from '@/hooks/usePresence';
+import { useSocket } from '@/contexts/SocketContext';
+
+type RealtimeNotificationPayload = {
+  notification?: {
+    type?: string;
+    conversationId?: string;
+    conversation_id?: string;
+    chatId?: string;
+    chat_id?: string;
+    timestamp?: number;
+  };
+};
 
 export default function ChatPage() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [chatRequests, setChatRequests] = useState<ChatRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'conversations' | 'requests'>('conversations');
+  const { getSocket, isConnected } = useSocket();
+  const conversationsRef = useRef<Conversation[]>([]);
+  const pendingRealtimeUpdatesRef = useRef<Map<string, { incrementBy: number; timestamp?: number }>>(new Map());
+  const flushTimerRef = useRef<number | null>(null);
+  const flushDelayRef = useRef<number>(80);
+
+  useEffect(() => {
+    conversationsRef.current = conversations;
+  }, [conversations]);
 
   // Collect other-user IDs for presence tracking
   const otherUserIds = useMemo(
@@ -27,6 +48,108 @@ export default function ChatPage() {
     fetchConversations();
     fetchChatRequests();
   }, []);
+
+  useEffect(() => {
+    if (!isConnected) return;
+    const socket = getSocket();
+    if (!socket) return;
+    const pendingMap = pendingRealtimeUpdatesRef.current;
+
+    const flushRealtimeConversationUpdates = () => {
+      const updates = Array.from(pendingMap.entries());
+      if (updates.length === 0) return;
+
+      const next = [...conversationsRef.current];
+      let changed = false;
+      let missingConversation = false;
+
+      for (const [conversationId, update] of updates) {
+        const index = next.findIndex((c) => c.conversation_id === conversationId);
+        if (index === -1) {
+          missingConversation = true;
+          continue;
+        }
+
+        changed = true;
+        const target = next[index];
+        const updatedConversation: Conversation = {
+          ...target,
+          unread_count: (target.unread_count || 0) + update.incrementBy,
+          last_message_time: update.timestamp ? new Date(update.timestamp) : target.last_message_time,
+        };
+
+        // Keep most recently active conversations at the top.
+        next.splice(index, 1);
+        next.unshift(updatedConversation);
+      }
+
+      pendingMap.clear();
+
+      if (changed) {
+        conversationsRef.current = next;
+        setConversations(next);
+      }
+
+      if (missingConversation) {
+        void fetchConversations();
+      }
+    };
+
+    const scheduleRealtimeFlush = () => {
+      const pendingCount = pendingMap.size;
+      const targetDelay = pendingCount > 6 ? 150 : 80;
+
+      if (flushTimerRef.current !== null) {
+        if (targetDelay === flushDelayRef.current) return;
+        window.clearTimeout(flushTimerRef.current);
+        flushTimerRef.current = null;
+      }
+
+      flushDelayRef.current = targetDelay;
+
+      flushTimerRef.current = window.setTimeout(() => {
+        flushTimerRef.current = null;
+        flushRealtimeConversationUpdates();
+      }, targetDelay);
+    };
+
+    const handleNewNotification = (payload: RealtimeNotificationPayload) => {
+      const notification = payload.notification;
+      if (!notification || notification.type !== 'new_message') return;
+
+      const conversationId =
+        notification.conversationId ||
+        notification.conversation_id ||
+        notification.chatId ||
+        notification.chat_id;
+
+      if (!conversationId) return;
+
+      const existing = pendingMap.get(conversationId) || { incrementBy: 0 };
+      const nextTimestamp =
+        typeof notification.timestamp === 'number'
+          ? Math.max(existing.timestamp || 0, notification.timestamp)
+          : existing.timestamp;
+
+      pendingMap.set(conversationId, {
+        incrementBy: existing.incrementBy + 1,
+        timestamp: nextTimestamp,
+      });
+
+      scheduleRealtimeFlush();
+    };
+
+    socket.on('new-notification', handleNewNotification);
+
+    return () => {
+      if (flushTimerRef.current !== null) {
+        window.clearTimeout(flushTimerRef.current);
+        flushTimerRef.current = null;
+      }
+      pendingMap.clear();
+      socket.off('new-notification', handleNewNotification);
+    };
+  }, [isConnected, getSocket]);
 
   const fetchConversations = async () => {
     try {
@@ -78,6 +201,16 @@ export default function ChatPage() {
     } catch (error) {
       console.error('Failed to reject request:', error);
     }
+  };
+
+  const handleConversationOpen = (conversationId: string) => {
+    setConversations((prev) =>
+      prev.map((conv) =>
+        conv.conversation_id === conversationId
+          ? { ...conv, unread_count: 0 }
+          : conv
+      )
+    );
   };
 
   const formatTime = (date: Date | string) => {
@@ -163,7 +296,12 @@ export default function ChatPage() {
                 <Link href="/dashboard" className="btn-romance px-6 py-2.5 text-sm font-semibold inline-block">Find people →</Link>
               </div>
             ) : conversations.map((conv, index) => (
-              <Link key={conv.conversation_id} href={`/chat/${conv.conversation_id}`} className="glass-card rounded-2xl p-4 flex items-center gap-4 no-underline">
+              <Link
+                key={conv.conversation_id}
+                href={`/chat/${conv.conversation_id}`}
+                onClick={() => handleConversationOpen(conv.conversation_id)}
+                className="glass-card rounded-2xl p-4 flex items-center gap-4 no-underline"
+              >
                 <div className="relative shrink-0">
                   {conv.other_user_dp ? (
                     <Image src={conv.other_user_dp} alt={conv.other_user_name} width={48} height={48} className="w-12 h-12 rounded-full object-cover ring-2 ring-white/50" priority={index < 5} />

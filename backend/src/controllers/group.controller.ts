@@ -54,7 +54,17 @@ import { cacheMessage } from '../services/messageCache.service.js';
 import { queueOfflineMessage } from '../services/offlineMessage.service.js';
 import { incrementUnread, resetUnread } from '../services/unread.service.js';
 import { pushNotification } from '../services/notification.service.js';
-import { initPollCache, votePoll, getLivePoll } from '../services/pollCache.service.js';
+import {
+  clearPollCache,
+  getLiveGeneralPollOptions,
+  getLivePoll,
+  initGeneralPollOptionsCache,
+  initPollCache,
+  rollbackGeneralPollVote,
+  rollbackVotePoll,
+  voteGeneralPoll,
+  votePoll,
+} from '../services/pollCache.service.js';
 import multer from 'multer';
 import { redis } from '../lib/redis.js';
 
@@ -821,7 +831,7 @@ export const updateGroup = async (req: Request, res: Response) => {
 // Get group messages
 export const getGroupMessages = async (req: Request, res: Response) => {
   const { groupId } = req.params;
-  const { limit = 50, before } = req.query;
+  const { limit = 50, before, q } = req.query;
   const userId = req.user?.userId;
 
   if (!userId) {
@@ -837,6 +847,29 @@ export const getGroupMessages = async (req: Request, res: Response) => {
 
     if (memberCheck.rows.length === 0) {
       throw new ApiError(403, 'Access denied to this group');
+    }
+
+    const parsedLimit = Math.min(Math.max(Number(limit) || 50, 1), 100);
+    const searchQuery = typeof q === 'string' ? q.trim() : '';
+    const queryParams: Array<string | number> = [String(groupId), String(userId), parsedLimit];
+
+    let beforeClause = '';
+    if (before) {
+      queryParams.push(String(before));
+      beforeClause = `AND cm.created_at < $${queryParams.length}`;
+    }
+
+    let searchClause = '';
+    if (searchQuery.length > 0) {
+      queryParams.push(searchQuery);
+      const searchParam = queryParams.length;
+      searchClause = `
+        AND (
+          cm.encrypted_content ILIKE '%' || $${searchParam} || '%'
+          OR u.name ILIKE '%' || $${searchParam} || '%'
+          OR u.roll_no ILIKE '%' || $${searchParam} || '%'
+          OR cm.message_type ILIKE '%' || $${searchParam} || '%'
+        )`;
     }
 
     const result = await pool.query(
@@ -895,13 +928,14 @@ export const getGroupMessages = async (req: Request, res: Response) => {
       LEFT JOIN users u ON cm.sender_id = u.user_id
       LEFT JOIN chat_session_keys sk ON cm.key_id = sk.session_key_id AND sk.encrypted_for_user_id = $2
       WHERE cm.group_id = $1
-      ${before ? 'AND cm.created_at < $4' : ''}
+      ${beforeClause}
+      ${searchClause}
       AND cm.is_deleted = false
       AND cm.deleted_for_everyone = false
       AND NOT ($2::uuid = ANY(COALESCE(cm.deleted_for_user_ids, ARRAY[]::uuid[])))
       ORDER BY cm.created_at DESC
       LIMIT $3`,
-      before ? [groupId, userId, limit, before] : [groupId, userId, limit]
+      queryParams
     );
 
     // Redis Messaging Layer
@@ -1278,6 +1312,12 @@ export const createPoll = async (req: Request, res: Response) => {
     if (poll_type === 'General') {
       const optsRes = await client.query(`SELECT * FROM poll_options WHERE poll_id = $1 ORDER BY option_order`, [poll.poll_id]);
       pollWithOptions = { ...poll, options: optsRes.rows };
+
+      await initGeneralPollOptionsCache(
+        poll.poll_id,
+        optsRes.rows.map((opt: { option_id: string }) => opt.option_id),
+        poll.expires_at
+      );
     }
 
     // Initialize Redis cache for this poll
@@ -1299,7 +1339,7 @@ export const createPoll = async (req: Request, res: Response) => {
       });
     }
 
-    io.to(`group: ${groupId}`).emit('new-poll', pollWithOptions);
+    io.to(`group:${groupId}`).emit('new-poll', pollWithOptions);
 
     res.status(201).json({
       success: true,
@@ -1455,7 +1495,7 @@ export const voteOnPoll = async (req: Request, res: Response) => {
         [pollId]
       );
       await client.query('COMMIT');
-      io.to(`group:${groupId} `).emit('poll-expired', { poll_id: pollId, group_id: groupId });
+      io.to(`group:${groupId}`).emit('poll-expired', { poll_id: pollId, group_id: groupId });
       throw new ApiError(400, 'This poll has expired');
     }
     // Target of a kick poll cannot vote on their own removal
@@ -1463,58 +1503,67 @@ export const voteOnPoll = async (req: Request, res: Response) => {
       throw new ApiError(403, 'You cannot vote on a poll targeting you for removal');
     }
 
-    let upsertResult, voteWasNew;
+    let insertResult;
+
     if (poll.poll_type === 'General') {
       // Validate option_id
       if (!option_id) throw new ApiError(400, 'option_id is required for General polls');
       // Check option exists for this poll
       const optRes = await client.query(`SELECT 1 FROM poll_options WHERE poll_id = $1 AND option_id = $2`, [pollId, option_id]);
       if (optRes.rows.length === 0) throw new ApiError(400, 'Invalid option_id');
-      upsertResult = await client.query(
-        `INSERT INTO votes(poll_id, user_id, option_id)
-  VALUES($1, $2, $3)
-         ON CONFLICT(poll_id, user_id)
-           WHERE user_id IS NOT NULL
-         DO UPDATE SET option_id = EXCLUDED.option_id, voted_at = NOW()
-  RETURNING(xmax = 0) AS inserted`,
-        [pollId, userId, option_id]
-      );
-      voteWasNew = upsertResult.rows[0]?.inserted ?? true;
 
-      // Register the voter in Redis (user_voted set) so double-voting is blocked
-      // at the cache layer too. We use vote_value=true as a canonical sentinel —
-      // General polls use options not yes/no, so only the set membership matters.
+      const cacheResult = await voteGeneralPoll(pollId as string, userId, option_id as string);
+      if (!cacheResult.applied) {
+        throw new ApiError(400, 'You have already voted on this poll');
+      }
+
       try {
-        await votePoll(pollId as string, userId, true);
-      } catch (cacheError: any) {
-        if (cacheError.message === 'User already voted') {
+        insertResult = await client.query(
+          `INSERT INTO votes(poll_id, user_id, option_id)
+           VALUES($1, $2, $3)
+           ON CONFLICT(poll_id, user_id)
+             WHERE user_id IS NOT NULL
+           DO NOTHING
+           RETURNING poll_id`,
+          [pollId, userId, option_id]
+        );
+
+        if (insertResult.rows.length === 0) {
+          await rollbackGeneralPollVote(pollId as string, userId, option_id as string);
           throw new ApiError(400, 'You have already voted on this poll');
         }
-        console.error('Redis vote cache error (General poll):', cacheError);
+      } catch (dbErr) {
+        await rollbackGeneralPollVote(pollId as string, userId, option_id as string);
+        throw dbErr;
       }
     } else {
       if (typeof vote_value !== 'boolean') {
         throw new ApiError(400, 'vote_value must be a boolean (true = yes, false = no)');
       }
-      upsertResult = await client.query(
-        `INSERT INTO votes(poll_id, user_id, vote_value)
-  VALUES($1, $2, $3)
-         ON CONFLICT(poll_id, user_id)
-           WHERE user_id IS NOT NULL
-         DO UPDATE SET vote_value = EXCLUDED.vote_value, voted_at = NOW()
-  RETURNING(xmax = 0) AS inserted`,
-        [pollId, userId, vote_value]
-      );
-      voteWasNew = upsertResult.rows[0]?.inserted ?? true;
 
-      // Update Redis Live Cache
+      const cacheResult = await votePoll(pollId as string, userId, vote_value);
+      if (!cacheResult.applied) {
+        throw new ApiError(400, 'You have already voted on this poll');
+      }
+
       try {
-        await votePoll(pollId as string, userId, vote_value);
-      } catch (cacheError: any) {
-        if (cacheError.message === "User already voted") {
-          throw new ApiError(400, "You have already voted on this poll");
+        insertResult = await client.query(
+          `INSERT INTO votes(poll_id, user_id, vote_value)
+           VALUES($1, $2, $3)
+           ON CONFLICT(poll_id, user_id)
+             WHERE user_id IS NOT NULL
+           DO NOTHING
+           RETURNING poll_id`,
+          [pollId, userId, vote_value]
+        );
+
+        if (insertResult.rows.length === 0) {
+          await rollbackVotePoll(pollId as string, userId, vote_value);
+          throw new ApiError(400, 'You have already voted on this poll');
         }
-        console.error("Redis vote cache error:", cacheError);
+      } catch (dbErr) {
+        await rollbackVotePoll(pollId as string, userId, vote_value);
+        throw dbErr;
       }
     }
 
@@ -1536,19 +1585,32 @@ export const voteOnPoll = async (req: Request, res: Response) => {
 
     // Fetch live votes from Redis if available, fallback to DB
     const liveVotes = await getLivePoll(pollId as string);
-    if (liveVotes && Object.keys(liveVotes).length > 0) {
-      updatedPoll.votes_for = parseInt(liveVotes.votesFor ?? '0') || 0;
-      updatedPoll.votes_against = parseInt(liveVotes.votesAgainst ?? '0') || 0;
-      updatedPoll.total_voters = parseInt(liveVotes.totalVoters ?? '0') || 0;
+    if (liveVotes) {
+      updatedPoll.votes_for = liveVotes.votesFor;
+      updatedPoll.votes_against = liveVotes.votesAgainst;
+      updatedPoll.total_voters = liveVotes.totalVoters;
+    }
+
+    if (poll.poll_type === 'General') {
+      const optionsRes = await query(
+        `SELECT * FROM poll_options WHERE poll_id = $1 ORDER BY option_order`,
+        [pollId]
+      );
+      const optionVotes = await getLiveGeneralPollOptions(pollId as string);
+
+      updatedPoll.options = optionsRes.rows.map((opt: { option_id: string }) => ({
+        ...opt,
+        votes: optionVotes[opt.option_id] ?? 0,
+      }));
     }
 
     // 7. Emit socket events
-    io.to(`group:${groupId} `).emit('poll-updated', updatedPoll);
+    io.to(`group:${groupId}`).emit('poll-updated', updatedPoll);
 
     res.json({
       success: true,
-      message: voteWasNew ? 'Vote cast successfully' : 'Vote updated successfully',
-      data: { poll: updatedPoll, user_vote: vote_value },
+      message: 'Vote cast successfully',
+      data: { poll: updatedPoll, user_vote: poll.poll_type === 'General' ? option_id : vote_value },
     });
   } catch (error: any) {
     await client.query('ROLLBACK');
@@ -1619,10 +1681,9 @@ export const cancelPoll = async (req: Request, res: Response) => {
     await client.query('COMMIT');
 
     // Remove from Redis Live Cache
-    await redis.del(`poll_live:${pollId as string}`);
-    await redis.del(`user_voted:${pollId as string}`);
+    await clearPollCache(pollId as string);
 
-    io.to(`group:${groupId} `).emit('poll-cancelled', {
+    io.to(`group:${groupId}`).emit('poll-cancelled', {
       poll_id: pollId,
       group_id: groupId,
       cancelled_by: userId,
@@ -1707,8 +1768,7 @@ export const executePoll = async (req: Request, res: Response) => {
     await client.query('COMMIT');
 
     // Remove from Redis Live Cache
-    await redis.del(`poll_live:${pollId as string}`);
-    await redis.del(`user_voted:${pollId as string}`);
+    await clearPollCache(pollId as string);
 
     // Read final state and emit socket events
     const finalRow = await query(`SELECT * FROM polls WHERE poll_id = $1`, [pollId]);
@@ -1716,14 +1776,14 @@ export const executePoll = async (req: Request, res: Response) => {
 
     if (fp?.is_executed) {
       if (fp.poll_type === 'kick_member' && fp.target_user_id) {
-        io.to(`group:${groupId} `).emit('member-removed', {
+        io.to(`group:${groupId}`).emit('member-removed', {
           group_id: groupId,
           user_id: fp.target_user_id,
           reason: 'poll_manual_execute',
           poll_id: pollId,
         });
       }
-      io.to(`group:${groupId} `).emit('poll-executed', {
+      io.to(`group:${groupId}`).emit('poll-executed', {
         poll_id: pollId,
         group_id: groupId,
         poll_type: fp.poll_type,

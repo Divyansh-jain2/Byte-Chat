@@ -9,6 +9,7 @@ import { cacheMessage } from '../services/messageCache.service.js';
 import { queueOfflineMessage } from '../services/offlineMessage.service.js';
 import { incrementUnread, resetUnread } from '../services/unread.service.js';
 import { isUserOnline as isOnlineRedis } from '../services/presence.service.js';
+import { pushNotification } from '../services/notification.service.js';
 
 /**
  * REGULAR CHAT CONTROLLER
@@ -350,7 +351,7 @@ export async function getMessages(req: Request, res: Response) {
   try {
     const userId = req.user?.userId;
     const { conversationId } = req.params;
-    const { limit = 50, before } = req.query;
+    const { limit = 50, before, q } = req.query;
 
     if (!userId) {
       throw new ApiError(401, 'Unauthorized');
@@ -367,7 +368,7 @@ export async function getMessages(req: Request, res: Response) {
     );
 
     if (convCheck.rows.length === 0) {
-      console.log('[DEBUG] getMessages 403 - user not in regular conversation:', { conversationId, userId });
+      // console.log('[DEBUG] getMessages 403 - user not in regular conversation:', { conversationId, userId });
       throw new ApiError(403, 'Access denied to this conversation');
     }
 
@@ -390,6 +391,29 @@ export async function getMessages(req: Request, res: Response) {
     //   name: otherUserInfo.rows[0].name,
     //   roll_no: otherUserInfo.rows[0].roll_no
     // });
+
+    const parsedLimit = Math.min(Math.max(Number(limit) || 50, 1), 100);
+    const searchQuery = typeof q === 'string' ? q.trim() : '';
+    const queryParams: Array<string | number> = [String(conversationId), String(userId), parsedLimit];
+
+    let beforeClause = '';
+    if (before) {
+      queryParams.push(String(before));
+      beforeClause = `AND cm.created_at < $${queryParams.length}`;
+    }
+
+    let searchClause = '';
+    if (searchQuery.length > 0) {
+      queryParams.push(searchQuery);
+      const searchParam = queryParams.length;
+      searchClause = `
+        AND (
+          cm.encrypted_content ILIKE '%' || $${searchParam} || '%'
+          OR u.name ILIKE '%' || $${searchParam} || '%'
+          OR u.roll_no ILIKE '%' || $${searchParam} || '%'
+          OR cm.message_type ILIKE '%' || $${searchParam} || '%'
+        )`;
+    }
 
     // Get messages with real sender info and reactions
     const result = await pool.query(
@@ -453,13 +477,27 @@ export async function getMessages(req: Request, res: Response) {
       LEFT JOIN users pu ON pm.sender_id = pu.user_id
       LEFT JOIN chat_session_keys sk ON cm.key_id = sk.session_key_id AND sk.encrypted_for_user_id = $2
       WHERE cm.conversation_id = $1
-      ${before ? 'AND cm.created_at < $4' : ''}
+      ${beforeClause}
+      ${searchClause}
       AND cm.is_deleted = false
       AND cm.deleted_for_everyone = false
       AND NOT ($2::uuid = ANY(COALESCE(cm.deleted_for_user_ids, ARRAY[]::uuid[])))
       ORDER BY cm.created_at DESC
       LIMIT $3`,
-      before ? [conversationId, userId, limit, before] : [conversationId, userId, limit]
+      queryParams
+    );
+
+    // Mark all incoming messages in this conversation as read for current user.
+    await pool.query(
+      `UPDATE message_status ms
+       SET status = 'read', read_at = NOW()
+       FROM chat_messages cm
+       WHERE ms.message_id = cm.message_id
+         AND ms.user_id = $1
+         AND cm.conversation_id = $2
+         AND cm.sender_id != $1
+         AND ms.status != 'read'`,
+      [userId, conversationId]
     );
 
     // Redis Messaging Layer
@@ -648,6 +686,16 @@ export async function sendMessage(req: Request, res: Response) {
     if (!online) {
       await queueOfflineMessage(otherUserId, fullMessage);
     }
+
+    // 4. Push a notification entry so it appears in Notification Center
+    await pushNotification(otherUserId, {
+      type: 'new_message',
+      conversationId,
+      message: 'You received a new message',
+      senderId: userId,
+      messageType,
+      timestamp: Date.now(),
+    });
 
     // console.log(`💬 Regular message sent in conversation ${conversationId}`);
 

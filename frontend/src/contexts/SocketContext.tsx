@@ -32,14 +32,41 @@ export const useSocket = () => useContext(SocketContext);
 export function SocketProvider({ children }: { children: React.ReactNode }) {
   const socketRef = useRef<Socket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
+  const [authToken, setAuthToken] = useState<string | null>(null);
 
   useEffect(() => {
-    const token = localStorage.getItem('accessToken');
-    if (!token) return;
+    const syncToken = () => {
+      const token = localStorage.getItem('accessToken');
+      setAuthToken((prev) => (prev === token ? prev : token));
+    };
+
+    syncToken();
+
+    // Same-tab localStorage writes do not fire "storage" events, so keep a tiny polling fallback.
+    const interval = window.setInterval(syncToken, 1000);
+    window.addEventListener('storage', syncToken);
+
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('storage', syncToken);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!authToken) {
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+        socketRef.current = null;
+      }
+      const timer = window.setTimeout(() => {
+        setIsConnected(false);
+      }, 0);
+      return () => window.clearTimeout(timer);
+    }
 
     const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
     const socketInstance = io(API_URL, {
-      auth: { token },
+      auth: { token: authToken },
       transports: ['websocket', 'polling'],
     });
 
@@ -65,7 +92,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       socketInstance.disconnect();
       socketRef.current = null;
     };
-  }, []);
+  }, [authToken]);
 
   /**
    * Register a handler for offline messages delivered by the backend on reconnect.

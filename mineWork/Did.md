@@ -180,3 +180,7 @@
 - **Message Delivery Status**: Sent, delivered, read indicators
 - **Typing Indicators**: Enhanced typing indicators with names in groups
 - **Online Indicators**: Green dot for online users
+- **Redis Caching**: Cache frequently accessed data
+
+
+

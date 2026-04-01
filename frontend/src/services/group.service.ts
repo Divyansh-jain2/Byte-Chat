@@ -220,12 +220,15 @@ export const groupService = {
   },
 
   // Get group messages
-  getGroupMessages: async (groupId: string, limit: number = 50, before?: string) => {
+  getGroupMessages: async (groupId: string, limit: number = 50, before?: string, q?: string) => {
     const token = localStorage.getItem('accessToken');
     const url = new URL(`${API_URL}/${groupId}/messages`);
     url.searchParams.set('limit', String(limit));
     if (before) {
       url.searchParams.set('before', before);
+    }
+    if (q) {
+      url.searchParams.set('q', q);
     }
 
     const response = await fetch(url.toString(), {

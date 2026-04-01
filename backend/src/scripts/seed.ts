@@ -33,11 +33,11 @@ const seedData = async () => {
     const degreeTypes = ['B', 'D', 'T']; // B=BTech, D=Dual, T=MTech
     const names = {
       male: ['Aarav', 'Vivaan', 'Aditya', 'Vihaan', 'Arjun', 'Sai', 'Arnav', 'Ayaan', 'Krishna', 'Ishaan'],
-      female: ['Aadhya', 'Saanvi', 'Ananya', 'Diya', 'Pari', 'Aaradhya', 'Navya', 'Myra', 'Aanya', 'Sara'],
+      female: ['Divyansh', 'Divyansh', 'Ananya', 'Diya', 'Pari', 'Aaradhya', 'Navya', 'Myra', 'Aanya', 'Sara'],
       other: ['Arya', 'Reyansh', 'Avni']
     };
 
-    const hashedPassword = await hashPassword('');
+    const hashedPassword = await hashPassword('this');
     console.log('[USERS] Hashed password created');
     for (let i = 1; i <= 30; i++) {
       const branch = branches[i % branches.length];
@@ -64,7 +64,7 @@ const seedData = async () => {
 
       // E2EE: Generate and store RSA keys for the dummy user
       const { publicKey, privateKey } = generateUserKeyPair();
-      const encryptedPrivateKey = encryptPrivateKey(privateKey, '');
+      const encryptedPrivateKey = encryptPrivateKey(privateKey, 'this');
 
       await pool.query(
         `INSERT INTO user_encryption_keys (user_id, public_key, encrypted_private_key)

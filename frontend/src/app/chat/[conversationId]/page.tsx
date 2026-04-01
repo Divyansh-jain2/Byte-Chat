@@ -38,6 +38,10 @@ export default function ChatWindowPage() {
   const socket = getSocket();
 
   const [messages, setMessages] = useState<Message[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<Message[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
   const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(true);
   const [loadingTimeout, setLoadingTimeout] = useState(false);
@@ -73,6 +77,7 @@ export default function ChatWindowPage() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messageInputRef = useRef<HTMLInputElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   // Track presence of the other user — only for non-anonymous chats
   const otherUserIds = useMemo(
@@ -81,6 +86,7 @@ export default function ChatWindowPage() {
   );
   const onlineUsers = usePresence(otherUserIds);
   const isOtherOnline = !isAnonymous && !!otherUser?.user_id && onlineUsers.has(otherUser.user_id);
+  const displayedMessages = useMemo(() => (searchQuery.trim() ? searchResults : messages), [searchQuery, searchResults, messages]);
 
   useEffect(() => {
     scrollToBottom();
@@ -102,6 +108,30 @@ export default function ChatWindowPage() {
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, [showEmojiPicker]);
+
+  // Focus search input when search is shown
+  useEffect(() => {
+    if (showSearch) {
+      setTimeout(() => searchInputRef.current?.focus(), 0);
+    }
+  }, [showSearch]);
+
+  // Handle escape key to close search
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && showSearch) {
+        setShowSearch(false);
+      }
+    };
+
+    if (showSearch) {
+      document.addEventListener('keydown', handleKeyDown);
+    }
+
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [showSearch]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -182,12 +212,12 @@ export default function ChatWindowPage() {
     } catch (error) {
       console.error('[E2EE] Session initialization failed:', error);
     }
-  }, [conversationId, isAnonymous, userPrivateKey]);
+  }, [conversationId, userPrivateKey]);
 
   const decryptMessages = useCallback(async (msgs: Message[], aesKey: CryptoKey) => {
     console.log('[DEBUG] Starting decryptMessages for', msgs.length, 'messages');
     return await Promise.all(msgs.map(async (m) => {
-      let decryptedMsg = { ...m };
+      const decryptedMsg = { ...m };
 
       if (m.encrypted_content && m.encrypted_content.length < 50) {
         console.log('[DEBUG] msg to decrypt:', m.message_id, 'iv:', !!m.content_iv, 'tag:', !!m.content_auth_tag);
@@ -268,7 +298,7 @@ export default function ChatWindowPage() {
           response = await chatService.getMessages(conversationId);
         }
       }
-      catch (fetchError: any) {
+      catch (fetchError) {
         console.error('[ERROR] Initial fetch failed:', fetchError);
         // Fallback or rethrow
         throw fetchError;
@@ -354,6 +384,35 @@ export default function ChatWindowPage() {
     }
   }, [conversationId, fetchMessages, joinConversation, isConnected, leaveConversation, loading]);
 
+  useEffect(() => {
+    const query = searchQuery.trim();
+    if (!query) {
+      setSearchResults([]);
+      setSearching(false);
+      return;
+    }
+
+    const searchTimer = setTimeout(async () => {
+      setSearching(true);
+      try {
+        // Local search for all chats (both anonymous and regular) because server-side content is encrypted
+        const lowered = query.toLowerCase();
+        const filtered = messages.filter((m) => {
+          const body = (m.encrypted_content || '').toLowerCase();
+          const senderName = (m.sender?.name || '').toLowerCase();
+          return body.includes(lowered) || senderName.includes(lowered);
+        });
+        setSearchResults(filtered);
+      } catch (error) {
+        console.error('[SEARCH] Failed to search messages:', error);
+      } finally {
+        setSearching(false);
+      }
+    }, 280);
+
+    return () => clearTimeout(searchTimer);
+  }, [searchQuery, messages]);
+
   // Socket event listeners for message management
   useEffect(() => {
     if (!socket || !conversationId) return;
@@ -418,7 +477,7 @@ export default function ChatWindowPage() {
       socket.off('message:edited', handleMessageEdited);
       socket.off('message:deleted', handleMessageDeleted);
     };
-  }, [socket, conversationId, fetchMessages]);
+  }, [socket, conversationId, fetchMessages, sessionKey]);
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -690,7 +749,7 @@ export default function ChatWindowPage() {
       console.error('Failed to edit message:', error);
       toast.error('Failed to edit message');
     }
-  }, [fetchMessages, toast, isAnonymous, isE2EEReady, sessionKey]);
+  }, [fetchMessages, toast, isE2EEReady, sessionKey]);
 
   const handleDelete = useCallback(async (messageId: string, deleteForEveryone: boolean) => {
     try {
@@ -851,7 +910,7 @@ export default function ChatWindowPage() {
       socket.off('conversation-unblocked', handleConversationUnblocked);
       socket.off('conversation-still-blocked', handleConversationStillBlocked);
     };
-  }, [socket, toast, fetchMessages]);
+  }, [socket, toast, fetchMessages, sessionKey, decryptMessages]);
 
 
   const handleBlockUser = async () => {
@@ -1036,7 +1095,61 @@ export default function ChatWindowPage() {
             )}
             {isAnonymous && otherUser?.gender && <p className="text-xs" style={{ color: 'var(--muted)' }}>{otherUser.gender}</p>}
           </div>
+
+          {/* Magnifier icon for search - appears in header middle area */}
+          {showSearch && (
+            <div className="flex items-center gap-1 shrink-0">
+              <input
+                ref={searchInputRef}
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search messages..."
+                className="input-romance h-8 text-xs w-40"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="p-1 rounded hover:opacity-70 transition-opacity"
+                  style={{ color: 'var(--muted)' }}
+                  title="Clear search"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              )}
+            </div>
+          )}
         </div>
+
+        {/* Search magnifier icon */}
+        {!showSearch && (
+          <button
+            onClick={() => setShowSearch(true)}
+            className="w-9 h-9 rounded-xl glass flex items-center justify-center transition-all hover:scale-105"
+            style={{ color: 'var(--body)' }}
+            title="Search messages"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+          </button>
+        )}
+
+        {showSearch && (
+          <button
+            onClick={() => { setShowSearch(false); setSearchQuery(''); }}
+            className="w-9 h-9 rounded-xl glass flex items-center justify-center transition-all hover:scale-105"
+            style={{ color: 'var(--body)' }}
+            title="Close search"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        )}
 
         {/* Action menu */}
         <div className="relative shrink-0">
@@ -1102,17 +1215,26 @@ export default function ChatWindowPage() {
 
       {/* Messages area */}
       <div className="flex-1 overflow-y-auto px-4 py-5 space-y-4">
-        {messages.length === 0 ? (
+        {searchQuery.trim() && (
+          <div className="text-xs px-2" style={{ color: 'var(--muted)' }}>
+            {searching ? 'Searching…' : `${displayedMessages.length} result(s) for "${searchQuery.trim()}"`}
+          </div>
+        )}
+        {displayedMessages.length === 0 ? (
           <div className="h-full flex items-center justify-center">
             <div className="text-center">
               <p className="text-5xl mb-3">👋</p>
-              <p className="font-semibold" style={{ color: 'var(--heading)' }}>Say hello!</p>
-              <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>Start the conversation</p>
+              <p className="font-semibold" style={{ color: 'var(--heading)' }}>
+                {searchQuery.trim() ? 'No matching messages' : 'Say hello!'}
+              </p>
+              <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>
+                {searchQuery.trim() ? 'Try a different keyword' : 'Start the conversation'}
+              </p>
             </div>
           </div>
         ) : (
           <>
-            {messages.map((message) => {
+            {displayedMessages.map((message) => {
               const isMyMessage = message.is_my_message;
               return (
                 <MessageBubble
@@ -1126,7 +1248,7 @@ export default function ChatWindowPage() {
                 />
               );
             })}
-            {isOtherTyping && (
+            {!searchQuery.trim() && isOtherTyping && (
               <div className="flex animate-fade-in my-2">
                 <div className="glass-strong rounded-2xl px-4 py-3 flex gap-1 bg-white/5 items-center w-fit">
                   <span className="typing-dot" style={{ background: 'var(--muted)', width: 6, height: 6, borderRadius: '50%' }} />

@@ -34,6 +34,25 @@ export default function DashboardPage() {
   const fetchData = useCallback(async () => {
     try {
       const token = localStorage.getItem('accessToken');
+      const userRaw = localStorage.getItem('user');
+      let currentUserId: string | null = null;
+      let currentUserRollNo: string | null = null;
+
+      if (userRaw) {
+        try {
+          const parsed = JSON.parse(userRaw) as Record<string, unknown>;
+          currentUserId =
+            (typeof parsed.user_id === 'string' && parsed.user_id) ||
+            (typeof parsed.userId === 'string' && parsed.userId) ||
+            null;
+          currentUserRollNo =
+            (typeof parsed.roll_no === 'string' && parsed.roll_no) ||
+            (typeof parsed.rollNo === 'string' && parsed.rollNo) ||
+            null;
+        } catch {
+          // Ignore malformed local user payload and continue without self-filter fallback.
+        }
+      }
 
       // Fetch users
       const usersResponse = await fetch('http://localhost:3001/api/profile/all', {
@@ -51,7 +70,12 @@ export default function DashboardPage() {
 
       const usersData = await usersResponse.json();
       if (usersData.success && usersData.data && Array.isArray(usersData.data.users)) {
-        setUsers(usersData.data.users);
+        const visibleUsers = usersData.data.users.filter((user: User) => {
+          if (currentUserId && user.user_id === currentUserId) return false;
+          if (currentUserRollNo && user.roll_no.toLowerCase() === currentUserRollNo.toLowerCase()) return false;
+          return true;
+        });
+        setUsers(visibleUsers);
       }
 
       // Fetch my groups to filter them out from public groups

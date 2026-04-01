@@ -7,7 +7,7 @@ import { storeWsAuth, getWsAuth, deleteWsAuth } from '../services/wsAuth.service
 import { mapUserSocket, removeSocketMapping, getUserSockets } from '../services/socketRouting.service.js';
 import { addOnlineUser, removeOnlineUser } from '../services/presence.service.js';
 import { joinRoom, leaveRoom, removeSocketFromAllRooms, getRoomSockets } from '../services/room.service.js';
-import { setTyping } from '../services/typing.service.js';
+import { clearTyping, setTyping } from '../services/typing.service.js';
 import { getOfflineMessages } from '../services/offlineMessage.service.js';
 
 interface UserSocket {
@@ -22,7 +22,80 @@ interface JwtPayload {
 
 let _io: SocketServer | null = null; // module-level singleton
 
+type RoomEmitMetrics = {
+  trackedEmits: number;
+  trackedSocketDeliveries: number;
+  fallbackEmits: number;
+  fallbackFromEmptyRoom: number;
+  fallbackFromRedisError: number;
+};
+
+const roomEmitMetrics: RoomEmitMetrics = {
+  trackedEmits: 0,
+  trackedSocketDeliveries: 0,
+  fallbackEmits: 0,
+  fallbackFromEmptyRoom: 0,
+  fallbackFromRedisError: 0,
+};
+
+let metricsIntervalStarted = false;
+
+function maybeStartSocketMetricsLogger() {
+  if (metricsIntervalStarted) return;
+
+  const enabled = process.env.SOCKET_METRICS_ENABLED === 'true';
+  if (!enabled) return;
+
+  const everyMs = Number(process.env.SOCKET_METRICS_INTERVAL_MS || 60000);
+  const intervalMs = Number.isFinite(everyMs) && everyMs >= 5000 ? everyMs : 60000;
+
+  metricsIntervalStarted = true;
+
+  setInterval(() => {
+    console.log('[SocketMetrics]', {
+      trackedEmits: roomEmitMetrics.trackedEmits,
+      trackedSocketDeliveries: roomEmitMetrics.trackedSocketDeliveries,
+      fallbackEmits: roomEmitMetrics.fallbackEmits,
+      fallbackFromEmptyRoom: roomEmitMetrics.fallbackFromEmptyRoom,
+      fallbackFromRedisError: roomEmitMetrics.fallbackFromRedisError,
+    });
+  }, intervalMs);
+}
+
+function fallbackRoomEmit(roomName: string, event: string, data: any) {
+  roomEmitMetrics.fallbackEmits += 1;
+  _io?.to(roomName).emit(event, data);
+}
+
+async function emitToTrackedRoom(chatId: string, roomName: string, event: string, data: any) {
+  const io = _io;
+  if (!io) return;
+
+  try {
+    const socketIds = await getRoomSockets(chatId);
+    if (socketIds.length > 0) {
+      roomEmitMetrics.trackedEmits += 1;
+      roomEmitMetrics.trackedSocketDeliveries += socketIds.length;
+      // Emit directly to socket IDs tracked in Redis room set.
+      for (const socketId of socketIds) {
+        io.to(socketId).emit(event, data);
+      }
+      return;
+    }
+
+    roomEmitMetrics.fallbackFromEmptyRoom += 1;
+  } catch (err) {
+    roomEmitMetrics.fallbackFromRedisError += 1;
+    console.warn('[Socket] Redis room emit failed, falling back to Socket.IO room:', err);
+  }
+
+  // Fallback path for compatibility/safety.
+  fallbackRoomEmit(roomName, event, data);
+}
+
 export function initializeSocket(httpServer: HTTPServer) {
+  maybeStartSocketMetricsLogger();
+
   const io = new SocketServer(httpServer, {
     cors: {
       origin: process.env.FRONTEND_URL,
@@ -102,26 +175,30 @@ export function initializeSocket(httpServer: HTTPServer) {
     socket.join(`user:${userId}`);
 
     // Handle joining conversation rooms
-    socket.on('join-conversation', (conversationId: string) => {
+    socket.on('join-conversation', async (conversationId: string) => {
       socket.join(`conversation:${conversationId}`);
+      await joinRoom(conversationId, socket.id);
       // console.log(`User ${userId} joined conversation ${conversationId}`);
     });
 
     // Handle leaving conversation rooms
-    socket.on('leave-conversation', (conversationId: string) => {
+    socket.on('leave-conversation', async (conversationId: string) => {
       socket.leave(`conversation:${conversationId}`);
+      await leaveRoom(conversationId, socket.id);
       // console.log(`User ${userId} left conversation ${conversationId}`);
     });
 
     // Handle joining group rooms
-    socket.on('join-group', (groupId: string) => {
+    socket.on('join-group', async (groupId: string) => {
       socket.join(`group:${groupId}`);
+      await joinRoom(groupId, socket.id);
       // console.log(`User ${userId} joined group ${groupId}`);
     });
 
     // Handle leaving group rooms
-    socket.on('leave-group', (groupId: string) => {
+    socket.on('leave-group', async (groupId: string) => {
       socket.leave(`group:${groupId}`);
+      await leaveRoom(groupId, socket.id);
       // console.log(`User ${userId} left group ${groupId}`);
     });
 
@@ -152,26 +229,36 @@ export function initializeSocket(httpServer: HTTPServer) {
       // Update Redis status if typing
       if (isUserTyping) {
         await setTyping(chatId, userId);
+      } else {
+        await clearTyping(chatId, userId);
       }
 
-      // Broadcast to standard conversation room
-      socket.to(`conversation:${chatId}`).emit('user-typing', {
-        userId,
-        conversationId: chatId,
-        isTyping: isUserTyping,
-      });
-      
-      // Also broadcast to generic chat room for backward compatibility
+      // Broadcast to sockets tracked in Redis room set (excluding sender socket).
       const roomSockets = await getRoomSockets(chatId);
-      roomSockets.forEach((sId) => {
-        if (sId !== socket.id) {
-          _io?.to(sId).emit('user-typing', {
-            chatId,
-            userId,
-            isTyping: isUserTyping,
-          });
-        }
-      });
+      if (roomSockets.length > 0) {
+        roomSockets.forEach((sId) => {
+          if (sId !== socket.id) {
+            _io?.to(sId).emit('user-typing', {
+              chatId,
+              userId,
+              isTyping: isUserTyping,
+            });
+          }
+        });
+      } else {
+        // Safe fallback for sessions that haven't yet registered in Redis room set.
+        socket.to(`conversation:${chatId}`).emit('user-typing', {
+          userId,
+          conversationId: chatId,
+          isTyping: isUserTyping,
+        });
+
+        socket.to(`group:${chatId}`).emit('user-typing', {
+          userId,
+          conversationId: chatId,
+          isTyping: isUserTyping,
+        });
+      }
     });
 
     // Handle message read status
@@ -244,9 +331,11 @@ export function emitToConversation(io: SocketServer | null, conversationId: stri
 export function emitToConversation(conversationId: string, event: string, data: any): void;
 export function emitToConversation(ioOrConvId: SocketServer | null | string, convIdOrEvent: string, eventOrData: string | any, data?: any): void {
   if (typeof ioOrConvId === 'string') {
-    _io?.to(`conversation:${ioOrConvId}`).emit(convIdOrEvent, eventOrData);
+    void emitToTrackedRoom(ioOrConvId, `conversation:${ioOrConvId}`, convIdOrEvent, eventOrData);
   } else {
-    (ioOrConvId || _io)?.to(`conversation:${convIdOrEvent}`).emit(eventOrData, data);
+    // Keep support for explicit io parameter while still using tracked room first.
+    _io = ioOrConvId || _io;
+    void emitToTrackedRoom(convIdOrEvent, `conversation:${convIdOrEvent}`, eventOrData, data);
   }
 }
 
@@ -255,9 +344,11 @@ export function emitToGroup(io: SocketServer | null, groupId: string, event: str
 export function emitToGroup(groupId: string, event: string, data: any): void;
 export function emitToGroup(ioOrGroupId: SocketServer | null | string, groupIdOrEvent: string, eventOrData: string | any, data?: any): void {
   if (typeof ioOrGroupId === 'string') {
-    _io?.to(`group:${ioOrGroupId}`).emit(groupIdOrEvent, eventOrData);
+    void emitToTrackedRoom(ioOrGroupId, `group:${ioOrGroupId}`, groupIdOrEvent, eventOrData);
   } else {
-    (ioOrGroupId || _io)?.to(`group:${groupIdOrEvent}`).emit(eventOrData, data);
+    // Keep support for explicit io parameter while still using tracked room first.
+    _io = ioOrGroupId || _io;
+    void emitToTrackedRoom(groupIdOrEvent, `group:${groupIdOrEvent}`, eventOrData, data);
   }
 }
 

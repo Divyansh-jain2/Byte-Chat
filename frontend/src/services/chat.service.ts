@@ -46,9 +46,9 @@ export const chatService = {
   },
 
   // Get messages for a conversation
-  async getMessages(conversationId: string, limit: number = 50, before?: string) {
+  async getMessages(conversationId: string, limit: number = 50, before?: string, q?: string) {
     const response = await api.get(`/conversation/${conversationId}/messages`, {
-      params: { limit, before },
+      params: { limit, before, q },
     });
     return response.data.data;
   },

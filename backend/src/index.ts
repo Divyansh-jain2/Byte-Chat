@@ -20,6 +20,7 @@ import messageManagementRoutes from './routes/message-management.routes.js';
 import notificationRoutes from './routes/notification.routes.js';
 import { errorHandler } from './utils/error.util.js';
 import { initializeSocket } from './socket/index.js';
+import { clearPollCache } from './services/pollCache.service.js';
 
 // Redis connection
 import { connectRedis, redis } from './lib/redis.js';
@@ -145,10 +146,7 @@ httpServer.listen(PORT, () => {
 
         // Clear Redis cache when poll ends 
         try {
-          // Import inline here is avoided by importing redis at top or using the existing redis connection
-          // We have connectRedis and redis exported from lib/redis.js, already imported at top of index.ts
-          await redis.del(`poll_live:${poll.poll_id}`);
-          await redis.del(`user_voted:${poll.poll_id}`);
+          await clearPollCache(poll.poll_id);
         } catch (redisErr) {
           console.error('[Poll Sweeper] Error clearing redis cache:', redisErr);
         }
@@ -184,7 +182,6 @@ httpServer.listen(PORT, () => {
       console.error('[Poll Sweeper] Error resolving polls:', err);
     }
   }, 60_000); // every 60 seconds
-  // ────────────────────────────────────────────────────────────────────────
 });
 
 export default app;

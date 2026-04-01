@@ -12,6 +12,14 @@ export async function setTyping(chatId: string, userId: string) {
 }
 
 /**
+ * Clears typing indicator immediately when user stops typing.
+ */
+export async function clearTyping(chatId: string, userId: string) {
+    const key = `typing:${chatId}:${userId}`;
+    await redis.del(key);
+}
+
+/**
  * Checks if a specific user is typing in a chat.
  */
 export async function isTyping(chatId: string, userId: string): Promise<boolean> {
