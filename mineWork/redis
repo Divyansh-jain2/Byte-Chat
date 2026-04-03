@@ -1,22 +1,6 @@
 
 ## 🚀 High-Priority Redis Optimization Opportunities
 
-### 1. User Profile Caching
-**Location**: `src/controllers/profile.controller.ts`, `src/services/auth.service.ts`
-**Current Issue**: Frequent database queries for user profiles
-**Redis Solution**:
-- Cache user profiles with 30-minute TTL
-- Cache user public keys for encryption operations
-- Cache user settings for quick access
-
-### 2. Conversation List Caching
-**Location**: `src/controllers/chat.controller.ts` (getConversations)
-**Current Issue**: Complex JOIN queries for conversation lists
-**Redis Solution**:
-- Cache conversation lists per user with 15-minute TTL
-- Store conversation metadata (last message, unread counts)
-- Invalidate on new messages or conversation changes
-
 ### 3. Group Member Lists
 **Location**: `src/controllers/group.controller.ts`
 **Current Issue**: Repeated database queries for group membership validation
@@ -25,23 +9,7 @@
 - Cache user group memberships for quick permission checks
 - Use Redis sets for efficient membership testing
 
-### 4. Message History Pagination
-**Location**: Frontend `src/services/chat.service.ts` (getMessages)
-**Current Issue**: Database queries for message pagination
-**Redis Solution**:
-- Cache paginated message results with 10-minute TTL
-- Implement cursor-based pagination caching
-- Pre-cache next page for smooth scrolling
-
 ## 🔧 Medium-Priority Redis Enhancements
-
-### 5. Rate Limiting Enhancement
-**Location**: `src/middleware/rateLimiter.ts`
-**Current Implementation**: Basic rate limiting
-**Redis Solution**:
-- Implement distributed rate limiting using Redis
-- User-specific rate limits for different endpoints
-- Sliding window rate limiting for better accuracy
 
 ### 6. OTP and Token Management
 **Location**: `src/controllers/auth.controller.ts`
@@ -67,14 +35,6 @@
 - Cache user discovery suggestions
 
 ## 🌐 Frontend-Side Redis Opportunities
-
-### 9. API Response Caching
-**Location**: Frontend services (`src/services/*.service.ts`)
-**Current Issue**: Repeated API calls for same data
-**Redis Solution**:
-- Implement HTTP caching headers with Redis backend
-- Cache static user data (profiles, settings)
-- Cache conversation metadata
 
 ### 10. Real-time Data Synchronization
 **Location**: WebSocket connections
@@ -127,15 +87,3 @@
 - Queue messages in Redis for reliable delivery
 - Cache message encryption keys
 - Implement message deduplication
-
-## 📈 Performance Metrics to Track
-
-1. **Cache Hit Ratios**: Monitor Redis cache effectiveness
-2. **Database Query Reduction**: Track reduced database load
-3. **Response Time Improvements**: Measure API response time gains
-4. **Memory Usage**: Monitor Redis memory consumption
-5. **Connection Efficiency**: Track database connection utilization
-
-4. **Notifications** (`src/services/notification.service.ts`)
-   - User notification lists with unread counts
-   - Real-time notification delivery with socket integration

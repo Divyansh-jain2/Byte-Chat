@@ -1,5 +1,6 @@
 import { pool } from '../lib/db.js';
 import { ApiError } from '../utils/error.util.js';
+import { getUserGenderCached } from '../services/userProfileCache.service.js';
 import type { Request, Response, NextFunction } from 'express';
 
 export const anonymousController = {
@@ -85,16 +86,10 @@ export const anonymousController = {
       }
 
       // Get user's gender
-      const userResult = await pool.query(
-        'SELECT gender FROM users WHERE user_id = $1',
-        [userId]
-      );
-
-      if (userResult.rows.length === 0) {
+      const gender = await getUserGenderCached(String(userId));
+      if (!gender) {
         throw new ApiError(404, 'User not found');
       }
-
-      const { gender } = userResult.rows[0];
 
       // Check if anonymous identity already exists for this context
       let checkQuery = 'SELECT identity_id, random_string FROM anonymous_identities WHERE user_id = $1 AND is_active = TRUE';

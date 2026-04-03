@@ -21,6 +21,7 @@ import notificationRoutes from './routes/notification.routes.js';
 import { errorHandler } from './utils/error.util.js';
 import { initializeSocket } from './socket/index.js';
 import { clearPollCache } from './services/pollCache.service.js';
+import { startCacheMetricsLogger } from './utils/cache.util.js';
 
 // Redis connection
 import { connectRedis, redis } from './lib/redis.js';
@@ -31,6 +32,7 @@ const httpServer = createServer(app);
 
 // Connect to Redis at server startup
 connectRedis();
+startCacheMetricsLogger();
 // Redis test endpoint
 app.get('/redis-test', async (req: Request, res: Response) => {
   try {

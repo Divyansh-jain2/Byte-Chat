@@ -54,6 +54,8 @@ import { cacheMessage } from '../services/messageCache.service.js';
 import { queueOfflineMessage } from '../services/offlineMessage.service.js';
 import { incrementUnread, resetUnread } from '../services/unread.service.js';
 import { pushNotification } from '../services/notification.service.js';
+import { cacheKeys, CACHE_TTL_SECONDS, getCacheJSON, setCacheJSON } from '../utils/cache.util.js';
+import { getUserGenderCached } from '../services/userProfileCache.service.js';
 import {
   clearPollCache,
   getLiveGeneralPollOptions,
@@ -325,10 +327,10 @@ export const joinGroup = async (req: Request, res: Response) => {
     // Create anonymous identity if joining anonymously
     let anonymousIdentityId = null;
     if (is_anonymous) {
-      const userResult = await client.query(
-        `SELECT gender FROM users WHERE user_id = $1`,
-        [userId]
-      );
+      const gender = await getUserGenderCached(String(userId));
+      if (!gender) {
+        throw new ApiError(404, 'User not found');
+      }
 
       const anonymousResult = await client.query(
         `INSERT INTO anonymous_identities (
@@ -342,7 +344,7 @@ export const joinGroup = async (req: Request, res: Response) => {
           userId,
           groupId,
           `anon_${Math.random().toString(36).substring(2, 15)}_${Date.now()}`,
-          userResult.rows[0].gender
+          gender
         ]
       );
 
@@ -2148,20 +2150,26 @@ export async function getGroupParticipantPublicKeys(req: Request, res: Response)
       throw new ApiError(403, 'Access denied to this group');
     }
 
-    // Get public keys of all members
-    const result = await pool.query(
-      `SELECT u.user_id, uek.public_key, u.name
-       FROM group_members gm
-       JOIN users u ON gm.user_id = u.user_id
-       JOIN user_encryption_keys uek ON u.user_id = uek.user_id
-       WHERE gm.group_id = $1`,
-      [groupId]
-    );
+    const cacheKey = cacheKeys.groupPublicKeys(String(groupId));
+    let participants = await getCacheJSON<Array<Record<string, unknown>>>(cacheKey);
+
+    if (!participants) {
+      const result = await pool.query(
+        `SELECT u.user_id, uek.public_key, u.name
+         FROM group_members gm
+         JOIN users u ON gm.user_id = u.user_id
+         JOIN user_encryption_keys uek ON u.user_id = uek.user_id
+         WHERE gm.group_id = $1`,
+        [groupId]
+      );
+      participants = result.rows;
+      await setCacheJSON(cacheKey, participants, CACHE_TTL_SECONDS.USER_PUBLIC_KEYS);
+    }
 
     res.json({
       success: true,
       data: {
-        participants: result.rows
+        participants
       }
     });
   } catch (error) {

@@ -6,6 +6,7 @@ import { emitToConversation } from '../socket/index.js';
 import { uploadToCloudinary } from '../utils/cloudinary.util.js';
 import { pushNotification } from '../services/notification.service.js';
 import { resetUnread } from '../services/unread.service.js';
+import { getUserProfileCached, getUserGenderCached } from '../services/userProfileCache.service.js';
 
 /**
  * ANONYMOUS CHAT CONTROLLER
@@ -53,10 +54,10 @@ export async function createAnonymousConversation(req: Request, res: Response) {
     // console.log(`🎭 Creating/finding anonymous conversation: User ${userId} → User ${otherUserId}`);
 
     // Get user's gender
-    const userInfo = await pool.query(
-      'SELECT gender FROM users WHERE user_id = $1',
-      [userId]
-    );
+    const userGender = await getUserGenderCached(String(userId));
+    if (!userGender) {
+      throw new ApiError(404, 'User not found');
+    }
 
     // Check if anonymous identity already exists for this user targeting the other user
     const existingAnonIdentity = await pool.query(
@@ -81,7 +82,7 @@ export async function createAnonymousConversation(req: Request, res: Response) {
           userId,
           otherUserId,
           `anon_${Math.random().toString(36).substring(2, 15)}`,
-          userInfo.rows[0].gender
+          userGender
         ]
       );
       anonymousIdentityId = anonIdentity.rows[0].identity_id;
@@ -324,12 +325,16 @@ export async function getAnonymousMessages(req: Request, res: Response) {
         // });
       } else {
         // Initiator (sender) sees real profile
-        const otherUserInfo = await pool.query(
-          `SELECT user_id, name, roll_no, gender, dp_url FROM users WHERE user_id = $1`,
-          [otherUserId]
-        );
+        const otherUserInfo = await getUserProfileCached(String(otherUserId));
+        if (!otherUserInfo) {
+          throw new ApiError(404, 'Other user not found');
+        }
         otherUserData = {
-          ...otherUserInfo.rows[0],
+          user_id: otherUserInfo.user_id,
+          name: otherUserInfo.name,
+          roll_no: otherUserInfo.roll_no,
+          gender: otherUserInfo.gender,
+          dp_url: otherUserInfo.dp_url,
           is_anonymous: false
         };
         // console.log(`🎭 Sender viewing receiver (real profile):`, {

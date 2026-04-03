@@ -2,6 +2,8 @@ import { pool } from '../lib/db.js';
 import { ApiError } from '../utils/error.util.js';
 import { uploadToCloudinary, deleteFromCloudinary, extractPublicId, getDefaultAvatar } from '../utils/cloudinary.util.js';
 import { getAvatarUrl, isValidPresetAvatar, getRandomAvatar } from '../utils/avatar.util.js';
+import { cacheKeys, CACHE_TTL_SECONDS, getCacheJSON, setCacheJSON, invalidateUserProfileCache } from '../utils/cache.util.js';
+import { sendConditionalJson } from '../utils/httpCache.util.js';
 import type { Request, Response, NextFunction } from 'express';
 import multer from 'multer';
 
@@ -15,6 +17,18 @@ export const profileController = {
         });
       }
       const userId = req.user.userId;
+
+      const cached = await getCacheJSON<Record<string, unknown>>(cacheKeys.userProfile(userId));
+      if (cached) {
+        return sendConditionalJson(req, res, {
+          success: true,
+          data: cached
+        }, {
+          maxAgeSeconds: 30,
+          cacheStatus: 'HIT'
+        });
+      }
+
       const result = await pool.query(
         `SELECT 
           user_id, roll_no, name, gender, branch, 
@@ -30,9 +44,14 @@ export const profileController = {
         throw new ApiError(404, 'User not found');
       }
 
-      res.json({
+      await setCacheJSON(cacheKeys.userProfile(userId), result.rows[0], CACHE_TTL_SECONDS.USER_PROFILE);
+
+      return sendConditionalJson(req, res, {
         success: true,
         data: result.rows[0]
+      }, {
+        maxAgeSeconds: 30,
+        cacheStatus: 'MISS'
       });
     } catch (error) {
       next(error);
@@ -44,23 +63,34 @@ export const profileController = {
     try {
       const { rollNo } = req.params;
       const currentUserId = req.user?.userId;
+      const normalizedRollNo = typeof rollNo === 'string' ? rollNo : String(rollNo || '');
 
-      const result = await pool.query(
-        `SELECT 
-          user_id, roll_no, name, gender, branch, 
-          dp_url, dob, bio, 
-          instagram_url, twitter_url, linkedin_url,
-          created_at
-         FROM users 
-         WHERE UPPER(roll_no) = UPPER($1) AND is_verified = TRUE AND is_active = TRUE`,
-        [rollNo]
-      );
+      const rollNoKey = cacheKeys.userProfileByRollNo(normalizedRollNo);
+      let profileData = await getCacheJSON<Record<string, unknown>>(rollNoKey);
+      let cacheStatus: 'HIT' | 'MISS' = 'HIT';
 
-      if (result.rows.length === 0) {
-        throw new ApiError(404, 'User not found');
+      if (!profileData) {
+        cacheStatus = 'MISS';
+        const result = await pool.query(
+          `SELECT 
+            user_id, roll_no, name, gender, branch, 
+            dp_url, dob, bio, 
+            instagram_url, twitter_url, linkedin_url,
+            created_at
+           FROM users 
+           WHERE UPPER(roll_no) = UPPER($1) AND is_verified = TRUE AND is_active = TRUE`,
+            [normalizedRollNo]
+        );
+
+        if (result.rows.length === 0) {
+          throw new ApiError(404, 'User not found');
+        }
+
+        profileData = result.rows[0] as Record<string, unknown>;
+        await setCacheJSON(rollNoKey, profileData, CACHE_TTL_SECONDS.USER_PROFILE);
       }
 
-      const profileUserId = result.rows[0].user_id;
+      const profileUserId = String(profileData.user_id || '');
 
       // Check if users are blocked (only if viewer is authenticated)
       if (currentUserId && currentUserId !== profileUserId) {
@@ -88,7 +118,7 @@ export const profileController = {
             // Current user blocked this profile
             return res.json({
               success: true,
-              data: result.rows[0],
+              data: profileData,
               blocked: true,
               blockMessage: 'You have blocked this user'
             });
@@ -96,9 +126,12 @@ export const profileController = {
         }
       }
 
-      res.json({
+      return sendConditionalJson(req, res, {
         success: true,
-        data: result.rows[0]
+        data: profileData
+      }, {
+        maxAgeSeconds: 30,
+        cacheStatus
       });
     } catch (error) {
       next(error);
@@ -259,6 +292,8 @@ export const profileController = {
 
       const result = await pool.query(query, params);
 
+      await invalidateUserProfileCache(userId, result.rows[0]?.roll_no);
+
       res.json({
         success: true,
         message: 'Profile updated successfully',
@@ -349,6 +384,8 @@ export const profileController = {
 
       const result = await pool.query(query, params);
 
+      await invalidateUserProfileCache(userId, result.rows[0]?.roll_no);
+
       res.json({
         success: true,
         message: 'Profile updated successfully',
@@ -369,6 +406,17 @@ export const profileController = {
       }
       const userId = req.user.userId;
 
+      const cached = await getCacheJSON<Record<string, boolean>>(cacheKeys.userProfileStatus(userId));
+      if (cached) {
+        return sendConditionalJson(req, res, {
+          success: true,
+          data: cached
+        }, {
+          maxAgeSeconds: 20,
+          cacheStatus: 'HIT'
+        });
+      }
+
       const result = await pool.query(
         `SELECT 
           CASE WHEN dob IS NOT NULL THEN TRUE ELSE FALSE END as has_dob,
@@ -385,13 +433,19 @@ export const profileController = {
 
       const status = result.rows[0];
       const isComplete = status.has_dob && status.has_bio && status.has_dp;
+      const data = {
+        ...status,
+        is_complete: isComplete
+      };
 
-      res.json({
+      await setCacheJSON(cacheKeys.userProfileStatus(userId), data, CACHE_TTL_SECONDS.USER_PROFILE);
+
+      return sendConditionalJson(req, res, {
         success: true,
-        data: {
-          ...status,
-          is_complete: isComplete
-        }
+        data
+      }, {
+        maxAgeSeconds: 20,
+        cacheStatus: 'MISS'
       });
     } catch (error) {
       next(error);
@@ -449,6 +503,8 @@ export const profileController = {
         [uploadResult.secure_url, userId]
       );
 
+      await invalidateUserProfileCache(userId, updateResult.rows[0]?.roll_no);
+
       res.json({
         success: true,
         message: 'Profile picture uploaded successfully',
@@ -504,6 +560,8 @@ export const profileController = {
          RETURNING user_id, roll_no, name, gender, branch, dp_url, dob, bio, updated_at`,
         [defaultAvatar, userId]
       );
+
+      await invalidateUserProfileCache(userId, updateResult.rows[0]?.roll_no);
 
       res.json({
         success: true,
@@ -573,6 +631,8 @@ export const profileController = {
          RETURNING user_id, roll_no, name, gender, branch, dp_url, dob, bio, updated_at`,
         [avatarUrl, userId]
       );
+
+      await invalidateUserProfileCache(userId, updateResult.rows[0]?.roll_no);
 
       res.json({
         success: true,

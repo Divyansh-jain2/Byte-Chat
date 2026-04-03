@@ -1,5 +1,7 @@
 import { pool } from '../lib/db.js';
 import { ApiError } from '../utils/error.util.js';
+import { cacheKeys, CACHE_TTL_SECONDS, getCacheJSON, setCacheJSON, deleteCacheKeys, invalidateUserProfileCache } from '../utils/cache.util.js';
+import { sendConditionalJson } from '../utils/httpCache.util.js';
 import type { Request, Response, NextFunction } from 'express';
 
 export const settingsController = {
@@ -10,6 +12,17 @@ export const settingsController = {
         return res.status(401).json({ error: 'Unauthorized' });
       }
       const userId = req.user.userId;
+
+      const cached = await getCacheJSON<Record<string, unknown>>(cacheKeys.userSettings(userId));
+      if (cached) {
+        return sendConditionalJson(req, res, {
+          success: true,
+          data: cached
+        }, {
+          maxAgeSeconds: 30,
+          cacheStatus: 'HIT'
+        });
+      }
 
       const result = await pool.query(
         `SELECT 
@@ -31,9 +44,14 @@ export const settingsController = {
         privacy_allow_anonymous_chats: true
       };
 
-      res.json({
+      await setCacheJSON(cacheKeys.userSettings(userId), settings, CACHE_TTL_SECONDS.USER_SETTINGS);
+
+      return sendConditionalJson(req, res, {
         success: true,
         data: settings
+      }, {
+        maxAgeSeconds: 30,
+        cacheStatus: 'MISS'
       });
     } catch (error) {
       next(error);
@@ -75,6 +93,8 @@ export const settingsController = {
         RETURNING *`,
         [userId, theme, email_notifications, notification_enabled, privacy_profile_public, privacy_show_online_status, privacy_allow_anonymous_chats]
       );
+
+      await setCacheJSON(cacheKeys.userSettings(userId), result.rows[0], CACHE_TTL_SECONDS.USER_SETTINGS);
 
       res.json({
         success: true,
@@ -213,6 +233,10 @@ export const settingsController = {
       const userId = req.user?.userId;
       const { password } = req.body;
 
+      if (!userId) {
+        throw new ApiError(401, 'Unauthorized');
+      }
+
       if (!password) {
         throw new ApiError(400, 'Password is required to delete account');
       }
@@ -248,6 +272,20 @@ export const settingsController = {
         'DELETE FROM user_sessions WHERE user_id = $1',
         [userId]
       );
+
+      await deleteCacheKeys([
+        cacheKeys.userSettings(String(userId)),
+        cacheKeys.userProfile(String(userId)),
+        cacheKeys.userProfileStatus(String(userId)),
+      ]);
+
+      const rollNoResult = await pool.query(
+        'SELECT roll_no FROM users WHERE user_id = $1',
+        [userId]
+      );
+      if (rollNoResult.rows.length > 0) {
+        await invalidateUserProfileCache(String(userId), rollNoResult.rows[0].roll_no);
+      }
 
       res.json({
         success: true,

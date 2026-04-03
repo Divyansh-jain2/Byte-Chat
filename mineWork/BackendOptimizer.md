@@ -236,5 +236,3 @@ Serve images/static assets from edge locations near users, not only from origin.
 - Redis command duration tracking for hot commands.
 - DB slow query log threshold (for example, 50 ms).
 - Socket event counters and average handler duration.
-
-This playbook is intentionally implementation-first so you can execute changes in small safe increments and verify impact per phase.

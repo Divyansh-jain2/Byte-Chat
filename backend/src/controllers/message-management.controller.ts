@@ -2,6 +2,7 @@ import type { Request, Response } from 'express';
 import { pool } from '../lib/db.js';
 import { ApiError } from '../utils/error.util.js';
 import { emitToConversation, emitToGroup } from '../socket/index.js';
+import { bumpMessagesCacheVersion } from '../services/messagePaginationCache.service.js';
 
 
 /**
@@ -80,6 +81,7 @@ export async function addReaction(req: Request, res: Response) {
 
     // Broadcast via socket
     if (message.conversation_id) {
+      await bumpMessagesCacheVersion(String(message.conversation_id));
       emitToConversation(message.conversation_id, 'message:reaction', {
         messageId, userId, emoji, reactions: reactions.rows, action: 'add'
       });
@@ -143,6 +145,7 @@ export async function removeReaction(req: Request, res: Response) {
     );
 
     if (messageData.rows[0]?.conversation_id) {
+      await bumpMessagesCacheVersion(String(messageData.rows[0].conversation_id));
       emitToConversation(messageData.rows[0].conversation_id, 'message:reaction', {
         messageId,
         userId,
@@ -266,6 +269,7 @@ export async function editMessage(req: Request, res: Response) {
 
     // Emit socket event
     if (message.conversation_id) {
+      await bumpMessagesCacheVersion(String(message.conversation_id));
       emitToConversation(message.conversation_id, 'message:edited', {
         messageId, encryptedContent, contentIv, contentAuthTag,
         isEdited: true, editedAt: updated.rows[0].edited_at
@@ -397,6 +401,7 @@ export async function deleteMessageEnhanced(req: Request, res: Response) {
 
       // Emit socket event
       if (message.conversation_id) {
+        await bumpMessagesCacheVersion(String(message.conversation_id));
         emitToConversation(message.conversation_id, 'message:deleted', {
           messageId, deleteForEveryone: true
         });
@@ -424,6 +429,7 @@ export async function deleteMessageEnhanced(req: Request, res: Response) {
 
       // Emit socket only to the requesting user (others keep seeing the message)
       if (message.conversation_id) {
+        await bumpMessagesCacheVersion(String(message.conversation_id));
         emitToConversation(message.conversation_id, 'message:deleted', {
           messageId, deleteForEveryone: false, deletedForUserId: userId
         });

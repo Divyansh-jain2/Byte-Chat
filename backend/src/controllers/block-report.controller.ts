@@ -2,11 +2,21 @@ import type { Request, Response } from 'express';
 import { pool } from '../lib/db.js';
 import { ApiError } from '../utils/error.util.js';
 import { io } from '../index.js';
+import { getUserProfileCached } from '../services/userProfileCache.service.js';
+import { cacheKeys, deleteCacheKeys } from '../utils/cache.util.js';
 
 /**
  * BLOCK & REPORT CONTROLLER
  * Handles user blocking and reporting functionality
  */
+
+async function invalidateConversationListCacheForUsers(userIds: Array<string | undefined | null>): Promise<void> {
+  const keys = userIds
+    .filter((id): id is string => Boolean(id))
+    .map((id) => cacheKeys.userConversations(String(id)));
+
+  await deleteCacheKeys(keys);
+}
 
 // ==================== BLOCK FUNCTIONALITY ====================
 
@@ -56,6 +66,8 @@ export async function blockUser(req: Request, res: Response) {
        WHERE (user1_id = LEAST($1, $2) AND user2_id = GREATEST($1, $2))`,
       [userId, blockedUserId]
     );
+
+    await invalidateConversationListCacheForUsers([String(userId), String(blockedUserId)]);
 
     // Reject any pending chat requests
     await pool.query(
@@ -168,6 +180,8 @@ export async function unblockUser(req: Request, res: Response) {
         });
       }
     }
+
+    await invalidateConversationListCacheForUsers([String(userId), String(blockedUserId)]);
 
     res.json({
       success: true,
@@ -324,15 +338,15 @@ export async function reportUser(req: Request, res: Response) {
     }
 
     // Get reporter and reported user info for detailed logging
-    const reporterInfo = await pool.query(
-      'SELECT user_id, name, roll_no, branch, dp_url FROM users WHERE user_id = $1',
-      [userId]
-    );
-    
-    const reportedInfo = await pool.query(
-      'SELECT user_id, name, roll_no, gender, branch, dp_url, bio FROM users WHERE user_id = $1',
-      [reportedUserId]
-    );
+    const reporterInfo = await getUserProfileCached(String(userId));
+    if (!reporterInfo) {
+      throw new ApiError(404, 'Reporter not found');
+    }
+
+    const reportedInfo = await getUserProfileCached(String(reportedUserId));
+    if (!reportedInfo) {
+      throw new ApiError(404, 'Reported user not found');
+    }
 
     // Get message details if messageId provided
     let messageDetails = null;
@@ -397,10 +411,10 @@ export async function reportGroup(req: Request, res: Response) {
     }
 
     // Get reporter info
-    const reporterInfo = await pool.query(
-      'SELECT user_id, name, roll_no, branch FROM users WHERE user_id = $1',
-      [userId]
-    );
+    const reporterInfo = await getUserProfileCached(String(userId));
+    if (!reporterInfo) {
+      throw new ApiError(404, 'Reporter not found');
+    }
 
     // Get reported group info
     const groupInfo = await pool.query(

@@ -36,8 +36,13 @@ export const authenticateToken = async (req: Request, res: Response, next: NextF
       if (!session) {
         return next(new ApiError(401, 'Invalid or expired session'));
       }
+      const sessionUserId = typeof session.userId === 'string' ? session.userId : undefined;
+      const sessionRollNo = typeof session.rollNo === 'string' ? session.rollNo : undefined;
+      if (!sessionUserId || !sessionRollNo) {
+        return next(new ApiError(401, 'Invalid session payload'));
+      }
       req.session = session;
-      req.user = { userId: session.userId, rollNo: session.rollNo };
+      req.user = { userId: sessionUserId, rollNo: sessionRollNo };
       await updateLastActivity(sessionId);
       return next();
     }
