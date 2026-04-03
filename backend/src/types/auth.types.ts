@@ -51,7 +51,9 @@ export interface ForgotPasswordRequest {
 }
 
 export interface ResetPasswordRequest {
-  resetToken: string;
+  rollNo: string;
+  otp?: string;
+  resetToken?: string;
   newPassword: string;
 }
 

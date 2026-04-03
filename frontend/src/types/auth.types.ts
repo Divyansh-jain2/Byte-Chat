@@ -81,6 +81,7 @@ export interface AuthResponse {
     accessToken?: string;
     user?: User;
     rollNo?: string;
-    expiresIn?: number;
+    otp?: string;
+    resetToken?: string;
   };
 }

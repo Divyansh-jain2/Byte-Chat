@@ -57,6 +57,11 @@ import { pushNotification } from '../services/notification.service.js';
 import { cacheKeys, CACHE_TTL_SECONDS, getCacheJSON, setCacheJSON } from '../utils/cache.util.js';
 import { getUserGenderCached } from '../services/userProfileCache.service.js';
 import {
+  buildMessageDedupeToken,
+  completeMessageDedupToken,
+  reserveMessageDedupToken,
+} from '../services/messageDeliveryOptimization.service.js';
+import {
   clearPollCache,
   getLiveGeneralPollOptions,
   getLivePoll,
@@ -970,7 +975,8 @@ export const sendGroupMessage = async (req: Request, res: Response) => {
     mediaMimeType,
     thumbnailUrl,
     keyId,
-    parentMessageId
+    parentMessageId,
+    clientMessageId
   } = req.body;
 
   if (!userId) {
@@ -989,6 +995,52 @@ export const sendGroupMessage = async (req: Request, res: Response) => {
 
   if (memberCheck.rows.length === 0) {
     throw new ApiError(403, 'Access denied to this group');
+  }
+
+  const dedupeInput: {
+    scope: string;
+    senderId: string;
+    encryptedContent: string;
+    contentIv: string;
+    contentAuthTag: string;
+    clientMessageId?: string;
+    parentMessageId?: string;
+    messageType?: string;
+  } = {
+    scope: `group:${groupId}`,
+    senderId: String(userId),
+    encryptedContent: String(encryptedContent),
+    contentIv: String(contentIv),
+    contentAuthTag: String(contentAuthTag),
+  };
+
+  if (typeof clientMessageId === 'string' && clientMessageId.length > 0) {
+    dedupeInput.clientMessageId = clientMessageId;
+  }
+  if (parentMessageId) {
+    dedupeInput.parentMessageId = String(parentMessageId);
+  }
+  if (typeof messageType === 'string' && messageType.length > 0) {
+    dedupeInput.messageType = messageType;
+  }
+
+  const dedupeToken = buildMessageDedupeToken(dedupeInput);
+
+  const dedupeState = await reserveMessageDedupToken(dedupeToken);
+  if (!dedupeState.reserved && dedupeState.existingMessageId) {
+    const existing = await pool.query(
+      'SELECT * FROM chat_messages WHERE message_id = $1',
+      [dedupeState.existingMessageId]
+    );
+
+    if (existing.rows.length > 0) {
+      return res.status(200).json({
+        success: true,
+        message: 'Duplicate message ignored',
+        duplicate: true,
+        data: existing.rows[0]
+      });
+    }
   }
 
   const result = await pool.query(
@@ -1026,6 +1078,7 @@ export const sendGroupMessage = async (req: Request, res: Response) => {
   );
 
   const messageId = result.rows[0].message_id;
+  await completeMessageDedupToken(dedupeToken, String(messageId));
 
   // Emit socket event with full message (including parent details)
   if (io) {
@@ -1083,7 +1136,7 @@ export const sendGroupMessage = async (req: Request, res: Response) => {
     // Queue for offline delivery if needed
     const online = await isUserOnline(memberId);
     if (!online) {
-      await queueOfflineMessage(memberId, groupMessage);
+      await queueOfflineMessage(memberId, groupMessage, `${dedupeToken}:${memberId}`);
     }
   }
 

@@ -7,6 +7,14 @@ import { uploadToCloudinary } from '../utils/cloudinary.util.js';
 import { pushNotification } from '../services/notification.service.js';
 import { resetUnread } from '../services/unread.service.js';
 import { getUserProfileCached, getUserGenderCached } from '../services/userProfileCache.service.js';
+import { queueOfflineMessage } from '../services/offlineMessage.service.js';
+import { isUserOnline } from '../socket/index.js';
+import {
+  buildMessageDedupeToken,
+  completeMessageDedupToken,
+  getEncryptedSessionKeyCached,
+  reserveMessageDedupToken,
+} from '../services/messageDeliveryOptimization.service.js';
 
 /**
  * ANONYMOUS CHAT CONTROLLER
@@ -476,7 +484,8 @@ export async function sendAnonymousMessage(req: Request, res: Response) {
       mediaMimeType,
       thumbnailUrl,
       keyId,
-      parentMessageId
+      parentMessageId,
+      clientMessageId
     } = req.body;
 
     if (!userId) {
@@ -523,6 +532,52 @@ export async function sendAnonymousMessage(req: Request, res: Response) {
 
     const conversation = convCheck.rows[0];
     const otherUserId = conversation.user1_id === userId ? conversation.user2_id : conversation.user1_id;
+
+    const dedupeInput: {
+      scope: string;
+      senderId: string;
+      encryptedContent: string;
+      contentIv: string;
+      contentAuthTag: string;
+      clientMessageId?: string;
+      parentMessageId?: string;
+      messageType?: string;
+    } = {
+      scope: `anon-conversation:${conversationId}`,
+      senderId: String(userId),
+      encryptedContent: String(encryptedContent),
+      contentIv: String(contentIv),
+      contentAuthTag: String(contentAuthTag),
+    };
+
+    if (typeof clientMessageId === 'string' && clientMessageId.length > 0) {
+      dedupeInput.clientMessageId = clientMessageId;
+    }
+    if (parentMessageId) {
+      dedupeInput.parentMessageId = String(parentMessageId);
+    }
+    if (typeof messageType === 'string' && messageType.length > 0) {
+      dedupeInput.messageType = messageType;
+    }
+
+    const dedupeToken = buildMessageDedupeToken(dedupeInput);
+
+    const dedupeState = await reserveMessageDedupToken(dedupeToken);
+    if (!dedupeState.reserved && dedupeState.existingMessageId) {
+      const existing = await pool.query(
+        'SELECT * FROM chat_messages WHERE message_id = $1',
+        [dedupeState.existingMessageId]
+      );
+
+      if (existing.rows.length > 0) {
+        return res.status(200).json({
+          success: true,
+          message: 'Duplicate message ignored',
+          duplicate: true,
+          data: existing.rows[0]
+        });
+      }
+    }
     let anonymousIdentityId: string;
 
     if (conversation.existing_identity_id) {
@@ -589,6 +644,7 @@ export async function sendAnonymousMessage(req: Request, res: Response) {
     );
 
     const message = result.rows[0];
+    await completeMessageDedupToken(dedupeToken, String(message.message_id));
 
     // Emit socket event with anonymous sender info (fetch from DB for consistency)
     if (io) {
@@ -619,20 +675,38 @@ export async function sendAnonymousMessage(req: Request, res: Response) {
             )
             ELSE null
           END as parent_message,
-          sk.aes_key_encrypted as user_session_key
+          NULL::text as user_session_key
         FROM chat_messages cm
         LEFT JOIN chat_messages pm ON cm.parent_message_id = pm.message_id
         LEFT JOIN users pu ON pm.sender_id = pu.user_id
-        LEFT JOIN chat_session_keys sk ON cm.key_id = sk.session_key_id AND sk.encrypted_for_user_id != $2
         WHERE cm.message_id = $1`,
-        [message.message_id, userId]
+        [message.message_id]
       );
+
+      const recipientSessionKey = keyId
+        ? await getEncryptedSessionKeyCached(String(keyId), String(otherUserId), async () => {
+          const keyResult = await pool.query(
+            `SELECT aes_key_encrypted
+             FROM chat_session_keys
+             WHERE session_key_id = $1 AND encrypted_for_user_id = $2
+             LIMIT 1`,
+            [keyId, otherUserId]
+          );
+          return keyResult.rows[0]?.aes_key_encrypted ?? null;
+        })
+        : null;
 
       emitToConversation(io, conversationId, 'new-message', {
         ...fullMessageResult.rows[0],
+        user_session_key: recipientSessionKey,
         sender: senderInfo,
         is_my_message: false,
       });
+    }
+
+    const online = await isUserOnline(String(otherUserId));
+    if (!online) {
+      await queueOfflineMessage(String(otherUserId), message, dedupeToken);
     }
 
     await pushNotification(otherUserId, {

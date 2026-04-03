@@ -1,7 +1,9 @@
 import { Server as SocketServer } from 'socket.io';
 import type { Server as HTTPServer } from 'http';
 import jwt from 'jsonwebtoken';
+import { createAdapter } from '@socket.io/redis-adapter';
 import { config } from '../config/index.js';
+import { redis } from '../lib/redis.js';
 import { getSession } from '../services/session.service.js';
 import { storeWsAuth, getWsAuth, deleteWsAuth } from '../services/wsAuth.service.js';
 import { mapUserSocket, removeSocketMapping, getUserSockets } from '../services/socketRouting.service.js';
@@ -21,6 +23,36 @@ interface JwtPayload {
 }
 
 let _io: SocketServer | null = null; // module-level singleton
+let socketRedisAdapterConfigured = false;
+
+function configureSocketRedisAdapter(io: SocketServer) {
+  if (socketRedisAdapterConfigured) return;
+
+  const enabled = process.env.SOCKET_REDIS_ADAPTER_ENABLED !== 'false';
+  if (!enabled) {
+    console.warn('[Socket] Redis adapter disabled via SOCKET_REDIS_ADAPTER_ENABLED=false');
+    return;
+  }
+
+  try {
+    const pubClient = redis.duplicate();
+    const subClient = redis.duplicate();
+
+    pubClient.on('error', (err: unknown) => {
+      console.error('[Socket] Redis pub client error:', err);
+    });
+
+    subClient.on('error', (err: unknown) => {
+      console.error('[Socket] Redis sub client error:', err);
+    });
+
+    io.adapter(createAdapter(pubClient, subClient));
+    socketRedisAdapterConfigured = true;
+    console.log('[Socket] Redis adapter enabled for cross-server event sync');
+  } catch (error) {
+    console.error('[Socket] Failed to enable Redis adapter, continuing without it:', error);
+  }
+}
 
 type RoomEmitMetrics = {
   trackedEmits: number;
@@ -102,6 +134,8 @@ export function initializeSocket(httpServer: HTTPServer) {
       credentials: true,
     },
   });
+
+  configureSocketRedisAdapter(io);
 
   // Authentication middleware
   io.use(async (socket, next) => {

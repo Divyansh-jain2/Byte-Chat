@@ -13,6 +13,14 @@ import { pushNotification } from '../services/notification.service.js';
 import { cacheKeys, CACHE_TTL_SECONDS, getCacheJSON, setCacheJSON } from '../utils/cache.util.js';
 import { getUserProfileCached } from '../services/userProfileCache.service.js';
 import { sendConditionalJson } from '../utils/httpCache.util.js';
+import { getEitherBlockedStatusCached, setEitherBlockedStatusCached } from '../services/blockCache.service.js';
+import {
+  buildMessageDedupeToken,
+  completeMessageDedupToken,
+  getEncryptedSessionKeyCached,
+  primeEncryptedSessionKeyCache,
+  reserveMessageDedupToken,
+} from '../services/messageDeliveryOptimization.service.js';
 import {
   buildMessagesPageCacheKey,
   bumpMessagesCacheVersion,
@@ -252,6 +260,26 @@ async function preCacheNextMessagesPage(params: {
   });
 }
 
+async function isEitherUserBlocked(userA: string, userB: string): Promise<boolean> {
+  const cached = await getEitherBlockedStatusCached(userA, userB);
+  if (cached !== null) {
+    return cached;
+  }
+
+  const blockCheck = await pool.query(
+    `SELECT EXISTS(
+      SELECT 1 FROM user_blocks
+      WHERE (blocker_id = $1 AND blocked_id = $2)
+         OR (blocker_id = $2 AND blocked_id = $1)
+    ) as is_blocked`,
+    [userA, userB]
+  );
+
+  const isBlocked = Boolean(blockCheck.rows[0]?.is_blocked);
+  await setEitherBlockedStatusCached(userA, userB, isBlocked);
+  return isBlocked;
+}
+
 // Get or create regular conversation (non-anonymous only)
 export async function getOrCreateConversation(req: Request, res: Response) {
   try {
@@ -272,16 +300,8 @@ export async function getOrCreateConversation(req: Request, res: Response) {
     }
 
     // Check if users are blocked
-    const blockCheck = await pool.query(
-      `SELECT EXISTS(
-        SELECT 1 FROM user_blocks 
-        WHERE (blocker_id = $1 AND blocked_id = $2) 
-           OR (blocker_id = $2 AND blocked_id = $1)
-      ) as is_blocked`,
-      [userId, otherUserId]
-    );
-
-    if (blockCheck.rows[0].is_blocked) {
+    const isBlocked = await isEitherUserBlocked(String(userId), String(otherUserId));
+    if (isBlocked) {
       throw new ApiError(403, 'Cannot message this user');
     }
 
@@ -729,7 +749,8 @@ export async function sendMessage(req: Request, res: Response) {
       mediaMimeType,
       thumbnailUrl,
       keyId,
-      parentMessageId
+      parentMessageId,
+      clientMessageId
     } = req.body;
 
     if (!userId) {
@@ -759,17 +780,55 @@ export async function sendMessage(req: Request, res: Response) {
     const conv = convCheck.rows[0];
     const otherUserId = conv.user1_id === userId ? conv.user2_id : conv.user1_id;
 
-    const blockCheck = await pool.query(
-      `SELECT EXISTS(
-        SELECT 1 FROM user_blocks 
-        WHERE (blocker_id = $1 AND blocked_id = $2) 
-           OR (blocker_id = $2 AND blocked_id = $1)
-      ) as is_blocked`,
-      [userId, otherUserId]
-    );
-
-    if (blockCheck.rows[0].is_blocked) {
+    const isBlocked = await isEitherUserBlocked(String(userId), String(otherUserId));
+    if (isBlocked) {
       throw new ApiError(403, 'Cannot send message - user is blocked');
+    }
+
+    const dedupeInput: {
+      scope: string;
+      senderId: string;
+      encryptedContent: string;
+      contentIv: string;
+      contentAuthTag: string;
+      clientMessageId?: string;
+      parentMessageId?: string;
+      messageType?: string;
+    } = {
+      scope: `conversation:${conversationId}`,
+      senderId: String(userId),
+      encryptedContent: String(encryptedContent),
+      contentIv: String(contentIv),
+      contentAuthTag: String(contentAuthTag),
+    };
+
+    if (typeof clientMessageId === 'string' && clientMessageId.length > 0) {
+      dedupeInput.clientMessageId = clientMessageId;
+    }
+    if (parentMessageId) {
+      dedupeInput.parentMessageId = String(parentMessageId);
+    }
+    if (typeof messageType === 'string' && messageType.length > 0) {
+      dedupeInput.messageType = messageType;
+    }
+
+    const dedupeToken = buildMessageDedupeToken(dedupeInput);
+
+    const dedupeState = await reserveMessageDedupToken(dedupeToken);
+    if (!dedupeState.reserved && dedupeState.existingMessageId) {
+      const existing = await pool.query(
+        'SELECT * FROM chat_messages WHERE message_id = $1',
+        [dedupeState.existingMessageId]
+      );
+
+      if (existing.rows.length > 0) {
+        return res.status(200).json({
+          success: true,
+          message: 'Duplicate message ignored',
+          duplicate: true,
+          data: existing.rows[0]
+        });
+      }
     }
 
     // Insert message
@@ -808,6 +867,7 @@ export async function sendMessage(req: Request, res: Response) {
     );
 
     const message = result.rows[0];
+    await completeMessageDedupToken(dedupeToken, String(message.message_id));
 
     // Update conversation last_message_at
     await pool.query(
@@ -850,17 +910,31 @@ export async function sendMessage(req: Request, res: Response) {
             )
             ELSE null
           END as parent_message,
-          sk.aes_key_encrypted as user_session_key
+          NULL::text as user_session_key
         FROM chat_messages cm
         LEFT JOIN chat_messages pm ON cm.parent_message_id = pm.message_id
         LEFT JOIN users pu ON pm.sender_id = pu.user_id
-        LEFT JOIN chat_session_keys sk ON cm.key_id = sk.session_key_id AND sk.encrypted_for_user_id != $2
         WHERE cm.message_id = $1`,
-        [message.message_id, userId]
+        [message.message_id]
       );
+
+      const recipientSessionKey = keyId
+        ? await getEncryptedSessionKeyCached(String(keyId), String(otherUserId), async () => {
+          const keyResult = await pool.query(
+            `SELECT aes_key_encrypted
+             FROM chat_session_keys
+             WHERE session_key_id = $1 AND encrypted_for_user_id = $2
+             LIMIT 1`,
+            [keyId, otherUserId]
+          );
+
+          return keyResult.rows[0]?.aes_key_encrypted ?? null;
+        })
+        : null;
 
       emitToConversation(io, conversationId, 'new-message', {
         ...fullMessageResult.rows[0],
+        user_session_key: recipientSessionKey,
         sender: senderInfo,
         is_my_message: false,
       });
@@ -878,7 +952,7 @@ export async function sendMessage(req: Request, res: Response) {
     // 3. Queue for offline delivery if needed
     const online = await isUserOnline(otherUserId);
     if (!online) {
-      await queueOfflineMessage(otherUserId, fullMessage);
+      await queueOfflineMessage(otherUserId, fullMessage, dedupeToken);
     }
 
     // 4. Push a notification entry so it appears in Notification Center
@@ -995,6 +1069,12 @@ export async function storeSessionKeys(req: Request, res: Response) {
             k.userId,
             k.keyVersion || 1
           ]
+        );
+
+        await primeEncryptedSessionKeyCache(
+          String(sessionKeyGroupId),
+          String(k.userId),
+          String(k.encryptedKey)
         );
       }
 

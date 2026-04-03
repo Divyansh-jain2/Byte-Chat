@@ -1,6 +1,4 @@
 
-## 🚀 High-Priority Redis Optimization Opportunities
-
 ### 3. Group Member Lists
 **Location**: `src/controllers/group.controller.ts`
 **Current Issue**: Repeated database queries for group membership validation
@@ -9,42 +7,6 @@
 - Cache user group memberships for quick permission checks
 - Use Redis sets for efficient membership testing
 
-## 🔧 Medium-Priority Redis Enhancements
-
-### 6. OTP and Token Management
-**Location**: `src/controllers/auth.controller.ts`
-**Current Issue**: OTP storage in database
-**Redis Solution**:
-- Move OTP storage to Redis with 15-minute TTL
-- Cache password reset tokens
-- Implement attempts tracking with Redis counters
-
-### 7. Block/Cache Relationship Data
-**Location**: `src/controllers/settings.controller.ts`
-**Current Issue**: Database queries for block checks
-**Redis Solution**:
-- Cache blocked users lists per user
-- Cache block status for quick lookup
-- Use Redis sets for efficient block management
-
-### 8. Search Result Caching
-**Location**: User search functionality
-**Redis Solution**:
-- Cache search results with 5-minute TTL
-- Implement trending searches cache
-- Cache user discovery suggestions
-
-## 🌐 Frontend-Side Redis Opportunities
-
-### 10. Real-time Data Synchronization
-**Location**: WebSocket connections
-**Current Issue**: Multiple database hits for real-time updates
-**Redis Solution**:
-- Use Redis pub/sub for cross-server socket events
-- Cache real-time user status updates
-- Implement efficient event broadcasting
-
-## 📊 Database Query Optimization with Redis
 
 ### 11. Read-Heavy Query Caching
 **Files with frequent `pool.query` calls**:
@@ -58,32 +20,9 @@
 - Cache permission checks and membership validation
 - Cache frequently accessed user data
 
-### 12. Write-Through Cache Strategy
-**Location**: Critical data paths
-**Redis Solution**:
-- Implement write-through caching for user profiles
-- Cache-aside pattern for conversation data
-- Lazy loading for message history
-
-## 🔍 Specific Implementation Recommendations
-
-### Database Connection Pool Optimization
-**Current**: `src/lib/db.ts` - PostgreSQL pool with max 20 connections
-**Redis Enhancement**:
-- Implement connection pooling monitoring with Redis
-- Cache connection health metrics
-- Use Redis for connection failover state
-
 ### Authentication Flow Optimization
 **Current**: JWT with database verification
 **Redis Enhancement**:
 - Cache token validation results
 - Implement token blacklist in Redis
 - Cache user permission sets
-
-### Message Delivery Optimization
-**Current**: Direct database writes + socket emission
-**Redis Enhancement**:
-- Queue messages in Redis for reliable delivery
-- Cache message encryption keys
-- Implement message deduplication

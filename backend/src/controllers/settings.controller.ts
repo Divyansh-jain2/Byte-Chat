@@ -2,6 +2,15 @@ import { pool } from '../lib/db.js';
 import { ApiError } from '../utils/error.util.js';
 import { cacheKeys, CACHE_TTL_SECONDS, getCacheJSON, setCacheJSON, deleteCacheKeys, invalidateUserProfileCache } from '../utils/cache.util.js';
 import { sendConditionalJson } from '../utils/httpCache.util.js';
+import {
+  addBlockedUserToSet,
+  getBlockedUsersListCached,
+  invalidateBlockedUsersListCache,
+  removeBlockedUserFromSet,
+  setBlockedUsersListCached,
+  setBlockedUsersSet,
+  setEitherBlockedStatusCached,
+} from '../services/blockCache.service.js';
 import type { Request, Response, NextFunction } from 'express';
 
 export const settingsController = {
@@ -110,6 +119,17 @@ export const settingsController = {
   async getBlockedUsers(req: Request, res: Response, next: NextFunction) {
     try {
       const userId = req.user?.userId;
+      if (!userId) {
+        throw new ApiError(401, 'Unauthorized');
+      }
+
+      const cached = await getBlockedUsersListCached<Array<Record<string, unknown>>>(String(userId));
+      if (cached) {
+        return res.json({
+          success: true,
+          data: cached
+        });
+      }
 
       const result = await pool.query(
         `SELECT DISTINCT ON (ub.block_id)
@@ -149,6 +169,12 @@ export const settingsController = {
          AND (ub.expires_at IS NULL OR ub.expires_at > NOW())
          ORDER BY ub.block_id, ub.created_at DESC`,
         [userId]
+      );
+
+      await setBlockedUsersListCached(String(userId), result.rows);
+      await setBlockedUsersSet(
+        String(userId),
+        result.rows.map((row) => String(row.blocked_id)).filter(Boolean)
       );
 
       res.json({
@@ -193,6 +219,10 @@ export const settingsController = {
         [userId, blockedUserId, reason, expiresAt]
       );
 
+      await addBlockedUserToSet(String(userId), String(blockedUserId));
+      await setEitherBlockedStatusCached(String(userId), String(blockedUserId), true);
+      await invalidateBlockedUsersListCache(String(userId));
+
       res.json({
         success: true,
         message: 'User blocked successfully',
@@ -217,6 +247,25 @@ export const settingsController = {
       if (result.rows.length === 0) {
         throw new ApiError(404, 'Block not found');
       }
+
+      await removeBlockedUserFromSet(String(userId), String(blockedUserId));
+
+      const remainingPairCheck = await pool.query(
+        `SELECT EXISTS(
+          SELECT 1 FROM user_blocks
+          WHERE (blocker_id = $1 AND blocked_id = $2)
+             OR (blocker_id = $2 AND blocked_id = $1)
+        ) as is_blocked`,
+        [userId, blockedUserId]
+      );
+
+      await setEitherBlockedStatusCached(
+        String(userId),
+        String(blockedUserId),
+        Boolean(remainingPairCheck.rows[0]?.is_blocked)
+      );
+
+      await invalidateBlockedUsersListCache(String(userId));
 
       res.json({
         success: true,

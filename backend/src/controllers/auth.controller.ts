@@ -2,22 +2,17 @@ import type { Request, Response } from 'express';
 import { pool } from '../lib/db.js';
 import { hashPassword, verifyPassword } from '../utils/password.util.js';
 import { generateAccessToken, generateRefreshToken } from '../utils/jwt.util.js';
-import { generateOTP, hashOTP, getOTPExpiry, generateRandomToken, hashToken } from '../utils/otp.util.js';
-import {
-  validateRollNumber,
-  constructRollNumber,
-  generateEmail,
-  validatePassword,
-  validateName,
-  validateBranch,
-  validate5DigitRoll
-} from '../utils/validation.util.js';
+import { generateOTP, hashToken, generateRandomToken } from '../utils/otp.util.js';
+import {validateRollNumber, constructRollNumber, generateEmail, validatePassword,
+  validateName, validateBranch, validate5DigitRoll} from '../utils/validation.util.js';
 import { sendOTPEmail } from '../utils/email.util.js';
 import type { SignupRequest, VerifyOTPRequest, LoginRequest, ForgotPasswordRequest, ResetPasswordRequest } from '../types/auth.types.js';
 import { config } from '../config/index.js';
 import { redis } from '../lib/redis.js';
 import { createSession, deleteSession } from '../services/session.service.js';
 import { v4 as uuidv4 } from 'uuid';
+import {clearOtp, clearPasswordResetState, consumePasswordResetToken, incrementOtpSendAttempts, incrementOtpVerifyAttempts,
+  isOtpSendRateLimited, isOtpVerifyRateLimited, matchesOtp, otpExpirySeconds, storeOtp, storePasswordResetToken } from '../services/authOtpCache.service.js';
 
 /**
  * SIGNUP - Step 1: Create user and send OTP
@@ -113,17 +108,9 @@ export async function signup(req: Request, res: Response) {
       );
     }
 
-    // Generate OTP
+    // Generate and cache OTP in Redis (15-minute TTL)
     const otp = generateOTP();
-    const expiresAt = getOTPExpiry();
-    const verificationToken = generateRandomToken();
-
-    // Store OTP in database
-    await pool.query(
-      `INSERT INTO user_verifications (user_id, otp_code, verification_token, verification_type, expires_at)
-       VALUES ($1, $2, $3, 'signup', $4)`,
-      [userId, otp, verificationToken, expiresAt]
-    );
+    await storeOtp('signup', fullRollNo, userId, otp);
 
     // Generate email and send OTP
     const email = generateEmail(fullRollNo);
@@ -137,8 +124,8 @@ export async function signup(req: Request, res: Response) {
     });
 
     if (!emailSent) {
-      // Rollback: delete user and verification
-      await pool.query('DELETE FROM user_verifications WHERE user_id = $1', [userId]);
+      // Rollback: delete user and OTP state
+      await clearOtp('signup', fullRollNo);
       await pool.query('DELETE FROM users WHERE user_id = $1', [userId]);
 
       return res.status(500).json({
@@ -168,7 +155,7 @@ export async function signup(req: Request, res: Response) {
       data: {
         rollNo: fullRollNo,
         email,
-        expiresIn: config.otp.expiryMinutes * 60
+        expiresIn: otpExpirySeconds()
       }
     });
 
@@ -187,26 +174,34 @@ export async function signup(req: Request, res: Response) {
 export async function verifyOTP(req: Request, res: Response) {
   try {
     const { rollNo, otp, purpose } = req.body as VerifyOTPRequest;
+    const normalizedRollNo = String(rollNo || '').trim().toUpperCase();
 
     // Validate inputs
-    if (!rollNo || !otp || !purpose) {
+    if (!normalizedRollNo || !otp || !purpose) {
       return res.status(400).json({
         success: false,
         message: 'Roll number, OTP, and purpose are required'
       });
     }
 
-    if (!validateRollNumber(rollNo)) {
+    if (!validateRollNumber(normalizedRollNo)) {
       return res.status(400).json({
         success: false,
         message: 'Invalid roll number format'
       });
     }
 
+    if (!['signup', 'password_reset'].includes(purpose)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid OTP purpose'
+      });
+    }
+
     // Find user (case-insensitive)
     const users = await pool.query(
       'SELECT user_id, is_verified FROM users WHERE UPPER(roll_no) = UPPER($1)',
-      [rollNo]
+      [normalizedRollNo]
     );
 
     if (users.rows.length === 0) {
@@ -218,53 +213,30 @@ export async function verifyOTP(req: Request, res: Response) {
 
     const userId = users.rows[0].user_id;
 
-    // Find verification record
-    const verifications = await pool.query(
-      `SELECT verification_id, otp_code, expires_at
-       FROM user_verifications
-       WHERE user_id = $1
-         AND verification_type = $2
-         AND is_used = FALSE
-       ORDER BY created_at DESC
-       LIMIT 1`,
-      [userId, purpose]
-    );
+    const attemptsSoFar = await incrementOtpVerifyAttempts(purpose, normalizedRollNo);
+    if (isOtpVerifyRateLimited(attemptsSoFar)) {
+      return res.status(429).json({
+        success: false,
+        message: 'Too many OTP attempts. Please request a new OTP.'
+      });
+    }
 
-    if (verifications.rows.length === 0) {
+    const otpMatch = await matchesOtp(purpose, normalizedRollNo, userId, otp);
+    if (otpMatch.missing) {
       return res.status(400).json({
         success: false,
         message: 'Invalid or expired OTP'
       });
     }
 
-    const verification = verifications.rows[0];
-
-    // Check if expired
-    if (new Date() > new Date(verification.expires_at)) {
-      await pool.query(
-        'UPDATE user_verifications SET is_used = TRUE WHERE verification_id = $1',
-        [verification.verification_id]
-      );
-
-      return res.status(400).json({
-        success: false,
-        message: 'OTP has expired'
-      });
-    }
-
-    // Verify OTP
-    if (verification.otp_code !== otp) {
+    if (!otpMatch.valid) {
       return res.status(400).json({
         success: false,
         message: 'Invalid OTP'
       });
     }
 
-    // Mark OTP as used
-    await pool.query(
-      'UPDATE user_verifications SET is_used = TRUE WHERE verification_id = $1',
-      [verification.verification_id]
-    );
+    await clearOtp(purpose, normalizedRollNo);
 
     // Update user as verified and active
     await pool.query(
@@ -290,8 +262,8 @@ export async function verifyOTP(req: Request, res: Response) {
 
     // For signup, auto-login and return tokens
     if (purpose === 'signup') {
-      const accessToken = generateAccessToken(userId, rollNo);
-      const refreshToken = generateRefreshToken(userId, rollNo);
+      const accessToken = generateAccessToken(userId, normalizedRollNo);
+      const refreshToken = generateRefreshToken(userId, normalizedRollNo);
       const refreshTokenHash = hashToken(refreshToken);
 
       // Store refresh token
@@ -328,6 +300,19 @@ export async function verifyOTP(req: Request, res: Response) {
     }
 
     // For password reset, return success
+    if (purpose === 'password_reset') {
+      const resetToken = generateRandomToken();
+      await storePasswordResetToken(resetToken, userId, normalizedRollNo);
+
+      return res.status(200).json({
+        success: true,
+        message: 'OTP verified successfully',
+        data: {
+          resetToken,
+        },
+      });
+    }
+
     return res.status(200).json({
       success: true,
       message: 'OTP verified successfully'
@@ -526,25 +511,35 @@ export async function login(req: Request, res: Response) {
 export async function forgotPassword(req: Request, res: Response) {
   try {
     const { rollNo } = req.body as ForgotPasswordRequest;
+    const normalizedRollNo = String(rollNo || '').trim().toUpperCase();
 
-    if (!rollNo) {
+    if (!normalizedRollNo) {
       return res.status(400).json({
         success: false,
         message: 'Roll number is required'
       });
     }
 
-    if (!validateRollNumber(rollNo)) {
+    if (!validateRollNumber(normalizedRollNo)) {
       return res.status(400).json({
         success: false,
         message: 'Invalid roll number format'
       });
     }
 
+    const ipAddress = req.ip || req.socket.remoteAddress || 'unknown';
+    const sendAttemptInfo = await incrementOtpSendAttempts('password_reset', normalizedRollNo, ipAddress);
+    if (isOtpSendRateLimited(sendAttemptInfo)) {
+      return res.status(429).json({
+        success: false,
+        message: 'Too many OTP requests. Please try again later.'
+      });
+    }
+
     // Find user (case-insensitive)
     const users = await pool.query(
       'SELECT user_id, is_active FROM users WHERE UPPER(roll_no) = UPPER($1)',
-      [rollNo]
+      [normalizedRollNo]
     );
 
     if (users.rows.length === 0 || !users.rows[0].is_active) {
@@ -559,23 +554,15 @@ export async function forgotPassword(req: Request, res: Response) {
 
     // Generate OTP
     const otp = generateOTP();
-    const expiresAt = getOTPExpiry();
-
-    // Store OTP
-    await pool.query(
-      `INSERT INTO user_password_resets (user_id, reset_token, expires_at)
-       VALUES ($1, $2, $3)`,
-      [user.user_id, otp, expiresAt]
-    );
+    await storeOtp('password_reset', normalizedRollNo, user.user_id, otp);
 
     // Send OTP email
-    const email = generateEmail(rollNo);
-    const ipAddress = req.ip || req.socket.remoteAddress || 'unknown';
+    const email = generateEmail(normalizedRollNo);
     const emailSent = await sendOTPEmail({
       to: email,
       otp,
       purpose: 'password_reset',
-      rollNo,
+      rollNo: normalizedRollNo,
       ipAddress
     });
 
@@ -594,7 +581,7 @@ export async function forgotPassword(req: Request, res: Response) {
           jsonb_build_object('roll_no', $4::VARCHAR),
           $5::INET, $6::TEXT
         )`,
-        [user.user_id, 'password_reset_requested', 'user', rollNo, ipAddress || '0.0.0.0', req.get('user-agent') || 'unknown']
+        [user.user_id, 'password_reset_requested', 'user', normalizedRollNo, ipAddress || '0.0.0.0', req.get('user-agent') || 'unknown']
       );
     } catch (auditError) {
       console.error('Audit log error:', auditError);
@@ -604,9 +591,9 @@ export async function forgotPassword(req: Request, res: Response) {
       success: true,
       message: 'OTP sent to your registered email.',
       data: {
-        rollNo,
+        rollNo: normalizedRollNo,
         email,
-        expiresIn: config.otp.expiryMinutes * 60
+        expiresIn: otpExpirySeconds()
       }
     });
 
@@ -624,12 +611,23 @@ export async function forgotPassword(req: Request, res: Response) {
  */
 export async function resetPassword(req: Request, res: Response) {
   try {
-    const { rollNo, otp, newPassword } = req.body;
+    const { rollNo, otp, newPassword, resetToken } = req.body as ResetPasswordRequest & {
+      rollNo?: string;
+      otp?: string;
+    };
+    const normalizedRollNo = String(rollNo || '').trim().toUpperCase();
 
-    if (!rollNo || !otp || !newPassword) {
+    if (!normalizedRollNo || !newPassword || (!otp && !resetToken)) {
       return res.status(400).json({
         success: false,
-        message: 'All fields are required'
+        message: 'Roll number, new password, and OTP or reset token are required'
+      });
+    }
+
+    if (!validateRollNumber(normalizedRollNo)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid roll number format'
       });
     }
 
@@ -645,7 +643,7 @@ export async function resetPassword(req: Request, res: Response) {
     // Find user (case-insensitive)
     const users = await pool.query(
       'SELECT user_id FROM users WHERE UPPER(roll_no) = UPPER($1)',
-      [rollNo]
+      [normalizedRollNo]
     );
 
     if (users.rows.length === 0) {
@@ -657,39 +655,48 @@ export async function resetPassword(req: Request, res: Response) {
 
     const userId = users.rows[0].user_id;
 
-    // Verify OTP
-    const resets = await pool.query(
-      `SELECT reset_id, reset_token, expires_at
-       FROM user_password_resets
-       WHERE user_id = $1
-         AND is_used = FALSE
-       ORDER BY created_at DESC
-       LIMIT 1`,
-      [userId]
-    );
+    let isAuthorized = false;
 
-    if (resets.rows.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid or expired OTP'
-      });
+    if (resetToken) {
+      isAuthorized = await consumePasswordResetToken(resetToken, userId, normalizedRollNo);
+      if (!isAuthorized) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid or expired reset token'
+        });
+      }
+    } else {
+      const attemptsSoFar = await incrementOtpVerifyAttempts('password_reset', normalizedRollNo);
+      if (isOtpVerifyRateLimited(attemptsSoFar)) {
+        return res.status(429).json({
+          success: false,
+          message: 'Too many OTP attempts. Please request a new OTP.'
+        });
+      }
+
+      const otpMatch = await matchesOtp('password_reset', normalizedRollNo, userId, String(otp));
+      if (otpMatch.missing) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid or expired OTP'
+        });
+      }
+
+      if (!otpMatch.valid) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid OTP'
+        });
+      }
+
+      await clearOtp('password_reset', normalizedRollNo);
+      isAuthorized = true;
     }
 
-    const reset = resets.rows[0];
-
-    // Check expiry
-    if (new Date() > new Date(reset.expires_at)) {
+    if (!isAuthorized) {
       return res.status(400).json({
         success: false,
-        message: 'OTP has expired'
-      });
-    }
-
-    // Verify OTP
-    if (reset.reset_token !== otp) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid OTP'
+        message: 'Unable to verify reset credentials'
       });
     }
 
@@ -702,17 +709,13 @@ export async function resetPassword(req: Request, res: Response) {
       [newPasswordHash, userId]
     );
 
-    // Mark OTP as used
-    await pool.query(
-      'UPDATE user_password_resets SET is_used = TRUE WHERE reset_id = $1',
-      [reset.reset_id]
-    );
-
     // Invalidate all sessions (force re-login)
     await pool.query(
       'DELETE FROM user_sessions WHERE user_id = $1',
       [userId]
     );
+
+    await clearPasswordResetState(normalizedRollNo);
 
     // Log audit event
     const ipAddress = req.ip || req.socket.remoteAddress || 'unknown';
@@ -723,7 +726,7 @@ export async function resetPassword(req: Request, res: Response) {
           jsonb_build_object('roll_no', $4::VARCHAR, 'sessions_invalidated', true),
           $5::INET, $6::TEXT
         )`,
-        [userId, 'password_reset_completed', 'user', rollNo, ipAddress || '0.0.0.0', req.get('user-agent') || 'unknown']
+        [userId, 'password_reset_completed', 'user', normalizedRollNo, ipAddress || '0.0.0.0', req.get('user-agent') || 'unknown']
       );
     } catch (auditError) {
       console.error('Audit log error:', auditError);
