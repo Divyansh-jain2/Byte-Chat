@@ -357,6 +357,8 @@ export default function PrivacyPolicy() {
             style={{ borderTop: '1px solid var(--border-light)' }}>
             <Link href="/terms" className="hover:underline" style={{ color: 'var(--muted)' }}>Terms &amp; Conditions</Link>
             <span style={{ color: 'var(--muted)' }}>·</span>
+            <Link href="/encryption" className="hover:underline" style={{ color: 'var(--muted)' }}>Encryption</Link>
+            <span style={{ color: 'var(--muted)' }}>·</span>
             <Link href="/contact" className="hover:underline" style={{ color: 'var(--muted)' }}>Contact Developers</Link>
             <span style={{ color: 'var(--muted)' }}>·</span>
             <Link href="/" className="hover:underline" style={{ color: 'var(--muted)' }}>Back to Home</Link>

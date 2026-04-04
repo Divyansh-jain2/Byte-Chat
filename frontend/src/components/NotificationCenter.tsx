@@ -5,7 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useNotifications } from '@/contexts/NotificationContext';
 
 const HIDDEN_PATH_PREFIXES = ['/login', '/signup'];
-const HIDDEN_EXACT_PATHS = ['/', '/terms', '/privacy', '/contact'];
+const HIDDEN_EXACT_PATHS = ['/', '/terms', '/privacy', '/contact', '/encryption'];
 
 type NotificationMeta = {
   title: string;

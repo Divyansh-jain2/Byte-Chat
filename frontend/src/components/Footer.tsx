@@ -35,6 +35,12 @@ export default function Footer() {
             >
               Contact Developers
             </Link>
+            <Link
+              href="/encryption"
+              className="text-sm text-gray-600 dark:text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
+            >
+              Security
+            </Link>
           </div>
         </div>
 

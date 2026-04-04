@@ -1,4 +1,5 @@
 import type { Request, Response } from 'express';
+import jwt from 'jsonwebtoken';
 import { pool } from '../lib/db.js';
 import { hashPassword, verifyPassword } from '../utils/password.util.js';
 import { generateAccessToken, generateRefreshToken } from '../utils/jwt.util.js';
@@ -9,10 +10,35 @@ import { sendOTPEmail } from '../utils/email.util.js';
 import type { SignupRequest, VerifyOTPRequest, LoginRequest, ForgotPasswordRequest, ResetPasswordRequest } from '../types/auth.types.js';
 import { config } from '../config/index.js';
 import { redis } from '../lib/redis.js';
-import { createSession, deleteSession } from '../services/session.service.js';
+import { createSession, deleteSession, storeRefreshToken, getRefreshTokenUser, deleteRefreshToken } from '../services/session.service.js';
 import { v4 as uuidv4 } from 'uuid';
 import {clearOtp, clearPasswordResetState, consumePasswordResetToken, incrementOtpSendAttempts, incrementOtpVerifyAttempts,
   isOtpSendRateLimited, isOtpVerifyRateLimited, matchesOtp, otpExpirySeconds, storeOtp, storePasswordResetToken } from '../services/authOtpCache.service.js';
+import {
+  blacklistToken,
+  invalidateUserPermissionCache,
+  setUserTokenRevokeAfterNow,
+} from '../services/authCache.service.js';
+import type { TokenPayload } from '../types/auth.types.js';
+
+function getBearerToken(req: Request): string | undefined {
+  const authHeader = req.headers['authorization'];
+  if (!authHeader) return undefined;
+
+  const [scheme, token] = authHeader.split(' ');
+  if (scheme?.toLowerCase() !== 'bearer' || !token) return undefined;
+  return token;
+}
+
+function getTokenRemainingTtl(token: string): number {
+  const decoded = jwt.decode(token) as TokenPayload | null;
+  const nowEpoch = Math.floor(Date.now() / 1000);
+  if (decoded && typeof decoded.exp === 'number') {
+    const ttl = decoded.exp - nowEpoch;
+    return ttl > 0 ? ttl : 0;
+  }
+  return 900;
+}
 
 /**
  * SIGNUP - Step 1: Create user and send OTP
@@ -266,12 +292,8 @@ export async function verifyOTP(req: Request, res: Response) {
       const refreshToken = generateRefreshToken(userId, normalizedRollNo);
       const refreshTokenHash = hashToken(refreshToken);
 
-      // Store refresh token
-      await pool.query(
-        `INSERT INTO user_sessions (user_id, session_token, expires_at)
-         VALUES ($1, $2, NOW() + INTERVAL '7 days')`,
-        [userId, refreshTokenHash]
-      );
+      // Store refresh token in Redis
+      await storeRefreshToken(userId, refreshTokenHash);
 
       // Set refresh token as HTTP-only cookie
       res.cookie('refreshToken', refreshToken, {
@@ -458,12 +480,8 @@ export async function login(req: Request, res: Response) {
     const refreshToken = generateRefreshToken(user.user_id, user.roll_no);
     const refreshTokenHash = hashToken(refreshToken);
 
-    // Store refresh token
-    await pool.query(
-      `INSERT INTO user_sessions (user_id, session_token, expires_at)
-       VALUES ($1, $2, NOW() + INTERVAL '7 days')`,
-      [user.user_id, refreshTokenHash]
-    );
+    // Store refresh token in Redis
+    await storeRefreshToken(user.user_id, refreshTokenHash);
 
     // Clear login attempts on success
     await redis.del(attemptKey);
@@ -715,6 +733,9 @@ export async function resetPassword(req: Request, res: Response) {
       [userId]
     );
 
+    await setUserTokenRevokeAfterNow(userId);
+    await invalidateUserPermissionCache(userId);
+
     await clearPasswordResetState(normalizedRollNo);
 
     // Log audit event
@@ -752,29 +773,25 @@ export async function resetPassword(req: Request, res: Response) {
 export async function logout(req: Request, res: Response) {
   try {
     const refreshToken = req.cookies.refreshToken;
+    const accessToken = getBearerToken(req);
     let userId = null;
+
+    if (accessToken) {
+      const ttl = getTokenRemainingTtl(accessToken);
+      await blacklistToken(accessToken, ttl, 'logout');
+    }
 
     if (refreshToken) {
       const tokenHash = hashToken(refreshToken);
 
-      // Get user_id before deleting session
-      const session = await pool.query(
-        'SELECT user_id FROM user_sessions WHERE session_token = $1',
-        [tokenHash]
-      );
-
-      if (session.rows.length > 0) {
-        userId = session.rows[0].user_id;
-      }
-
-      // Delete session
-      await pool.query(
-        'DELETE FROM user_sessions WHERE session_token = $1',
-        [tokenHash]
-      );
+      // Get user_id from Redis before deleting session
+      userId = await getRefreshTokenUser(tokenHash);
+      // Delete session from Redis
+      await deleteRefreshToken(tokenHash);
 
       // Log audit event
       if (userId) {
+        await invalidateUserPermissionCache(userId);
         const ipAddress = req.ip || req.socket.remoteAddress || 'unknown';
         try {
           await pool.query(

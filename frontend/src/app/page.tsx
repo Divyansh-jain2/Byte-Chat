@@ -211,6 +211,7 @@ export default function Home() {
             <Link href="/terms" className="hover:text-pink-500 transition-colors">Terms</Link>
             <Link href="/privacy" className="hover:text-pink-500 transition-colors">Privacy</Link>
             <Link href="/contact" className="hover:text-pink-500 transition-colors">Contact</Link>
+            <Link href="/encryption" className="hover:text-pink-500 transition-colors">Security</Link>
             <Link href="/impress-us" className="hover:text-pink-500 transition-colors">✨ Impress Us</Link>
           </div>
         </div>

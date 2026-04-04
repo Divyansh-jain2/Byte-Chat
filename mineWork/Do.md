@@ -133,9 +133,10 @@
 
 ## Group Administration
 - **Invite Links/Codes**: Generate shareable invite links with expiry
-
-
 - **Push Notifications**
    - No clear mention of browser/mobile push notifications for new messages.
 - **Accessibility (a11y)**
    - No mention of accessibility features in the frontend.
+- **Global limits in redis**
+   - Global app rate limit is not Redis-backed.
+

@@ -6,12 +6,10 @@ export const getPollResults = async (req: Request, res: Response) => {
   const userId = req.user?.userId;
   if (!userId) throw new ApiError(401, 'Unauthorized');
 
-  // Confirm user is a group member
-  const memberCheck = await query(
-    `SELECT 1 FROM group_members WHERE group_id = $1 AND user_id = $2`,
-    [groupId, userId]
-  );
-  if (memberCheck.rows.length === 0) throw new ApiError(403, 'You are not a member of this group');
+  // Confirm user is a group member using permission cache
+  const permissionSet = await getUserPermissionSetCached(userId);
+  const isMember = permissionSet.groupRoles.some(r => r.groupId === groupId);
+  if (!isMember) throw new ApiError(403, 'You are not a member of this group');
 
   // Get poll
   const pollRes = await query(`SELECT * FROM polls WHERE poll_id = $1 AND group_id = $2`, [pollId, groupId]);
@@ -72,6 +70,7 @@ import {
   voteGeneralPoll,
   votePoll,
 } from '../services/pollCache.service.js';
+import { invalidateUserPermissionCache, getUserPermissionSetCached } from '../services/authCache.service.js';
 import multer from 'multer';
 import { redis } from '../lib/redis.js';
 
@@ -133,6 +132,7 @@ export const createGroup = async (req: Request, res: Response) => {
     );
 
     await client.query('COMMIT');
+    await invalidateUserPermissionCache(userId);
 
     res.status(201).json({
       success: true,
@@ -417,14 +417,10 @@ export const addMemberToGroup = async (req: Request, res: Response) => {
 
     const group = groupResult.rows[0];
 
-    // Check if requester is admin or owner of the group
-    const adminCheck = await client.query(
-      `SELECT is_admin, is_owner FROM group_members 
-       WHERE group_id = $1 AND user_id = $2`,
-      [groupId, adminUserId]
-    );
-
-    if (adminCheck.rows.length === 0 || (!adminCheck.rows[0].is_admin && !adminCheck.rows[0].is_owner)) {
+    // Check if requester is admin or owner of the group using permission cache
+    const adminPermissionSet = await getUserPermissionSetCached(adminUserId);
+    const adminRole = adminPermissionSet.groupRoles.find(r => r.groupId === groupId);
+    if (!adminRole || (!adminRole.isAdmin && !adminRole.isOwner)) {
       throw new ApiError(403, 'Only group admins can add members');
     }
 
@@ -597,14 +593,10 @@ export const removeMemberFromGroup = async (req: Request, res: Response) => {
       throw new ApiError(403, 'Cannot remove members from public groups. Members must leave on their own.');
     }
 
-    // Check if requester is admin or owner
-    const adminCheck = await client.query(
-      `SELECT is_admin, is_owner FROM group_members 
-       WHERE group_id = $1 AND user_id = $2`,
-      [groupId, adminUserId]
-    );
-
-    if (adminCheck.rows.length === 0 || (!adminCheck.rows[0].is_admin && !adminCheck.rows[0].is_owner)) {
+    // Check if requester is admin or owner using permission cache
+    const adminPermissionSet = await getUserPermissionSetCached(adminUserId);
+    const adminRole = adminPermissionSet.groupRoles.find(r => r.groupId === groupId);
+    if (!adminRole || (!adminRole.isAdmin && !adminRole.isOwner)) {
       throw new ApiError(403, 'Only group admins can remove members');
     }
 
@@ -625,9 +617,11 @@ export const removeMemberFromGroup = async (req: Request, res: Response) => {
     }
 
     // Prevent non-owners from removing admins
-    if (memberToRemove.rows[0].is_admin && !adminCheck.rows[0].is_owner) {
+    if (memberToRemove.rows[0].is_admin && !(adminRole && adminRole.isOwner)) {
       throw new ApiError(403, 'Only the group owner can remove admins');
     }
+
+    const removedUserId = String(memberToRemove.rows[0].user_id);
 
     // Remove the member
     await client.query(
@@ -636,6 +630,7 @@ export const removeMemberFromGroup = async (req: Request, res: Response) => {
     );
 
     await client.query('COMMIT');
+    await invalidateUserPermissionCache(removedUserId);
 
     res.json({
       success: true,
@@ -703,7 +698,7 @@ export const leaveGroup = async (req: Request, res: Response) => {
     }
     // If member was admin and no admins left, promote oldest member to admin
     else if (member.is_admin && adminCount === 0) {
-      await client.query(
+      const promotedOwner = await client.query<{ user_id: string }>(
         `UPDATE group_members 
          SET is_admin = true, is_owner = true
          WHERE member_id = (
@@ -711,12 +706,21 @@ export const leaveGroup = async (req: Request, res: Response) => {
            WHERE group_id = $1 
            ORDER BY joined_at ASC 
            LIMIT 1
-         )`,
+          )
+         RETURNING user_id`,
         [groupId]
       );
+
+      if (promotedOwner.rows.length > 0) {
+        const promotedOwnerRow = promotedOwner.rows[0];
+        if (promotedOwnerRow) {
+          await invalidateUserPermissionCache(promotedOwnerRow.user_id);
+        }
+      }
     }
 
     await client.query('COMMIT');
+    await invalidateUserPermissionCache(userId);
 
     res.json({
       success: true,
@@ -746,14 +750,10 @@ export const updateGroup = async (req: Request, res: Response) => {
   try {
     await client.query('BEGIN');
 
-    // Check if user is admin or owner
-    const adminCheck = await client.query(
-      `SELECT is_admin, is_owner FROM group_members 
-       WHERE group_id = $1 AND user_id = $2`,
-      [groupId, userId]
-    );
-
-    if (adminCheck.rows.length === 0 || (!adminCheck.rows[0].is_admin && !adminCheck.rows[0].is_owner)) {
+    // Check if user is admin or owner using permission cache
+    const permissionSet = await getUserPermissionSetCached(userId);
+    const role = permissionSet.groupRoles.find(r => r.groupId === groupId);
+    if (!role || (!role.isAdmin && !role.isOwner)) {
       throw new ApiError(403, 'Only group admins can update group details');
     }
 
@@ -1202,6 +1202,7 @@ export const promoteMemberToAdmin = async (req: Request, res: Response) => {
       [groupId, memberId]
     );
     if (memberUserIdResult.rows.length > 0) {
+      await invalidateUserPermissionCache(memberUserIdResult.rows[0].user_id);
       await pushNotification(memberUserIdResult.rows[0].user_id, {
         type: "admin_promoted",
         groupId,
@@ -1876,14 +1877,10 @@ export const uploadGroupPicture = async (req: Request, res: Response) => {
   try {
     await client.query('BEGIN');
 
-    // Check if user is admin or owner
-    const adminCheck = await client.query(
-      `SELECT is_admin, is_owner FROM group_members 
-       WHERE group_id = $1 AND user_id = $2`,
-      [groupId, userId]
-    );
-
-    if (adminCheck.rows.length === 0 || (!adminCheck.rows[0].is_admin && !adminCheck.rows[0].is_owner)) {
+    // Check if user is admin or owner using permission cache
+    const permissionSet = await getUserPermissionSetCached(userId);
+    const role = permissionSet.groupRoles.find(r => r.groupId === groupId);
+    if (!role || (!role.isAdmin && !role.isOwner)) {
       throw new ApiError(403, 'Only group admins can update group picture');
     }
 
@@ -1959,14 +1956,10 @@ export const deleteGroupPicture = async (req: Request, res: Response) => {
   try {
     await client.query('BEGIN');
 
-    // Check if user is admin or owner
-    const adminCheck = await client.query(
-      `SELECT is_admin, is_owner FROM group_members 
-       WHERE group_id = $1 AND user_id = $2`,
-      [groupId, userId]
-    );
-
-    if (adminCheck.rows.length === 0 || (!adminCheck.rows[0].is_admin && !adminCheck.rows[0].is_owner)) {
+    // Check if user is admin or owner using permission cache
+    const permissionSet = await getUserPermissionSetCached(userId);
+    const role = permissionSet.groupRoles.find(r => r.groupId === groupId);
+    if (!role || (!role.isAdmin && !role.isOwner)) {
       throw new ApiError(403, 'Only group admins can delete group picture');
     }
 
@@ -2051,14 +2044,10 @@ export const selectGroupPresetAvatar = async (req: Request, res: Response) => {
   try {
     await client.query('BEGIN');
 
-    // Check if user is admin or owner
-    const adminCheck = await client.query(
-      `SELECT is_admin, is_owner FROM group_members 
-       WHERE group_id = $1 AND user_id = $2`,
-      [groupId, userId]
-    );
-
-    if (adminCheck.rows.length === 0 || (!adminCheck.rows[0].is_admin && !adminCheck.rows[0].is_owner)) {
+    // Check if user is admin or owner using permission cache
+    const permissionSet = await getUserPermissionSetCached(userId);
+    const role = permissionSet.groupRoles.find(r => r.groupId === groupId);
+    if (!role || (!role.isAdmin && !role.isOwner)) {
       throw new ApiError(403, 'Only group admins can update group picture');
     }
 

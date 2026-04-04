@@ -220,6 +220,8 @@ export default function ContactPage() {
             <span>·</span>
             <Link href="/privacy" className="hover:underline">Privacy Policy</Link>
             <span>·</span>
+            <Link href="/encryption" className="hover:underline">Security</Link>
+            <span>·</span>
             <Link href="/" className="hover:underline">Back to Home</Link>
           </div>
         </div>

@@ -317,6 +317,8 @@ export default function SignupPage() {
               <Link href="/privacy" className="hover:text-pink-500 transition-colors">Privacy</Link>
               <span>·</span>
               <Link href="/contact" className="hover:text-pink-500 transition-colors">Contact</Link>
+              <span>·</span>
+              <Link href="/encryption" className="hover:text-pink-500 transition-colors">Security</Link>
             </div>
           </div>
         </div>

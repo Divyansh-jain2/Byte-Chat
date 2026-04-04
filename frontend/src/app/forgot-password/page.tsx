@@ -186,6 +186,8 @@ export default function ForgotPasswordPage() {
               <Link href="/privacy" className="hover:underline">Privacy</Link>
               <span>·</span>
               <Link href="/contact" className="hover:underline">Contact</Link>
+              <span>·</span>
+              <Link href="/encryption" className="hover:underline">Security</Link>
             </div>
           </div>
         </div>
@@ -243,6 +245,8 @@ export default function ForgotPasswordPage() {
             <Link href="/privacy" className="hover:underline">Privacy</Link>
             <span>·</span>
             <Link href="/contact" className="hover:underline">Contact</Link>
+            <span>·</span>
+            <Link href="/encryption" className="hover:underline">Security</Link>
           </div>
         </div>
       </div>

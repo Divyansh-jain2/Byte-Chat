@@ -1,17 +1,13 @@
 # Byte-Chat Backend Performance Playbook
 
-This document provides a practical optimization plan for low-latency chat behavior in this repository.
-
 ## Performance Targets
-
-- API p95 latency for message fetch: under 150 ms
-- API p95 latency for send message: under 120 ms
-- Socket fan-out delay (server side): under 50 ms
-- Redis command p95: under 5 ms
-- Database query p95 for hot queries: under 30 ms
+  - API p95 latency for message fetch: under 150 ms
+  - API p95 latency for send message: under 120 ms
+  - Socket fan-out delay (server side): under 50 ms
+  - Redis command p95: under 5 ms
+  - Database query p95 for hot queries: under 30 ms
 
 ## Where Your Current Hot Paths Are
-
 - Regular message fetch/send:
   - `backend/src/controllers/chat.controller.ts`
   - `backend/src/routes/chat.routes.ts`

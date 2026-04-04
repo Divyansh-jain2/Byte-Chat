@@ -28,6 +28,7 @@ import { errorHandler } from './utils/error.util.js';
 import { initializeSocket } from './socket/index.js';
 import { clearPollCache } from './services/pollCache.service.js';
 import { startCacheMetricsLogger } from './utils/cache.util.js';
+import { getAuthCacheMetrics } from './services/authCache.service.js';
 
 // Redis connection
 import { connectRedis, redis } from './lib/redis.js';
@@ -53,6 +54,7 @@ type RedisSnapshotEntry = {
   type: string;
   ttlSeconds: number;
   valuePreview: unknown;
+  isTruncated: boolean;
 };
 
 function truncateString(value: string, maxLength = 500): string {
@@ -60,38 +62,72 @@ function truncateString(value: string, maxLength = 500): string {
   return `${value.slice(0, maxLength)}...<truncated>`;
 }
 
-async function getRedisValuePreview(key: string, keyType: string): Promise<unknown> {
+async function getRedisValuePreview(
+  key: string,
+  keyType: string,
+  includeFullValues: boolean,
+): Promise<{ valuePreview: unknown; isTruncated: boolean }> {
   switch (keyType) {
     case 'string': {
       const value = await redis.get(key);
-      return typeof value === 'string' ? truncateString(value) : value;
+      if (typeof value !== 'string') {
+        return { valuePreview: value, isTruncated: false };
+      }
+      const truncated = truncateString(value);
+      return {
+        valuePreview: includeFullValues ? value : truncated,
+        isTruncated: !includeFullValues && truncated !== value,
+      };
     }
     case 'hash': {
       const value = await redis.hgetall(key);
-      return value;
+      return { valuePreview: value, isTruncated: false };
     }
     case 'list': {
-      const value = await redis.lrange(key, 0, 50);
-      return value.map((item) => truncateString(item));
+      const value = includeFullValues ? await redis.lrange(key, 0, -1) : await redis.lrange(key, 0, 50);
+      return {
+        valuePreview: value.map((item) => includeFullValues ? item : truncateString(item)),
+        isTruncated: !includeFullValues,
+      };
     }
     case 'set': {
       const value = await redis.smembers(key);
-      return value.slice(0, 50).map((item) => truncateString(item));
+      if (includeFullValues) {
+        return { valuePreview: value, isTruncated: false };
+      }
+      return {
+        valuePreview: value.slice(0, 50).map((item) => truncateString(item)),
+        isTruncated: value.length > 50,
+      };
     }
     case 'zset': {
-      const value = await redis.zrange(key, 0, 50, 'WITHSCORES');
-      return value.map((item) => truncateString(item));
+      const value = includeFullValues
+        ? await redis.zrange(key, 0, -1, 'WITHSCORES')
+        : await redis.zrange(key, 0, 50, 'WITHSCORES');
+      return {
+        valuePreview: value.map((item) => includeFullValues ? item : truncateString(item)),
+        isTruncated: !includeFullValues,
+      };
     }
     case 'stream': {
-      const value = await redis.xrange(key, '-', '+', 'COUNT', 20);
-      return value;
+      const value = includeFullValues
+        ? await redis.xrange(key, '-', '+')
+        : await redis.xrange(key, '-', '+', 'COUNT', 20);
+      return {
+        valuePreview: value,
+        isTruncated: !includeFullValues,
+      };
     }
     default:
-      return null;
+      return { valuePreview: null, isTruncated: false };
   }
 }
 
-async function buildRedisSnapshot(pattern: string, limit: number): Promise<RedisSnapshotEntry[]> {
+async function buildRedisSnapshot(
+  pattern: string,
+  limit: number,
+  includeFullValues: boolean,
+): Promise<{ entries: RedisSnapshotEntry[]; isCapped: boolean }> {
   let cursor = '0';
   const discovered = new Set<string>();
 
@@ -105,6 +141,7 @@ async function buildRedisSnapshot(pattern: string, limit: number): Promise<Redis
   } while (cursor !== '0' && discovered.size < limit);
 
   const selectedKeys = Array.from(discovered).slice(0, limit);
+  const isCapped = cursor !== '0';
   const entries = await Promise.all(
     selectedKeys.map(async (key): Promise<RedisSnapshotEntry> => {
       try {
@@ -113,12 +150,13 @@ async function buildRedisSnapshot(pattern: string, limit: number): Promise<Redis
           redis.pttl(key),
         ]);
         const ttlSeconds = ttlMs > 0 ? Math.floor(ttlMs / 1000) : ttlMs;
-        const valuePreview = await getRedisValuePreview(key, keyType);
+        const { valuePreview, isTruncated } = await getRedisValuePreview(key, keyType, includeFullValues);
         return {
           key,
           type: keyType,
           ttlSeconds,
           valuePreview,
+          isTruncated,
         };
       } catch (error) {
         return {
@@ -128,12 +166,16 @@ async function buildRedisSnapshot(pattern: string, limit: number): Promise<Redis
           valuePreview: {
             error: error instanceof Error ? error.message : 'Unable to read key',
           },
+          isTruncated: false,
         };
       }
     })
   );
 
-  return entries.sort((a, b) => a.key.localeCompare(b.key));
+  return {
+    entries: entries.sort((a, b) => a.key.localeCompare(b.key)),
+    isCapped,
+  };
 }
 
 // Connect to Redis at server startup
@@ -252,16 +294,19 @@ app.get('/debug/redis-snapshot', async (req: Request, res: Response) => {
 
   const patternRaw = typeof req.query.pattern === 'string' && req.query.pattern.trim() ? req.query.pattern.trim() : '*';
   const limitRaw = typeof req.query.limit === 'string' ? parseInt(req.query.limit, 10) : 200;
-  const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 500) : 200;
+  const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 20000) : 200;
+  const includeFullValues = req.query.full === '1' || req.query.full === 'true';
 
   try {
-    const entries = await buildRedisSnapshot(patternRaw, limit);
+    const { entries, isCapped } = await buildRedisSnapshot(patternRaw, limit, includeFullValues);
     return res.status(200).json({
       success: true,
       data: {
         snapshotAt: new Date().toISOString(),
         pattern: patternRaw,
         limit,
+        includeFullValues,
+        isCapped,
         totalKeys: entries.length,
         entries,
       },
@@ -273,6 +318,28 @@ app.get('/debug/redis-snapshot', async (req: Request, res: Response) => {
       error: error instanceof Error ? error.message : 'Unknown error',
     });
   }
+});
+
+app.get('/debug/auth-cache-metrics', async (req: Request, res: Response) => {
+  if (config.server.nodeEnv === 'production') {
+    return res.status(404).json({ success: false, message: 'Route not found' });
+  }
+
+  const passwordHeader = req.headers['x-debug-password'];
+  const submittedPassword = typeof passwordHeader === 'string' ? passwordHeader : '';
+
+  if (!isDebugPasswordValid(submittedPassword)) {
+    return res.status(401).json({ success: false, message: 'Unauthorized' });
+  }
+
+  const metrics = await getAuthCacheMetrics();
+  return res.status(200).json({
+    success: true,
+    data: {
+      snapshotAt: new Date().toISOString(),
+      metrics,
+    },
+  });
 });
 
 // 404 handler

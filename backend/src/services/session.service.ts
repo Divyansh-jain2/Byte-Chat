@@ -1,3 +1,21 @@
+// --- Refresh Token Session Management in Redis ---
+const REFRESH_TOKEN_TTL = 7 * 24 * 60 * 60; // 7 days in seconds
+
+export async function storeRefreshToken(userId: string, refreshTokenHash: string) {
+    const key = `refresh:${refreshTokenHash}`;
+    await redis.set(key, userId, 'EX', REFRESH_TOKEN_TTL);
+}
+
+export async function getRefreshTokenUser(refreshTokenHash: string): Promise<string | null> {
+    const key = `refresh:${refreshTokenHash}`;
+    const userId = await redis.get(key);
+    return userId || null;
+}
+
+export async function deleteRefreshToken(refreshTokenHash: string) {
+    const key = `refresh:${refreshTokenHash}`;
+    await redis.del(key);
+}
 import { redis } from "../lib/redis.js";
 
 const SESSION_TTL = 604800; // 7 days in seconds
