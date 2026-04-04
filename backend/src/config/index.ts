@@ -2,39 +2,48 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
+
+function requireEnv(name: string) {
+  const value = process.env[name];
+  if (!value || value.trim() === "") {
+    throw new Error(`Missing required environment variable: ${name}`);
+  }
+  return value;
+}
+
 export const config = {
   database: {
-    url: process.env.DATABASE_URL || ''
+    url: requireEnv('DATABASE_URL')
   },
   jwt: {
-    accessSecret: process.env.JWT_ACCESS_SECRET || 'fallback-secret-change-in-production',
-    refreshSecret: process.env.JWT_REFRESH_SECRET || 'fallback-refresh-secret-change-in-production',
-    accessExpiry: process.env.JWT_ACCESS_EXPIRY || '7d',
-    refreshExpiry: process.env.JWT_REFRESH_EXPIRY || '7d'
+    accessSecret: requireEnv('JWT_ACCESS_SECRET'),
+    refreshSecret: requireEnv('JWT_REFRESH_SECRET'),
+    accessExpiry: requireEnv('JWT_ACCESS_EXPIRY'),
+    refreshExpiry: requireEnv('JWT_REFRESH_EXPIRY')
   },
   otp: {
-    expiryMinutes: parseInt(process.env.OTP_EXPIRY_MINUTES || '15', 10),
-    maxAttempts: parseInt(process.env.OTP_MAX_ATTEMPTS || '3', 10)
+    expiryMinutes: parseInt(requireEnv('OTP_EXPIRY_MINUTES'), 10),
+    maxAttempts: parseInt(requireEnv('OTP_MAX_ATTEMPTS'), 10)
   },
   rateLimit: {
-    loginMaxAttempts: parseInt(process.env.LOGIN_MAX_ATTEMPTS || '5', 10),
-    lockDurationMinutes: parseInt(process.env.LOGIN_LOCK_DURATION_MINUTES || '30', 10)
+    loginMaxAttempts: parseInt(requireEnv('LOGIN_MAX_ATTEMPTS'), 10),
+    lockDurationMinutes: parseInt(requireEnv('LOGIN_LOCK_DURATION_MINUTES'), 10)
   },
   email: {
-    gmailUser: process.env.GMAIL_USER || '',
-    gmailPassword: process.env.GMAIL_APP_PASSWORD || ''
+    gmailUser: requireEnv('GMAIL_USER'),
+    gmailPassword: requireEnv('GMAIL_APP_PASSWORD')
   },
   server: {
-    port: parseInt(process.env.PORT || '3001', 10),
-    nodeEnv: process.env.NODE_ENV || 'development'
+    port: parseInt(requireEnv('NODE_PORT'), 10),
+    nodeEnv: requireEnv('NODE_ENV')
   },
   cors: {
-    frontendUrl: process.env.FRONTEND_URL || 'http://localhost:3000'
+    frontendUrl: requireEnv('FRONTEND_URL')
   },
   redis: {
-    host: process.env.REDIS_HOST || 'localhost',
-    port: parseInt(process.env.REDIS_PORT || '6379', 10),
-    password: process.env.REDIS_PASSWORD || undefined,
-    db: parseInt(process.env.REDIS_DB || '0', 10)
+    host: requireEnv('REDIS_HOST'),
+    port: parseInt(requireEnv('REDIS_PORT'), 10),
+    password: requireEnv('REDIS_PASSWORD'),
+    db: parseInt(requireEnv('REDIS_DB'), 10)
   }
 };

@@ -8,7 +8,7 @@ export default function ImpressUsPage() {
 
   const handleCopyEmail = async () => {
     try {
-      await navigator.clipboard.writeText('oppenheimer.6thaug@gmail.com');
+      await navigator.clipboard.writeText('contact@bytechat.in');
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
@@ -50,7 +50,7 @@ export default function ImpressUsPage() {
             <p className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--muted)' }}>Send your application to</p>
             <div className="flex items-center justify-between gap-3">
               <span className="text-sm font-mono font-semibold" style={{ color: 'var(--heading)' }}>
-                B23415@students.iitmandi.ac.in
+                contact@bytechat.in
               </span>
               <button onClick={handleCopyEmail} className="btn-ghost px-3 py-1.5 text-xs shrink-0">
                 {copied ? '✓ Copied' : 'Copy'}
@@ -81,7 +81,7 @@ export default function ImpressUsPage() {
           <div className="glass rounded-2xl p-3 mb-5 text-center">
             <p className="text-xs" style={{ color: 'var(--muted)' }}>
               ⏱ We typically respond within{' '}
-              <span className="font-semibold" style={{ color: 'var(--heading)' }}>2–3 business days</span>
+              <span className="font-semibold" style={{ color: 'var(--heading)' }}>1-2 business days</span>
             </p>
           </div>
 

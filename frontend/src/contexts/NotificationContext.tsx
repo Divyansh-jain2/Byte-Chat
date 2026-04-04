@@ -17,6 +17,7 @@ import {
   type AppNotification,
 } from '@/services/notification.service';
 import { useSocket } from '@/contexts/SocketContext';
+import { authService } from '@/services/auth.service';
 
 interface NotificationContextType {
   notifications: AppNotification[];
@@ -63,8 +64,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
 
   // Fetch on mount (when there is an access token available)
   useEffect(() => {
-    const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null;
-    if (token) {
+    if (authService.getCurrentUser()) {
       const timer = window.setTimeout(() => {
         void refresh();
       }, 0);

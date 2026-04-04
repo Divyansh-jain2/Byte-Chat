@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useSocket } from '@/contexts/SocketContext';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
 /**
  * usePresence — tracks which users are currently online.
@@ -23,15 +23,12 @@ export function usePresence(userIds: string[]): Set<string> {
   // Fetch initial presence snapshot from Redis
   const fetchPresence = useCallback(async (ids: string[]) => {
     if (ids.length === 0) return;
-    const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null;
-    if (!token) return;
 
     try {
       const res = await fetch(`${API_URL}/api/chat/presence`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
         },
         credentials: 'include',
         body: JSON.stringify({ userIds: ids }),

@@ -31,8 +31,9 @@ type DiffEvent = {
   key: string;
 };
 
-const API_URL = 'http://localhost:3001/debug/redis-snapshot';
-const AUTH_METRICS_URL = 'http://localhost:3001/debug/auth-cache-metrics';
+import { API_BASE_URL } from '../../services/apiBase';
+const API_URL = `${API_BASE_URL}/debug/redis-snapshot`;
+const AUTH_METRICS_URL = `${API_BASE_URL}/debug/auth-cache-metrics`;
 
 type AuthMetricsResponse = {
   success: boolean;

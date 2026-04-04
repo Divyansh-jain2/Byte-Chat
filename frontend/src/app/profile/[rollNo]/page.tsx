@@ -27,13 +27,10 @@ export default function ViewProfile() {
 
   const fetchProfile = useCallback(async () => {
     try {
-      const token = localStorage.getItem('accessToken');
-
       // Fetch current user's profile to check if it's their own profile
-      const myProfileResponse = await fetch('http://localhost:3001/api/profile/me', {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
+      const { API_BASE_URL } = await import('../../../services/apiBase');
+      const myProfileResponse = await fetch(`${API_BASE_URL}/api/profile/me`, {
+        credentials: 'include'
       });
       const myProfileData = await myProfileResponse.json();
       if (myProfileData.success) {
@@ -41,10 +38,8 @@ export default function ViewProfile() {
       }
 
       // Fetch the requested profile
-      const response = await fetch(`http://localhost:3001/api/profile/${rollNo}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
+      const response = await fetch(`${API_BASE_URL}/api/profile/${rollNo}`, {
+        credentials: 'include'
       });
 
       const data = await response.json();

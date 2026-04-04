@@ -92,7 +92,6 @@ export default function MessageBubble({
   const handleReaction = useCallback(async (emoji: string) => {
     // console.log('[MessageBubble] Reaction clicked:', emoji);
     try {
-      const token = localStorage.getItem('accessToken');
       const userStr = localStorage.getItem('user');
 
       // console.log('[MessageBubble] Raw user string:', userStr);
@@ -105,11 +104,6 @@ export default function MessageBubble({
       // console.log('[MessageBubble] Token:', token ? 'Present' : 'Missing');
       // console.log('[MessageBubble] User ID:', currentUserId);
 
-      if (!token) {
-        // console.error('[MessageBubble] No token found');
-        alert('Please log in first');
-        return;
-      }
       if (!currentUserId) {
         // console.error('[MessageBubble] No user ID found. User object:', currentUser);
         alert('Please log out and log in again to fix your session');
@@ -125,7 +119,7 @@ export default function MessageBubble({
 
       if (userReacted) {
         console.log('[MessageBubble] Calling removeReaction API...');
-        const result = await messageManagementService.removeReaction(message.message_id, emoji, token);
+        const result = await messageManagementService.removeReaction(message.message_id, emoji, '');
         console.log('[MessageBubble] Remove reaction result:', result);
         setReactions(prev =>
           prev.map(r => r.emoji === emoji
@@ -135,7 +129,7 @@ export default function MessageBubble({
         );
       } else {
         console.log('[MessageBubble] Calling addReaction API...');
-        const result = await messageManagementService.addReaction(message.message_id, emoji, token);
+        const result = await messageManagementService.addReaction(message.message_id, emoji, '');
         console.log('[MessageBubble] Add reaction result:', result);
         setReactions(prev => {
           const existing = prev.find(r => r.emoji === emoji);

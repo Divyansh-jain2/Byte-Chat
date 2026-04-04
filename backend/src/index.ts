@@ -36,7 +36,15 @@ import { connectRedis, redis } from './lib/redis.js';
 
 const app: Express = express();
 const httpServer = createServer(app);
-const DB_POOL_DEBUG_PASSWORD = process.env.DB_POOL_DEBUG_PASSWORD || 'thisisthesecurestwaytoprotecthtesame';
+function requireEnv(name: string): string {
+  const value = process.env[name];
+  if (!value || value.trim() === "") {
+    throw new Error(`Missing required environment variable: ${name}`);
+  }
+  return value;
+}
+
+const DB_POOL_DEBUG_PASSWORD = requireEnv('DB_POOL_DEBUG_PASSWORD');
 
 function isDebugPasswordValid(candidate: string): boolean {
   const expectedBuffer = Buffer.from(DB_POOL_DEBUG_PASSWORD);

@@ -44,11 +44,9 @@ export default function ProfileImageManager({
 
   const fetchProfile = useCallback(async () => {
     try {
-      const token = localStorage.getItem('accessToken');
-      if (!token) return;
-
-      const response = await fetch('http://localhost:3001/api/profile/me', {
-        headers: { Authorization: `Bearer ${token}` }
+      const { API_BASE_URL } = await import('../services/apiBase');
+      const response = await fetch(`${API_BASE_URL}/api/profile/me`, {
+        credentials: 'include'
       });
 
       const data = await response.json();
@@ -73,13 +71,7 @@ export default function ProfileImageManager({
     setMessage(null);
 
     try {
-      const token = localStorage.getItem('accessToken');
-      if (!token) {
-        setMessage({ type: 'error', text: 'Please login to upload image' });
-        return;
-      }
-
-      const result = await uploadProfilePicture(file, token);
+      const result = await uploadProfilePicture(file, '');
       const user = result.data?.user;
 
       if (result.success && user) {
@@ -128,13 +120,7 @@ export default function ProfileImageManager({
     setMessage(null);
 
     try {
-      const token = localStorage.getItem('accessToken');
-      if (!token) {
-        setMessage({ type: 'error', text: 'Please login to delete image' });
-        return;
-      }
-
-      const result = await deleteProfilePicture(token);
+      const result = await deleteProfilePicture('');
       const user = result.data?.user;
       if (result.success && user) {
         const userProfile = mapUserToUserProfile(user);
@@ -176,13 +162,7 @@ export default function ProfileImageManager({
     setMessage(null);
 
     try {
-      const token = localStorage.getItem('accessToken');
-      if (!token) {
-        setMessage({ type: 'error', text: 'Please login to select avatar' });
-        return;
-      }
-
-      const result = await selectPresetAvatar(avatarId, token);
+      const result = await selectPresetAvatar(avatarId, '');
       const user = result.data?.user;
       if (result.success && user) {
         const userProfile = mapUserToUserProfile(user);

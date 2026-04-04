@@ -2,7 +2,7 @@ import axios from 'axios';
 import type { ChatRequest, Conversation } from '@/types/chat.types';
 import { clearInFlightGetRequestDedupe, dedupedGet } from './request-dedupe.service';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
 const api = axios.create({
   baseURL: `${API_URL}/api/chat`,
@@ -10,15 +10,6 @@ const api = axios.create({
 });
 
 const CHAT_GET_DEDUPE_NAMESPACE = 'chat|';
-
-// Add request interceptor to include auth token
-api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('accessToken');
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
-  return config;
-});
 
 export const chatService = {
   // Send chat request (regular chat only)

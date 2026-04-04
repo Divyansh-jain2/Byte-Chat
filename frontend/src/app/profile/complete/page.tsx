@@ -72,13 +72,13 @@ export default function CompleteProfile() {
     setError('');
 
     try {
-      const token = localStorage.getItem('accessToken');
-      const response = await fetch('http://localhost:3001/api/profile/complete', {
+      const { API_BASE_URL } = await import('../../../services/apiBase');
+      const response = await fetch(`${API_BASE_URL}/api/profile/complete`, {
         method: 'PUT',
         headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
+          'Content-Type': 'application/json'
         },
+        credentials: 'include',
         body: JSON.stringify(formData)
       });
 

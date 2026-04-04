@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
+import { authService } from '@/services/auth.service';
 
 interface SocketContextType {
   getSocket: () => Socket | null;
@@ -32,28 +33,28 @@ export const useSocket = () => useContext(SocketContext);
 export function SocketProvider({ children }: { children: React.ReactNode }) {
   const socketRef = useRef<Socket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
-  const [authToken, setAuthToken] = useState<string | null>(null);
+  const [hasSession, setHasSession] = useState(false);
 
   useEffect(() => {
-    const syncToken = () => {
-      const token = localStorage.getItem('accessToken');
-      setAuthToken((prev) => (prev === token ? prev : token));
+    const syncSession = () => {
+      const user = authService.getCurrentUser();
+      setHasSession((prev) => (prev === Boolean(user) ? prev : Boolean(user)));
     };
 
-    syncToken();
+    syncSession();
 
     // Same-tab localStorage writes do not fire "storage" events, so keep a tiny polling fallback.
-    const interval = window.setInterval(syncToken, 1000);
-    window.addEventListener('storage', syncToken);
+    const interval = window.setInterval(syncSession, 1000);
+    window.addEventListener('storage', syncSession);
 
     return () => {
       window.clearInterval(interval);
-      window.removeEventListener('storage', syncToken);
+      window.removeEventListener('storage', syncSession);
     };
   }, []);
 
   useEffect(() => {
-    if (!authToken) {
+    if (!hasSession) {
       if (socketRef.current) {
         socketRef.current.disconnect();
         socketRef.current = null;
@@ -64,9 +65,9 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       return () => window.clearTimeout(timer);
     }
 
-    const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+    const API_URL = process.env.NEXT_PUBLIC_API_URL;
     const socketInstance = io(API_URL, {
-      auth: { token: authToken },
+      withCredentials: true,
       transports: ['websocket', 'polling'],
     });
 
@@ -92,7 +93,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       socketInstance.disconnect();
       socketRef.current = null;
     };
-  }, [authToken]);
+  }, [hasSession]);
 
   /**
    * Register a handler for offline messages delivered by the backend on reconnect.

@@ -1,4 +1,5 @@
-const API_URL = 'http://localhost:3001/api/groups';
+import { API_BASE_URL } from './apiBase';
+const API_URL = `${API_BASE_URL}/api/groups`;
 
 export interface CreateGroupData {
   group_name: string;
@@ -11,12 +12,10 @@ export interface CreateGroupData {
 export const groupService = {
   // Create a new group
   createGroup: async (groupData: CreateGroupData) => {
-    const token = localStorage.getItem('accessToken');
     const response = await fetch(API_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': token ? `Bearer ${token}` : '',
       },
       credentials: 'include',
       body: JSON.stringify(groupData),
@@ -32,11 +31,7 @@ export const groupService = {
 
   // Get all public groups
   getPublicGroups: async () => {
-    const token = localStorage.getItem('accessToken');
     const response = await fetch(`${API_URL}/public`, {
-      headers: {
-        'Authorization': token ? `Bearer ${token}` : '',
-      },
       credentials: 'include',
     });
 
@@ -49,11 +44,7 @@ export const groupService = {
 
   // Get user's groups
   getMyGroups: async () => {
-    const token = localStorage.getItem('accessToken');
     const response = await fetch(`${API_URL}/my-groups`, {
-      headers: {
-        'Authorization': token ? `Bearer ${token}` : '',
-      },
       credentials: 'include',
     });
 
@@ -66,11 +57,7 @@ export const groupService = {
 
   // Get group details
   getGroupDetails: async (groupId: string) => {
-    const token = localStorage.getItem('accessToken');
     const response = await fetch(`${API_URL}/${groupId}`, {
-      headers: {
-        'Authorization': token ? `Bearer ${token}` : '',
-      },
       credentials: 'include',
     });
 
@@ -83,12 +70,10 @@ export const groupService = {
 
   // Join a public group
   joinGroup: async (groupId: string, isAnonymous: boolean = false) => {
-    const token = localStorage.getItem('accessToken');
     const response = await fetch(`${API_URL}/${groupId}/join`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': token ? `Bearer ${token}` : '',
       },
       credentials: 'include',
       body: JSON.stringify({ is_anonymous: isAnonymous }),
@@ -104,11 +89,7 @@ export const groupService = {
 
   // Get group members
   getGroupMembers: async (groupId: string) => {
-    const token = localStorage.getItem('accessToken');
     const response = await fetch(`${API_URL}/${groupId}/members`, {
-      headers: {
-        'Authorization': token ? `Bearer ${token}` : '',
-      },
       credentials: 'include',
     });
 
@@ -122,12 +103,10 @@ export const groupService = {
 
   // Add member to group (for admins)
   addMemberToGroup: async (groupId: string, userId: string, isAnonymous: boolean = false) => {
-    const token = localStorage.getItem('accessToken');
     const response = await fetch(`${API_URL}/${groupId}/members`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': token ? `Bearer ${token}` : '',
       },
       credentials: 'include',
       body: JSON.stringify({ user_id: userId, is_anonymous: isAnonymous }),
@@ -143,12 +122,8 @@ export const groupService = {
 
   // Remove member from group (for admins)
   removeMemberFromGroup: async (groupId: string, memberId: string) => {
-    const token = localStorage.getItem('accessToken');
     const response = await fetch(`${API_URL}/${groupId}/members/${memberId}`, {
       method: 'DELETE',
-      headers: {
-        'Authorization': token ? `Bearer ${token}` : '',
-      },
       credentials: 'include',
     });
 
@@ -162,12 +137,8 @@ export const groupService = {
 
   // Leave a group
   leaveGroup: async (groupId: string) => {
-    const token = localStorage.getItem('accessToken');
     const response = await fetch(`${API_URL}/${groupId}/leave`, {
       method: 'POST',
-      headers: {
-        'Authorization': token ? `Bearer ${token}` : '',
-      },
       credentials: 'include',
     });
 
@@ -181,12 +152,10 @@ export const groupService = {
 
   // Update group details (for admins)
   updateGroup: async (groupId: string, groupData: Partial<CreateGroupData>) => {
-    const token = localStorage.getItem('accessToken');
     const response = await fetch(`${API_URL}/${groupId}`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': token ? `Bearer ${token}` : '',
       },
       credentials: 'include',
       body: JSON.stringify(groupData),
@@ -202,12 +171,8 @@ export const groupService = {
 
   // Promote member to admin (for owners)
   promoteMemberToAdmin: async (groupId: string, memberId: string) => {
-    const token = localStorage.getItem('accessToken');
     const response = await fetch(`${API_URL}/${groupId}/members/${memberId}/promote`, {
       method: 'POST',
-      headers: {
-        'Authorization': token ? `Bearer ${token}` : '',
-      },
       credentials: 'include',
     });
 
@@ -221,7 +186,6 @@ export const groupService = {
 
   // Get group messages
   getGroupMessages: async (groupId: string, limit: number = 50, before?: string, q?: string) => {
-    const token = localStorage.getItem('accessToken');
     const url = new URL(`${API_URL}/${groupId}/messages`);
     url.searchParams.set('limit', String(limit));
     if (before) {
@@ -232,9 +196,6 @@ export const groupService = {
     }
 
     const response = await fetch(url.toString(), {
-      headers: {
-        'Authorization': token ? `Bearer ${token}` : '',
-      },
       credentials: 'include',
     });
 
@@ -259,12 +220,10 @@ export const groupService = {
     keyId?: string;
     parentMessageId?: string;
   }) => {
-    const token = localStorage.getItem('accessToken');
     const response = await fetch(`${API_URL}/${groupId}/messages`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': token ? `Bearer ${token}` : '',
       },
       credentials: 'include',
       body: JSON.stringify(data),
@@ -287,12 +246,10 @@ export const groupService = {
     expires_in_hours?: number;
     options?: string[]; // For General polls
   }) => {
-    const token = localStorage.getItem('accessToken');
     const response = await fetch(`${API_URL}/${groupId}/polls`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': token ? `Bearer ${token}` : '',
       },
       credentials: 'include',
       body: JSON.stringify(pollData),
@@ -308,16 +265,12 @@ export const groupService = {
 
   // Get group polls
   getGroupPolls: async (groupId: string, status: string = 'active') => {
-    const token = localStorage.getItem('accessToken');
     const url = new URL(`${API_URL}/${groupId}/polls`);
     if (status && status !== 'all') {
       url.searchParams.set('status', status);
     }
 
     const response = await fetch(url.toString(), {
-      headers: {
-        'Authorization': token ? `Bearer ${token}` : '',
-      },
       credentials: 'include',
     });
 
@@ -331,7 +284,6 @@ export const groupService = {
 
   // Vote on a poll
   voteOnPoll: async (groupId: string, pollId: string, voteValue?: boolean, optionId?: string) => {
-    const token = localStorage.getItem('accessToken');
     // const body: any = {};
     const body: { vote_value?: boolean; option_id?: string } = {};
     if (typeof voteValue === 'boolean') body.vote_value = voteValue;
@@ -340,7 +292,6 @@ export const groupService = {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': token ? `Bearer ${token}` : '',
       },
       credentials: 'include',
       body: JSON.stringify(body),
@@ -355,11 +306,7 @@ export const groupService = {
   },
   // Get poll results (for General polls)
   getPollResults: async (groupId: string, pollId: string) => {
-    const token = localStorage.getItem('accessToken');
     const response = await fetch(`${API_URL}/${groupId}/polls/${pollId}/results`, {
-      headers: {
-        'Authorization': token ? `Bearer ${token}` : '',
-      },
       credentials: 'include',
     });
     if (!response.ok) {
@@ -371,12 +318,10 @@ export const groupService = {
 
   // Cancel an active poll (creator or admin)
   cancelPoll: async (groupId: string, pollId: string, reason?: string) => {
-    const token = localStorage.getItem('accessToken');
     const response = await fetch(`${API_URL}/${groupId}/polls/${pollId}`, {
       method: 'DELETE',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': token ? `Bearer ${token}` : '',
       },
       credentials: 'include',
       body: JSON.stringify({ reason }),
@@ -392,12 +337,8 @@ export const groupService = {
 
   // Manually execute a passed poll (admin only)
   executePoll: async (groupId: string, pollId: string) => {
-    const token = localStorage.getItem('accessToken');
     const response = await fetch(`${API_URL}/${groupId}/polls/${pollId}/execute`, {
       method: 'POST',
-      headers: {
-        'Authorization': token ? `Bearer ${token}` : '',
-      },
       credentials: 'include',
     });
 
@@ -411,15 +352,11 @@ export const groupService = {
 
   // Upload group chat image
   uploadImage: async (groupId: string, file: File) => {
-    const token = localStorage.getItem('accessToken');
     const formData = new FormData();
     formData.append('image', file);
 
     const response = await fetch(`${API_URL}/${groupId}/upload-image`, {
       method: 'POST',
-      headers: {
-        'Authorization': token ? `Bearer ${token}` : '',
-      },
       credentials: 'include',
       body: formData,
     });
@@ -434,11 +371,7 @@ export const groupService = {
 
   // Get public keys of all participants in a group
   getGroupParticipantPublicKeys: async (groupId: string) => {
-    const token = localStorage.getItem('accessToken');
     const response = await fetch(`${API_URL}/${groupId}/participants/keys`, {
-      headers: {
-        'Authorization': token ? `Bearer ${token}` : '',
-      },
       credentials: 'include',
     });
 

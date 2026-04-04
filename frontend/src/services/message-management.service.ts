@@ -1,6 +1,7 @@
 import axios from 'axios';
 
-const API_URL = 'http://localhost:3001/api/messages';
+import { API_BASE_URL } from './apiBase';
+const API_URL = `${API_BASE_URL}/api/messages`;
 
 export const messageManagementService = {
   // ========== REACTIONS ==========
@@ -8,7 +9,7 @@ export const messageManagementService = {
     const response = await axios.post(
       `${API_URL}/message/${messageId}/reaction`,
       { emoji },
-      { headers: { Authorization: `Bearer ${token}` } }
+      { withCredentials: true }
     );
     return response.data;
   },
@@ -18,7 +19,7 @@ export const messageManagementService = {
       `${API_URL}/message/${messageId}/reaction`,
       {
         data: { emoji },
-        headers: { Authorization: `Bearer ${token}` }
+        withCredentials: true
       }
     );
     return response.data;
@@ -27,7 +28,7 @@ export const messageManagementService = {
   async getReactions(messageId: string, token: string) {
     const response = await axios.get(
       `${API_URL}/message/${messageId}/reactions`,
-      { headers: { Authorization: `Bearer ${token}` } }
+      { withCredentials: true }
     );
     return response.data;
   },
@@ -43,7 +44,7 @@ export const messageManagementService = {
     const response = await axios.put(
       `${API_URL}/message/${messageId}/edit`,
       { encryptedContent, contentIv, contentAuthTag },
-      { headers: { Authorization: `Bearer ${token}` } }
+      { withCredentials: true }
     );
     return response.data;
   },
@@ -51,7 +52,7 @@ export const messageManagementService = {
   async getEditHistory(messageId: string, token: string) {
     const response = await axios.get(
       `${API_URL}/message/${messageId}/history`,
-      { headers: { Authorization: `Bearer ${token}` } }
+      { withCredentials: true }
     );
     return response.data;
   },
@@ -62,7 +63,7 @@ export const messageManagementService = {
       `${API_URL}/message/${messageId}/delete`,
       {
         data: { deleteForEveryone },
-        headers: { Authorization: `Bearer ${token}` }
+        withCredentials: true
       }
     );
     return response.data;

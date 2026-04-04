@@ -33,7 +33,6 @@ export default function DashboardPage() {
 
   const fetchData = useCallback(async () => {
     try {
-      const token = localStorage.getItem('accessToken');
       const userRaw = localStorage.getItem('user');
       let currentUserId: string | null = null;
       let currentUserRollNo: string | null = null;
@@ -55,11 +54,9 @@ export default function DashboardPage() {
       }
 
       // Fetch users
-      const usersResponse = await fetch('http://localhost:3001/api/profile/all', {
+      const { API_BASE_URL } = await import('../../services/apiBase');
+      const usersResponse = await fetch(`${API_BASE_URL}/api/profile/all`, {
         credentials: 'include',
-        headers: {
-          'Authorization': token ? `Bearer ${token}` : '',
-        },
       });
 
       if (usersResponse.status === 401) {

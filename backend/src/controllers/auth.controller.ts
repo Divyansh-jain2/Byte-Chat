@@ -40,6 +40,15 @@ function getTokenRemainingTtl(token: string): number {
   return 900;
 }
 
+function setAccessTokenCookie(res: Response, accessToken: string) {
+  res.cookie('accessToken', accessToken, {
+    httpOnly: true,
+    secure: config.server.nodeEnv === 'production',
+    sameSite: 'strict',
+    maxAge: 15 * 60 * 1000,
+  });
+}
+
 /**
  * SIGNUP - Step 1: Create user and send OTP
  */
@@ -302,6 +311,7 @@ export async function verifyOTP(req: Request, res: Response) {
         sameSite: 'strict',
         maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
       });
+      setAccessTokenCookie(res, accessToken);
 
       // Get user details
       const userDetails = await pool.query(
@@ -315,7 +325,6 @@ export async function verifyOTP(req: Request, res: Response) {
         success: true,
         message: 'Email verified successfully. You are now logged in.',
         data: {
-          accessToken,
           user: userDetails.rows[0]
         }
       });
@@ -483,6 +492,15 @@ export async function login(req: Request, res: Response) {
     // Store refresh token in Redis
     await storeRefreshToken(user.user_id, refreshTokenHash);
 
+    // Set refresh token as HTTP-only cookie
+    res.cookie('refreshToken', refreshToken, {
+      httpOnly: true,
+      secure: config.server.nodeEnv === 'production',
+      sameSite: 'strict',
+      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+    });
+    setAccessTokenCookie(res, accessToken);
+
     // Clear login attempts on success
     await redis.del(attemptKey);
 
@@ -500,7 +518,6 @@ export async function login(req: Request, res: Response) {
       success: true,
       message: 'Login successful',
       data: {
-        accessToken,
         sessionId, // Return sessionId to client
         user: {
           userId: user.user_id,
@@ -773,7 +790,7 @@ export async function resetPassword(req: Request, res: Response) {
 export async function logout(req: Request, res: Response) {
   try {
     const refreshToken = req.cookies.refreshToken;
-    const accessToken = getBearerToken(req);
+    const accessToken = getBearerToken(req) || req.cookies?.accessToken;
     let userId = null;
 
     if (accessToken) {
@@ -814,6 +831,7 @@ export async function logout(req: Request, res: Response) {
     }
 
     // Clear cookie
+    res.clearCookie('accessToken');
     res.clearCookie('refreshToken');
 
     return res.status(200).json({

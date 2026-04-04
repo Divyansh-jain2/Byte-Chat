@@ -3,26 +3,15 @@
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL;
 
-// Helper function to get token and validate
-const getAuthToken = (): string => {
-  const token = localStorage.getItem('accessToken');
-  if (!token) {
-    throw new Error('You are not logged in. Please log in and try again.');
-  }
-  return token;
-};
-
 // ==================== BLOCK SERVICES ====================
 
 export const blockUser = async (blockedUserId: string, reason?: string) => {
-  const token = getAuthToken();
-  
   const response = await fetch(`${API_BASE}/api/moderation/block`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
     },
+    credentials: 'include',
     body: JSON.stringify({ blockedUserId, reason }),
   });
 
@@ -35,14 +24,12 @@ export const blockUser = async (blockedUserId: string, reason?: string) => {
 };
 
 export const unblockUser = async (blockedUserId: string) => {
-  const token = getAuthToken();
-  
   const response = await fetch(`${API_BASE}/api/moderation/unblock`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
     },
+    credentials: 'include',
     body: JSON.stringify({ blockedUserId }),
   });
 
@@ -55,13 +42,9 @@ export const unblockUser = async (blockedUserId: string) => {
 };
 
 export const getBlockedUsers = async () => {
-  const token = getAuthToken();
-  
   const response = await fetch(`${API_BASE}/api/moderation/blocked-users`, {
     method: 'GET',
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
+    credentials: 'include',
   });
 
   if (!response.ok) {
@@ -73,13 +56,9 @@ export const getBlockedUsers = async () => {
 };
 
 export const checkIfBlocked = async (otherUserId: string) => {
-  const token = getAuthToken();
-  
   const response = await fetch(`${API_BASE}/api/moderation/check-blocked/${otherUserId}`, {
     method: 'GET',
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
+    credentials: 'include',
   });
 
   if (!response.ok) {
@@ -108,14 +87,12 @@ export interface ReportGroupData {
 }
 
 export const reportUser = async (data: ReportUserData) => {
-  const token = getAuthToken();
-  
   const response = await fetch(`${API_BASE}/api/moderation/report/user`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
     },
+    credentials: 'include',
     body: JSON.stringify(data),
   });
 
@@ -128,8 +105,6 @@ export const reportUser = async (data: ReportUserData) => {
 };
 
 export const reportGroup = async (data: ReportGroupData) => {
-  const token = getAuthToken();
-  
   // console.log('📤 SENDING GROUP REPORT:');
   // console.log('  - URL:', `${API_BASE}/api/moderation/report/group`);
   // console.log('  - Token:', token ? `${token.substring(0, 20)}...` : 'MISSING');
@@ -139,8 +114,8 @@ export const reportGroup = async (data: ReportGroupData) => {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
     },
+    credentials: 'include',
     body: JSON.stringify(data),
   });
 
@@ -158,13 +133,9 @@ export const reportGroup = async (data: ReportGroupData) => {
 };
 
 export const getMyReports = async () => {
-  const token = getAuthToken();
-  
   const response = await fetch(`${API_BASE}/api/moderation/reports/my`, {
     method: 'GET',
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
+    credentials: 'include',
   });
 
   if (!response.ok) {
@@ -176,13 +147,9 @@ export const getMyReports = async () => {
 };
 
 export const deleteReport = async (reportId: string) => {
-  const token = getAuthToken();
-  
   const response = await fetch(`${API_BASE}/api/moderation/report/${reportId}`, {
     method: 'DELETE',
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
+    credentials: 'include',
   });
 
   if (!response.ok) {
@@ -196,14 +163,12 @@ export const deleteReport = async (reportId: string) => {
 // ==================== ANONYMOUS CHAT SERVICES ====================
 
 export const revealAnonymousIdentity = async (conversationId: string) => {
-  const token = getAuthToken();
-  
   const response = await fetch(`${API_BASE}/api/anonymous-chat/reveal/${conversationId}`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
     },
+    credentials: 'include',
   });
 
   if (!response.ok) {

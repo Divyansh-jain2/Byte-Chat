@@ -1,9 +1,9 @@
-import { SignupRequest, VerifyOTPRequest, LoginRequest, ForgotPasswordRequest, ResetPasswordRequest, AuthResponse, User } from '@/types/auth.types';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+import { SignupRequest, VerifyOTPRequest, LoginRequest, ForgotPasswordRequest, ResetPasswordRequest, AuthResponse, User } from '@/types/auth.types';
+import {getApiUrl} from './api.config';
 
 class AuthService {
-  private baseUrl = `${API_BASE_URL}/api/auth`;
+  private baseUrl = getApiUrl('/api/auth');
 
   private async request<T>(endpoint: string, options?: RequestInit): Promise<T> {
     const response = await fetch(`${this.baseUrl}${endpoint}`, {
@@ -37,11 +37,6 @@ class AuthService {
       body: JSON.stringify(data)
     });
 
-    // Store access token if present
-    if (response.data?.accessToken) {
-      localStorage.setItem('accessToken', response.data.accessToken);
-    }
-
     // Store user if present
     if (response.data?.user) {
       localStorage.setItem('user', JSON.stringify(response.data.user));
@@ -55,11 +50,6 @@ class AuthService {
       method: 'POST',
       body: JSON.stringify(data)
     });
-
-    // Store access token
-    if (response.data?.accessToken) {
-      localStorage.setItem('accessToken', response.data.accessToken);
-    }
 
     // Store user
     if (response.data?.user) {
@@ -75,7 +65,6 @@ class AuthService {
     });
 
     // Clear local storage
-    localStorage.removeItem('accessToken');
     localStorage.removeItem('user');
   }
 
@@ -94,8 +83,7 @@ class AuthService {
   }
 
   getAccessToken(): string | null {
-    if (typeof window === 'undefined') return null;
-    return localStorage.getItem('accessToken');
+    return null;
   }
 
   getCurrentUser(): User | null {
@@ -105,7 +93,7 @@ class AuthService {
   }
 
   isAuthenticated(): boolean {
-    return !!this.getAccessToken();
+    return !!this.getCurrentUser();
   }
 }
 

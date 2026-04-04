@@ -1,19 +1,10 @@
 import axios from 'axios';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
 const api = axios.create({
   baseURL: `${API_URL}/api/anonymous-chat`,
   withCredentials: true,
-});
-
-// Add request interceptor to include auth token
-api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('accessToken');
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
-  return config;
 });
 
 /**
@@ -80,12 +71,6 @@ export const reportAnonymousUser = async (data: {
     baseURL: `${API_URL}/api/chat`,
     withCredentials: true,
   });
-
-  // Add auth token
-  const token = localStorage.getItem('accessToken');
-  if (token) {
-    chatApi.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-  }
 
   const response = await chatApi.post('/report', data);
   return response.data;

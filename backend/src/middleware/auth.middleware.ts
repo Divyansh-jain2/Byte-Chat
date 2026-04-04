@@ -44,6 +44,11 @@ function getBearerToken(req: Request): string | undefined {
   return token;
 }
 
+function getCookieToken(req: Request, cookieName: string): string | undefined {
+  const cookieValue = req.cookies?.[cookieName];
+  return typeof cookieValue === 'string' && cookieValue ? cookieValue : undefined;
+}
+
 function getTokenTtlSeconds(payload: TokenPayload): number {
   if (typeof payload.exp === 'number') {
     const ttl = payload.exp - Math.floor(Date.now() / 1000);
@@ -54,7 +59,7 @@ function getTokenTtlSeconds(payload: TokenPayload): number {
 
 export const authenticateToken = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const token = getBearerToken(req);
+    const token = getBearerToken(req) ?? getCookieToken(req, 'accessToken');
     // const sessionId = req.headers['x-session-id'] as string;
     const sessionId = typeof req.headers['x-session-id'] === 'string' ? req.headers['x-session-id'] : undefined;
 

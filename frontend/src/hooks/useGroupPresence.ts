@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useSocket } from '@/contexts/SocketContext';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
 interface GroupPresence {
   onlineCount: number;
@@ -27,11 +27,8 @@ export function useGroupPresence(groupId: string | null): GroupPresence {
 
   const fetchCount = useCallback(async () => {
     if (!groupId) return;
-    const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null;
-    if (!token) return;
     try {
       const res = await fetch(`${API_URL}/api/groups/${groupId}/online-count`, {
-        headers: { Authorization: `Bearer ${token}` },
         credentials: 'include',
       });
       if (!res.ok) return;

@@ -45,6 +45,8 @@ interface BlockedUser {
   is_anonymous_block: boolean;
 }
 
+const { API_BASE_URL } = await import('../../../services/apiBase');
+
 export default function ProfileEditPage() {
   const router = useRouter();
   const { theme, toggleTheme } = useTheme();
@@ -77,15 +79,15 @@ export default function ProfileEditPage() {
 
   const fetchData = useCallback(async () => {
     try {
-      const token = localStorage.getItem('accessToken');
-      if (!token) {
+      if (!localStorage.getItem('user')) {
         router.push('/login');
         return;
       }
 
       // Fetch profile
-      const profileRes = await fetch('http://localhost:3001/api/profile/me', {
-        headers: { Authorization: `Bearer ${token}` }
+      const { API_BASE_URL } = await import('../../../services/apiBase');
+      const profileRes = await fetch(`${API_BASE_URL}/api/profile/me`, {
+        credentials: 'include'
       });
       const profileData = await profileRes.json();
 
@@ -110,8 +112,8 @@ export default function ProfileEditPage() {
       }
 
       // Fetch settings
-      const settingsRes = await fetch('http://localhost:3001/api/settings/settings', {
-        headers: { Authorization: `Bearer ${token}` }
+      const settingsRes = await fetch(`${API_BASE_URL}/api/settings/settings`, {
+        credentials: 'include'
       });
       const settingsData = await settingsRes.json();
 
@@ -126,8 +128,8 @@ export default function ProfileEditPage() {
       }
 
       // Fetch blocked users
-      const blockedRes = await fetch('http://localhost:3001/api/settings/blocked', {
-        headers: { Authorization: `Bearer ${token}` }
+      const blockedRes = await fetch(`${API_BASE_URL}/api/settings/blocked`, {
+        credentials: 'include'
       });
       const blockedData = await blockedRes.json();
 
@@ -152,13 +154,12 @@ export default function ProfileEditPage() {
     e.preventDefault();
 
     try {
-      const token = localStorage.getItem('accessToken');
-      const res = await fetch('http://localhost:3001/api/profile/update', {
+      const res = await fetch(`${API_BASE_URL}/api/profile/update`, {
         method: 'PUT',
         headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
+          'Content-Type': 'application/json'
         },
+        credentials: 'include',
         body: JSON.stringify({ 
           bio, 
           dob: dob || null, 
@@ -187,13 +188,12 @@ export default function ProfileEditPage() {
     //
 
     try {
-      const token = localStorage.getItem('accessToken');
-      const res = await fetch('http://localhost:3001/api/settings/settings', {
+      const res = await fetch(`${API_BASE_URL}/api/settings/settings`, {
         method: 'PUT',
         headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
+          'Content-Type': 'application/json'
         },
+        credentials: 'include',
         body: JSON.stringify({
           theme: theme,
           email_notifications: emailNotifications,
@@ -220,13 +220,12 @@ export default function ProfileEditPage() {
     //
 
     try {
-      const token = localStorage.getItem('accessToken');
-      const res = await fetch('http://localhost:3001/api/settings/settings', {
+      const res = await fetch(`${API_BASE_URL}/api/settings/settings`, {
         method: 'PUT',
         headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
+          'Content-Type': 'application/json'
         },
+        credentials: 'include',
         body: JSON.stringify({
           privacy_profile_public: privacyProfilePublic,
           privacy_show_online_status: privacyShowOnlineStatus,
@@ -252,10 +251,9 @@ export default function ProfileEditPage() {
     //
 
     try {
-      const token = localStorage.getItem('accessToken');
-      const res = await fetch(`http://localhost:3001/api/settings/unblock/${blockedUserId}`, {
+      const res = await fetch(`${API_BASE_URL}/api/settings/unblock/${blockedUserId}`, {
         method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` }
+        credentials: 'include'
       });
 
       const data = await res.json();
@@ -275,7 +273,6 @@ export default function ProfileEditPage() {
   const handleLogout = () => {
     // Replace confirm with toast and a custom confirmation
     toastInfo('Logout is not undoable. Logging out...');
-    localStorage.removeItem('accessToken');
     localStorage.removeItem('user');
     router.push('/login');
   };
@@ -287,20 +284,18 @@ export default function ProfileEditPage() {
     toastWarning('Deleting your account is permanent.');
 
     try {
-      const token = localStorage.getItem('accessToken');
-      const res = await fetch('http://localhost:3001/api/settings/delete-account', {
+      const res = await fetch(`${API_BASE_URL}/api/settings/delete-account`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
+          'Content-Type': 'application/json'
         },
+        credentials: 'include',
         body: JSON.stringify({ password: deletePassword })
       });
 
       const data = await res.json();
       if (data.success) {
         toastSuccess('Account deleted successfully.');
-        localStorage.removeItem('accessToken');
         localStorage.removeItem('user');
         router.push('/login');
       } else {

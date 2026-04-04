@@ -53,12 +53,9 @@ export default function ManageGroupPage() {
       }
 
       // Fetch all users for adding members
-      const token = localStorage.getItem('accessToken');
-      const usersResponse = await fetch('http://localhost:3001/api/profile/all', {
+      const { API_BASE_URL } = await import('../../../../services/apiBase');
+      const usersResponse = await fetch(`${API_BASE_URL}/api/profile/all`, {
         credentials: 'include',
-        headers: {
-          'Authorization': token ? `Bearer ${token}` : '',
-        },
       });
       
       if (usersResponse.ok) {

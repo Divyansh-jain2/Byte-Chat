@@ -1,3 +1,9 @@
+// Helper to ensure ArrayBuffer from Uint8Array (handles ArrayBufferLike)
+function toArrayBuffer(u8: Uint8Array): ArrayBuffer {
+    const ab = new ArrayBuffer(u8.byteLength);
+    new Uint8Array(ab).set(u8);
+    return ab;
+}
 /**
  * E2EE Utilities (Web Crypto API)
  * Strictly aligned with the specifications in 'Curr' design document.
@@ -35,18 +41,19 @@ export async function generateUserKeyPair(): Promise<{ publicKey: string; privat
  */
 async function deriveKeyFromPassword(password: string, salt: Uint8Array): Promise<CryptoKey> {
     const enc = new TextEncoder();
+    const encodedPassword = enc.encode(password);
     const keyMaterial = await window.crypto.subtle.importKey(
         'raw',
-        enc.encode(password),
+        new Uint8Array(encodedPassword),
         { name: 'PBKDF2' },
         false,
         ['deriveKey']
     );
 
-    return (window.crypto.subtle as any).deriveKey(
+    return window.crypto.subtle.deriveKey(
         {
             name: 'PBKDF2',
-            salt: salt,
+            salt: new Uint8Array(salt),
             iterations: PBKDF2_ITERATIONS,
             hash: PBKDF2_HASH,
         },
@@ -65,9 +72,10 @@ export async function encryptPrivateKey(privateKeyPem: string, password: string)
     const salt = window.crypto.getRandomValues(new Uint8Array(16));
     const iv = window.crypto.getRandomValues(new Uint8Array(12));
 
+
     const key = await deriveKeyFromPassword(password, salt);
-    const encrypted = await (window.crypto.subtle as any).encrypt(
-        { name: 'AES-GCM', iv },
+    const encrypted = await window.crypto.subtle.encrypt(
+        { name: 'AES-GCM', iv: toArrayBuffer(iv) },
         key,
         enc.encode(privateKeyPem)
     );
@@ -86,12 +94,11 @@ export async function decryptPrivateKey(encryptedData: string, password: string)
     const salt = base64ToBuf(saltB64);
     const iv = base64ToBuf(ivB64);
     const data = base64ToBuf(dataB64);
-
     const key = await deriveKeyFromPassword(password, salt);
-    const decrypted = await (window.crypto.subtle as any).decrypt(
-        { name: 'AES-GCM', iv },
+    const decrypted = await window.crypto.subtle.decrypt(
+        { name: 'AES-GCM', iv: toArrayBuffer(iv) },
         key,
-        data
+        toArrayBuffer(data)
     );
 
     return new TextDecoder().decode(decrypted);
@@ -121,9 +128,9 @@ export async function exportKeyToBase64(key: CryptoKey): Promise<string> {
  */
 export async function importKeyFromBase64(base64Key: string): Promise<CryptoKey> {
     const buf = base64ToBuf(base64Key);
-    return (window.crypto.subtle as any).importKey(
+    return window.crypto.subtle.importKey(
         'raw',
-        buf,
+        toArrayBuffer(buf),
         { name: 'AES-GCM', length: 256 },
         true,
         ['encrypt', 'decrypt']
@@ -135,13 +142,12 @@ export async function importKeyFromBase64(base64Key: string): Promise<CryptoKey>
  */
 export async function encryptKeyWithPublicKey(aesKeyBase64: string, publicKeyPem: string): Promise<string> {
     const pubKey = await importPublicKey(publicKeyPem);
-    // const enc = new TextEncoder();
-    const encrypted = await (window.crypto.subtle as any).encrypt(
+    const aesKeyBuf = base64ToBuf(aesKeyBase64);
+    const encrypted = await window.crypto.subtle.encrypt(
         { name: 'RSA-OAEP' },
         pubKey,
-        base64ToBuf(aesKeyBase64)
+        toArrayBuffer(aesKeyBuf)
     );
-
     return bufToBase64(encrypted);
 }
 
@@ -149,12 +155,12 @@ export async function encryptKeyWithPublicKey(aesKeyBase64: string, publicKeyPem
  * Decrypt AES key using RSA Private Key (RSA-OAEP)
  */
 export async function decryptKeyWithPrivateKey(privateKey: CryptoKey, encryptedKeyB64: string): Promise<string> {
-    const decrypted = await (window.crypto.subtle as any).decrypt(
+    const encryptedKeyBuf = base64ToBuf(encryptedKeyB64);
+    const decrypted = await window.crypto.subtle.decrypt(
         { name: 'RSA-OAEP' },
         privateKey,
-        base64ToBuf(encryptedKeyB64)
+        toArrayBuffer(encryptedKeyBuf)
     );
-
     return bufToBase64(decrypted);
 }
 
@@ -165,7 +171,7 @@ export async function encryptMessageAES(text: string, aesKey: CryptoKey): Promis
     const enc = new TextEncoder();
     const iv = window.crypto.getRandomValues(new Uint8Array(12));
 
-    const encrypted = await (window.crypto.subtle as any).encrypt(
+    const encrypted = await window.crypto.subtle.encrypt(
         { name: 'AES-GCM', iv },
         aesKey,
         enc.encode(text)
@@ -190,29 +196,29 @@ export async function decryptMessageAES(ciphertext: string, iv: string, authTag:
     const cipherBuf = base64ToBuf(ciphertext);
     const ivBuf = base64ToBuf(iv);
     const tagBuf = base64ToBuf(authTag);
-
-    // Combine ciphertext and tag for SubtleCrypto
     const combined = new Uint8Array(cipherBuf.length + tagBuf.length);
     combined.set(new Uint8Array(cipherBuf));
     combined.set(new Uint8Array(tagBuf), cipherBuf.length);
-
-    const decrypted = await (window.crypto.subtle as any).decrypt(
-        { name: 'AES-GCM', iv: ivBuf },
+    const decrypted = await window.crypto.subtle.decrypt(
+        { name: 'AES-GCM', iv: toArrayBuffer(ivBuf) },
         aesKey,
-        combined
+        toArrayBuffer(combined)
     );
-
     return new TextDecoder().decode(decrypted);
 }
-
-// --- Helper Functions ---
 
 function bufToBase64(buf: ArrayBuffer): string {
     return btoa(String.fromCharCode(...new Uint8Array(buf)));
 }
 
 function base64ToBuf(b64: string): Uint8Array {
-    return Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+    const binary = atob(b64);
+    const len = binary.length;
+    const buf = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+        buf[i] = binary.charCodeAt(i);
+    }
+    return buf;
 }
 
 function arrayBufferToPem(buf: ArrayBuffer, type: 'PUBLIC KEY' | 'PRIVATE KEY'): string {
@@ -221,25 +227,43 @@ function arrayBufferToPem(buf: ArrayBuffer, type: 'PUBLIC KEY' | 'PRIVATE KEY'):
     return `-----BEGIN ${type}-----\n${lines}\n-----END ${type}-----`;
 }
 
+
+
+
 export async function importPublicKey(pem: string): Promise<CryptoKey> {
-    const b64 = pem.replace(/-----BEGIN PUBLIC KEY-----|-----END PUBLIC KEY-----|\n|\r/g, '');
+    const b64 = pem.replace(
+        /-----BEGIN PUBLIC KEY-----|-----END PUBLIC KEY-----|\n|\r/g,
+        ''
+    );
+
     const buf = base64ToBuf(b64);
-    return (window.crypto.subtle as any).importKey(
+    const keyBuffer = toArrayBuffer(buf);
+    return window.crypto.subtle.importKey(
         'spki',
-        buf,
-        { name: 'RSA-OAEP', hash: 'SHA-256' },
+        keyBuffer,
+        {
+            name: 'RSA-OAEP',
+            hash: 'SHA-256'
+        },
         false,
         ['encrypt']
     );
 }
 
 export async function importPrivateKey(pem: string): Promise<CryptoKey> {
-    const b64 = pem.replace(/-----BEGIN PRIVATE KEY-----|-----END PRIVATE KEY-----|\n|\r/g, '');
+    const b64 = pem.replace(
+        /-----BEGIN PRIVATE KEY-----|-----END PRIVATE KEY-----|\n|\r/g,
+        ''
+    );
     const buf = base64ToBuf(b64);
-    return (window.crypto.subtle as any).importKey(
+    const keyBuffer: ArrayBuffer = new Uint8Array(buf).buffer;
+    return window.crypto.subtle.importKey(
         'pkcs8',
-        buf,
-        { name: 'RSA-OAEP', hash: 'SHA-256' },
+        keyBuffer,
+        {
+            name: 'RSA-OAEP',
+            hash: 'SHA-256'
+        },
         false,
         ['decrypt']
     );

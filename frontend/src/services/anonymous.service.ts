@@ -1,13 +1,11 @@
 import axios from 'axios';
 
-const API_URL = 'http://localhost:3001/api';
+import { API_BASE_URL } from './apiBase';
+const API_URL = `${API_BASE_URL}/api`;
 
 const getAuthHeader = () => {
-  const token = localStorage.getItem('accessToken');
   return {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
+    withCredentials: true,
   };
 };
 

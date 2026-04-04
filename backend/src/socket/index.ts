@@ -140,7 +140,13 @@ export function initializeSocket(httpServer: HTTPServer) {
   // Authentication middleware
   io.use(async (socket, next) => {
     try {
-      const token = socket.handshake.auth.token || socket.handshake.headers.authorization?.split(' ')[1];
+      const cookieHeader = socket.handshake.headers.cookie;
+      const accessTokenCookie = cookieHeader
+        ?.split(';')
+        .map((part) => part.trim())
+        .find((part) => part.startsWith('accessToken='))
+        ?.slice('accessToken='.length);
+      const token = socket.handshake.auth.token || socket.handshake.headers.authorization?.split(' ')[1] || accessTokenCookie;
       const sessionId = socket.handshake.auth.sessionId || socket.handshake.headers['x-session-id'];
 
       // 1. Try Session ID (Redis)

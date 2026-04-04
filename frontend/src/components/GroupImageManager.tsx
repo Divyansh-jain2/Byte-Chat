@@ -30,11 +30,9 @@ export default function GroupImageManager({
   
   const fetchGroup = useCallback(async () => {
     try {
-      const token = localStorage.getItem('accessToken');
-      if (!token) return;
-
-      const response = await fetch(`http://localhost:3001/api/groups/${groupId}`, {
-        headers: { Authorization: `Bearer ${token}` }
+      const { API_BASE_URL } = await import('../services/apiBase');
+      const response = await fetch(`${API_BASE_URL}/api/groups/${groupId}`, {
+        credentials: 'include'
       });
 
       const data = await response.json();
@@ -58,13 +56,7 @@ export default function GroupImageManager({
     setMessage(null);
 
     try {
-      const token = localStorage.getItem('accessToken');
-      if (!token) {
-        setMessage({ type: 'error', text: 'Please login to upload image' });
-        return;
-      }
-
-      const result = await uploadGroupPicture(groupId, file, token);
+      const result = await uploadGroupPicture(groupId, file, '');
       const group = result.data?.group;
       
       if (result.success && group) {
@@ -111,13 +103,7 @@ export default function GroupImageManager({
     setMessage(null);
 
     try {
-      const token = localStorage.getItem('accessToken');
-      if (!token) {
-        setMessage({ type: 'error', text: 'Please login to delete image' });
-        return;
-      }
-
-      const result = await deleteGroupPicture(groupId, token);
+      const result = await deleteGroupPicture(groupId, '');
       
       if (result.success) {
         setMessage({ type: 'success', text: 'Group picture deleted successfully!' });
@@ -159,13 +145,7 @@ export default function GroupImageManager({
     setMessage(null);
 
     try {
-      const token = localStorage.getItem('accessToken');
-      if (!token) {
-        setMessage({ type: 'error', text: 'Please login to select avatar' });
-        return;
-      }
-
-      const result = await selectGroupPresetAvatar(groupId, avatarId, token);
+      const result = await selectGroupPresetAvatar(groupId, avatarId, '');
       const group = result.data?.group;
       
       if (result.success && group) {

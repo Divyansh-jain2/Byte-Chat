@@ -1,8 +1,7 @@
 import axios from 'axios';
 import { User as AuthUser } from '@/types/auth.types';
 import { Group as ChatGroup } from '@/types/chat.types';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
+import { API_BASE_URL, getApiUrl } from './api.config';
 
 export interface ImageUploadResponse {
   success: boolean;
@@ -42,20 +41,19 @@ export const getDefaultGroupDP = (): string => {
  * Upload profile picture
  */
 export const uploadProfilePicture = async (
-  file: File,
-  token: string
+  file: File
 ): Promise<ImageUploadResponse> => {
   const formData = new FormData();
   formData.append('image', file);
 
   const response = await axios.post(
-    `${API_URL}/api/profile/upload-picture`,
+    getApiUrl('/api/profile/upload-picture'),
     formData,
     {
       headers: {
         'Content-Type': 'multipart/form-data',
-        Authorization: `Bearer ${token}`,
       },
+      withCredentials: true,
     }
   );
 
@@ -65,15 +63,11 @@ export const uploadProfilePicture = async (
 /**
  * Delete profile picture (reset to default)
  */
-export const deleteProfilePicture = async (
-  token: string
-): Promise<ImageUploadResponse> => {
+export const deleteProfilePicture = async (): Promise<ImageUploadResponse> => {
   const response = await axios.delete(
-    `${API_URL}/api/profile/delete-picture`,
+    getApiUrl('/api/profile/delete-picture'),
     {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
+      withCredentials: true,
     }
   );
 
@@ -85,20 +79,19 @@ export const deleteProfilePicture = async (
  */
 export const uploadGroupPicture = async (
   groupId: string,
-  file: File,
-  token: string
+  file: File
 ): Promise<ImageUploadResponse> => {
   const formData = new FormData();
   formData.append('image', file);
 
   const response = await axios.post(
-    `${API_URL}/api/groups/${groupId}/upload-picture`,
+    getApiUrl(`/api/groups/${groupId}/upload-picture`),
     formData,
     {
       headers: {
         'Content-Type': 'multipart/form-data',
-        Authorization: `Bearer ${token}`,
       },
+      withCredentials: true,
     }
   );
 
@@ -109,15 +102,12 @@ export const uploadGroupPicture = async (
  * Delete group picture
  */
 export const deleteGroupPicture = async (
-  groupId: string,
-  token: string
+  groupId: string
 ): Promise<ImageUploadResponse> => {
   const response = await axios.delete(
-    `${API_URL}/api/groups/${groupId}/delete-picture`,
+    getApiUrl(`/api/groups/${groupId}/delete-picture`),
     {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
+      withCredentials: true,
     }
   );
 
@@ -148,17 +138,16 @@ export const getGroupDP = (dpUrl: string | null | undefined): string => {
  * Select preset avatar for profile
  */
 export const selectPresetAvatar = async (
-  avatarId: string,
-  token: string
+  avatarId: string
 ): Promise<ImageUploadResponse> => {
   const response = await axios.post(
-    `${API_URL}/api/profile/select-avatar`,
+    `${API_BASE_URL}/api/profile/select-avatar`,
     { avatarId },
     {
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
       },
+      withCredentials: true,
     }
   );
 
@@ -170,17 +159,16 @@ export const selectPresetAvatar = async (
  */
 export const selectGroupPresetAvatar = async (
   groupId: string,
-  avatarId: string,
-  token: string
+  avatarId: string
 ): Promise<ImageUploadResponse> => {
   const response = await axios.post(
-    `${API_URL}/api/groups/${groupId}/select-avatar`,
+    `${API_BASE_URL}/api/groups/${groupId}/select-avatar`,
     { avatarId },
     {
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
       },
+      withCredentials: true,
     }
   );
 

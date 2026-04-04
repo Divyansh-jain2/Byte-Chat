@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { useNotifications } from '@/contexts/NotificationContext';
+import { authService } from '@/services/auth.service';
 
 const HIDDEN_PATH_PREFIXES = ['/login', '/signup'];
 const HIDDEN_EXACT_PATHS = ['/', '/terms', '/privacy', '/contact', '/encryption'];
@@ -115,7 +116,7 @@ export default function NotificationCenter() {
   const router = useRouter();
   const { notifications, count, markRead, deleteOne, refresh } = useNotifications();
   const [open, setOpen] = useState(false);
-  const isAuthed = typeof window !== 'undefined' && Boolean(localStorage.getItem('accessToken'));
+  const isAuthed = typeof window !== 'undefined' && Boolean(authService.getCurrentUser());
 
   const hidden = useMemo(() => {
     if (HIDDEN_EXACT_PATHS.includes(pathname)) return true;

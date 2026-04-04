@@ -781,8 +781,7 @@ export default function GroupChatPage() {
 
   const handleEdit = useCallback(async (messageId: string, newContent: string) => {
     try {
-      const token = localStorage.getItem('accessToken');
-      if (!token) {
+      if (!localStorage.getItem('user')) {
         toast.error('Authentication required');
         return;
       }
@@ -808,7 +807,7 @@ export default function GroupChatPage() {
         encryptedContent,
         contentIv,
         contentAuthTag,
-        token
+        ''
       );
       toast.success('Message edited');
       fetchMessages();
@@ -820,12 +819,11 @@ export default function GroupChatPage() {
 
   const handleDelete = useCallback(async (messageId: string, deleteForEveryone: boolean) => {
     try {
-      const token = localStorage.getItem('accessToken');
-      if (!token) {
+      if (!localStorage.getItem('user')) {
         toast.error('Authentication required');
         return;
       }
-      await messageManagementService.deleteMessage(messageId, deleteForEveryone, token);
+      await messageManagementService.deleteMessage(messageId, deleteForEveryone, '');
       toast.success(deleteForEveryone ? 'Message deleted for everyone' : 'Message deleted for you');
       fetchMessages();
     } catch (error: unknown) {
