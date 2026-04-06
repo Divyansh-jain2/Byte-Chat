@@ -11,7 +11,7 @@ interface SocketContextType {
   leaveConversation: (conversationId: string) => void;
   joinGroup: (groupId: string) => void;
   leaveGroup: (groupId: string) => void;
-  sendTyping: (conversationId: string, isTyping: boolean) => void;
+  sendTyping: (chatId: string, chatType: 'conversation' | 'group', isTyping: boolean) => void;
   /** Register a handler for offline messages delivered on reconnect */
   onOfflineMessages: (handler: (msg: unknown) => void) => () => void;
 }
@@ -127,9 +127,9 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
       const s = socketRef.current;
       if (s && isConnected) s.emit('leave-group', groupId);
     },
-    sendTyping: (conversationId: string, isTyping: boolean) => {
+    sendTyping: (chatId: string, chatType: 'conversation' | 'group', isTyping: boolean) => {
       const s = socketRef.current;
-      if (s && isConnected) s.emit('typing', { conversationId, isTyping });
+      if (s && isConnected) s.emit('typing', { chatId, chatType, isTyping });
     },
     onOfflineMessages,
   }), [isConnected, onOfflineMessages]);

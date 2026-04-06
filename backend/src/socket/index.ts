@@ -94,12 +94,13 @@ function maybeStartSocketMetricsLogger() {
   }, intervalMs);
 }
 
-function fallbackRoomEmit(roomName: string, event: string, data: any) {
+function fallbackRoomEmit(roomName: string, event: string, data: any, excludeSocketId?: string) {
   roomEmitMetrics.fallbackEmits += 1;
-  _io?.to(roomName).emit(event, data);
+  const target = excludeSocketId ? _io?.to(roomName).except(excludeSocketId) : _io?.to(roomName);
+  target?.emit(event, data);
 }
 
-async function emitToTrackedRoom(chatId: string, roomName: string, event: string, data: any) {
+async function emitToTrackedRoom(chatId: string, roomName: string, event: string, data: any, excludeSocketId?: string) {
   const io = _io;
   if (!io) return;
 
@@ -110,7 +111,9 @@ async function emitToTrackedRoom(chatId: string, roomName: string, event: string
       roomEmitMetrics.trackedSocketDeliveries += socketIds.length;
       // Emit directly to socket IDs tracked in Redis room set.
       for (const socketId of socketIds) {
-        io.to(socketId).emit(event, data);
+        if (socketId !== excludeSocketId) {
+          io.to(socketId).emit(event, data);
+        }
       }
       return;
     }
@@ -122,7 +125,7 @@ async function emitToTrackedRoom(chatId: string, roomName: string, event: string
   }
 
   // Fallback path for compatibility/safety.
-  fallbackRoomEmit(roomName, event, data);
+  fallbackRoomEmit(roomName, event, data, excludeSocketId);
 }
 
 export function initializeSocket(httpServer: HTTPServer) {
@@ -130,7 +133,7 @@ export function initializeSocket(httpServer: HTTPServer) {
 
   const io = new SocketServer(httpServer, {
     cors: {
-      origin: process.env.FRONTEND_URL,
+      origin: config.cors.frontendUrl,
       credentials: true,
     },
   });
@@ -253,52 +256,37 @@ export function initializeSocket(httpServer: HTTPServer) {
 
     // Handle typing indicator
     socket.on('typing', async (payload) => {
-      // payload could be a string (chatId) or an object { conversationId, isTyping }
       let chatId = '';
-      let isUserTyping = true; // default to true if using the simple string format
+      let chatType: 'conversation' | 'group' = 'conversation';
+      let isUserTyping = true;
 
       if (typeof payload === 'string') {
         chatId = payload;
       } else if (payload && typeof payload === 'object') {
-        chatId = payload.conversationId || payload.chatId;
+        chatId = payload.chatId || payload.conversationId || payload.groupId;
+        chatType = payload.chatType || (payload.groupId ? 'group' : 'conversation');
         isUserTyping = payload.isTyping !== undefined ? payload.isTyping : true;
       }
 
       if (!chatId) return;
 
-      // Update Redis status if typing
+      // Update Redis typing status
       if (isUserTyping) {
         await setTyping(chatId, userId);
       } else {
         await clearTyping(chatId, userId);
       }
 
-      // Broadcast to sockets tracked in Redis room set (excluding sender socket).
-      const roomSockets = await getRoomSockets(chatId);
-      if (roomSockets.length > 0) {
-        roomSockets.forEach((sId) => {
-          if (sId !== socket.id) {
-            _io?.to(sId).emit('user-typing', {
-              chatId,
-              userId,
-              isTyping: isUserTyping,
-            });
-          }
-        });
-      } else {
-        // Safe fallback for sessions that haven't yet registered in Redis room set.
-        socket.to(`conversation:${chatId}`).emit('user-typing', {
-          userId,
-          conversationId: chatId,
-          isTyping: isUserTyping,
-        });
-
-        socket.to(`group:${chatId}`).emit('user-typing', {
-          userId,
-          conversationId: chatId,
-          isTyping: isUserTyping,
-        });
-      }
+      // Use canonical emit target per chat type
+      const roomName = `${chatType}:${chatId}`;
+      
+      // Broadcast to tracked sockets in Redis (cross-server) or fallback to local room.
+      // Note: We use the helper to ensure cross-node delivery via Redis if adapter is enabled.
+      void emitToTrackedRoom(chatId, roomName, 'user-typing', {
+        chatId,
+        userId,
+        isTyping: isUserTyping,
+      }, socket.id);
     });
 
     // Handle message read status

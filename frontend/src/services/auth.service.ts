@@ -1,89 +1,55 @@
-
 import { SignupRequest, VerifyOTPRequest, LoginRequest, ForgotPasswordRequest, ResetPasswordRequest, AuthResponse, User } from '@/types/auth.types';
-import {getApiUrl} from './api.config';
+import apiClient from '@/lib/apiClient';
 
 class AuthService {
-  private baseUrl = getApiUrl('/api/auth');
-
-  private async request<T>(endpoint: string, options?: RequestInit): Promise<T> {
-    const response = await fetch(`${this.baseUrl}${endpoint}`, {
-      ...options,
-      headers: {
-        'Content-Type': 'application/json',
-        ...options?.headers
-      },
-      credentials: 'include' // Important for cookies
+  private async request<T, D = unknown>(method: 'GET' | 'POST' | 'PUT' | 'DELETE',
+    endpoint: string, data?: D): Promise<T> {
+    const response = await apiClient({
+      method,
+      url: `/api/auth${endpoint}`,
+      data,
     });
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      throw new Error(data.message || 'Something went wrong');
-    }
-
-    return data;
+    return response.data;
   }
 
   async signup(data: SignupRequest): Promise<AuthResponse> {
-    return this.request<AuthResponse>('/signup', {
-      method: 'POST',
-      body: JSON.stringify(data)
-    });
+    return this.request<AuthResponse>('POST', '/signup', data);
   }
 
   async verifyOTP(data: VerifyOTPRequest): Promise<AuthResponse> {
-    const response = await this.request<AuthResponse>('/verify-otp', {
-      method: 'POST',
-      body: JSON.stringify(data)
-    });
-
-    // Store user if present
+    const response = await this.request<AuthResponse>('POST', '/verify-otp', data);
     if (response.data?.user) {
       localStorage.setItem('user', JSON.stringify(response.data.user));
     }
-
     return response;
   }
 
   async login(data: LoginRequest): Promise<AuthResponse> {
-    const response = await this.request<AuthResponse>('/login', {
-      method: 'POST',
-      body: JSON.stringify(data)
-    });
-
-    // Store user
+    const response = await this.request<AuthResponse>('POST', '/login', data);
     if (response.data?.user) {
       localStorage.setItem('user', JSON.stringify(response.data.user));
     }
-
     return response;
   }
 
   async logout(): Promise<void> {
-    await this.request('/logout', {
-      method: 'POST'
-    });
+    try {
+      await this.request('POST', '/logout');
+    } finally {
+      localStorage.removeItem('user');
+    }
+  }
 
-    // Clear local storage
-    localStorage.removeItem('user');
+  async refresh(): Promise<AuthResponse> {
+    return this.request<AuthResponse>('POST', '/refresh');
   }
 
   async forgotPassword(data: ForgotPasswordRequest): Promise<AuthResponse> {
-    return this.request<AuthResponse>('/forgot-password', {
-      method: 'POST',
-      body: JSON.stringify(data)
-    });
+    return this.request<AuthResponse>('POST', '/forgot-password', data);
   }
 
   async resetPassword(data: ResetPasswordRequest): Promise<AuthResponse> {
-    return this.request<AuthResponse>('/reset-password', {
-      method: 'POST',
-      body: JSON.stringify(data)
-    });
-  }
-
-  getAccessToken(): string | null {
-    return null;
+    return this.request<AuthResponse>('POST', '/reset-password', data);
   }
 
   getCurrentUser(): User | null {

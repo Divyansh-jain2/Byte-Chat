@@ -1,21 +1,14 @@
-import axios from 'axios';
-import type { ChatRequest, Conversation } from '@/types/chat.types';
+import apiClient from '@/lib/apiClient';
+import type { ChatRequest, Conversation, Message } from '@/types/chat.types';
 import { clearInFlightGetRequestDedupe, dedupedGet } from './request-dedupe.service';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL;
-
-const api = axios.create({
-  baseURL: `${API_URL}/api/chat`,
-  withCredentials: true,
-});
-
+const api = apiClient;
+const CHAT_PREFIX = '/api/chat';
 const CHAT_GET_DEDUPE_NAMESPACE = 'chat|';
 
 export const chatService = {
-  // Send chat request (regular chat only)
   async sendChatRequest(receiverId: string) {
-    // Redirect to conversation creation
-    const response = await api.post('/conversation', {
+    const response = await api.post(`${CHAT_PREFIX}/conversation`, {
       otherUserId: receiverId,
     });
     clearInFlightGetRequestDedupe(CHAT_GET_DEDUPE_NAMESPACE);
@@ -26,13 +19,13 @@ export const chatService = {
   async getChatRequests(): Promise<ChatRequest[]> {
     const response = await dedupedGet<{
       data: ChatRequest[];
-    }>(api, '/requests', undefined, { namespace: CHAT_GET_DEDUPE_NAMESPACE });
+    }>(api, `${CHAT_PREFIX}/requests`, undefined, { namespace: CHAT_GET_DEDUPE_NAMESPACE });
     return response.data.data;
   },
 
   // Respond to chat request
   async respondToChatRequest(requestId: string, action: 'accept' | 'reject') {
-    const response = await api.put(`/request/${requestId}`, { action });
+    const response = await api.put(`${CHAT_PREFIX}/request/${requestId}`, { action });
     clearInFlightGetRequestDedupe(CHAT_GET_DEDUPE_NAMESPACE);
     return response.data;
   },
@@ -41,21 +34,16 @@ export const chatService = {
   async getConversations(): Promise<Conversation[]> {
     const response = await dedupedGet<{
       data: Conversation[];
-    }>(api, '/conversations', undefined, { namespace: CHAT_GET_DEDUPE_NAMESPACE });
+    }>(api, `${CHAT_PREFIX}/conversations`, undefined, { namespace: CHAT_GET_DEDUPE_NAMESPACE });
     return response.data.data;
   },
 
   // Get messages for a conversation
-  async getMessages(
-    conversationId: string,
-    limit: number = 50,
-    before?: string,
-    q?: string,
-    prefetchNext: boolean = true,
-  ) {
+  async getMessages( conversationId: string, limit: number = 50,
+    before?: string, q?: string, prefetchNext: boolean = true, ): Promise<Message[]> {
     const response = await dedupedGet<{
-      data: any;
-    }>(api, `/conversation/${conversationId}/messages`, {
+      data: Message[];
+    }>(api, `${CHAT_PREFIX}/conversation/${conversationId}/messages`, {
       params: { limit, before, q, prefetchNext },
     }, { namespace: CHAT_GET_DEDUPE_NAMESPACE });
     return response.data.data;
@@ -75,21 +63,21 @@ export const chatService = {
     keyId?: string;
     parentMessageId?: string;
   }) {
-    const response = await api.post('/send', data);
+    const response = await api.post(`${CHAT_PREFIX}/send`, data);
     clearInFlightGetRequestDedupe(CHAT_GET_DEDUPE_NAMESPACE);
     return response.data;
   },
 
   // Update message status
   async updateMessageStatus(messageId: string, status: 'delivered' | 'read') {
-    const response = await api.put(`/message/${messageId}/status`, { status });
+    const response = await api.put(`${CHAT_PREFIX}/message/${messageId}/status`, { status });
     clearInFlightGetRequestDedupe(CHAT_GET_DEDUPE_NAMESPACE);
     return response.data;
   },
 
   // Delete message
   async deleteMessage(messageId: string, deleteFor: 'me' | 'everyone' = 'me') {
-    const response = await api.delete(`/message/${messageId}`, {
+    const response = await api.delete(`${CHAT_PREFIX}/message/${messageId}`, {
       data: { deleteFor },
     });
     clearInFlightGetRequestDedupe(CHAT_GET_DEDUPE_NAMESPACE);
@@ -98,14 +86,14 @@ export const chatService = {
 
   // Block user in conversation
   async blockUser(conversationId: string) {
-    const response = await api.post(`/block/${conversationId}`);
+    const response = await api.post(`${CHAT_PREFIX}/block/${conversationId}`);
     clearInFlightGetRequestDedupe(CHAT_GET_DEDUPE_NAMESPACE);
     return response.data;
   },
 
   // Unblock user in conversation
   async unblockUser(conversationId: string) {
-    const response = await api.delete(`/unblock/${conversationId}`);
+    const response = await api.delete(`${CHAT_PREFIX}/unblock/${conversationId}`);
     clearInFlightGetRequestDedupe(CHAT_GET_DEDUPE_NAMESPACE);
     return response.data;
   },
@@ -115,8 +103,8 @@ export const chatService = {
     reportedUserId: string;
     conversationId?: string;
     messageId?: string;
-    reason?: string;          // Backwards compatibility
-    reportType?: string;      // New format
+    reason?: string;
+    reportType?: string;
     description?: string;
     evidenceUrls?: string[];
   }) {
@@ -127,7 +115,7 @@ export const chatService = {
       description: data.description || data.reason || 'No description provided'
     };
 
-    const response = await api.post('/report', reportData);
+    const response = await api.post(`${CHAT_PREFIX}/report`, reportData);
     clearInFlightGetRequestDedupe(CHAT_GET_DEDUPE_NAMESPACE);
     return response.data;
   },
@@ -136,8 +124,7 @@ export const chatService = {
   async uploadImage(file: File) {
     const formData = new FormData();
     formData.append('image', file);
-
-    const response = await api.post('/upload-image', formData, {
+    const response = await api.post(`${CHAT_PREFIX}/upload-image`, formData, {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
@@ -156,7 +143,7 @@ export const chatService = {
         }>;
         isAnonymous?: boolean;
       };
-    }>(api, `/${conversationId}/participants/keys`, undefined, { namespace: CHAT_GET_DEDUPE_NAMESPACE });
+    }>(api, `${CHAT_PREFIX}/${conversationId}/participants/keys`, undefined, { namespace: CHAT_GET_DEDUPE_NAMESPACE });
     return response.data.data;
   },
 
@@ -166,7 +153,7 @@ export const chatService = {
     groupId?: string;
     keys: Array<{ userId: string; encryptedKey: string; keyVersion: number }>;
   }) {
-    const response = await api.post('/keys', data);
+    const response = await api.post(`${CHAT_PREFIX}/keys`, data);
     clearInFlightGetRequestDedupe(CHAT_GET_DEDUPE_NAMESPACE);
     return response.data.data;
   },

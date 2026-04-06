@@ -39,6 +39,11 @@ interface GroupMessage extends Message {
   };
 }
 
+interface GroupParticipant {
+  user_id: string;
+  public_key: string;
+}
+
 export default function GroupChatPage() {
   const params = useParams();
   const router = useRouter();
@@ -135,7 +140,7 @@ export default function GroupChatPage() {
       const aesKeyB64 = await exportKeyToBase64(newAesKey);
 
       // Encrypt for all participants
-      const encryptedKeys = await Promise.all(participants.map(async (p: any) => {
+      const encryptedKeys = await Promise.all(participants.map(async (p: GroupParticipant) => {
         const encrypted = await encryptKeyWithPublicKey(aesKeyB64, p.public_key);
         return {
           userId: p.user_id,
@@ -584,7 +589,7 @@ export default function GroupChatPage() {
     if ((!newMessage.trim() && !selectedImage) || sending) return;
 
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-    sendTyping(groupId, false);
+    sendTyping(groupId, 'group', false);
 
     try {
       setSending(true);
@@ -745,31 +750,36 @@ export default function GroupChatPage() {
     setNewMessage(e.target.value);
     
     if (isConnected) {
-      sendTyping(groupId, true);
+      sendTyping(groupId, 'group', true);
       
       if (typingTimeoutRef.current) {
         clearTimeout(typingTimeoutRef.current);
       }
       
       typingTimeoutRef.current = setTimeout(() => {
-        sendTyping(groupId, false);
+        sendTyping(groupId, 'group', false);
       }, 2000);
     }
   };
 
   const formatTime = (dateString: string) => {
     const date = new Date(dateString);
-    const now = new Date();
-    const diff = now.getTime() - date.getTime();
-    const minutes = Math.floor(diff / 60000);
-    const hours = Math.floor(diff / 3600000);
-    const days = Math.floor(diff / 86400000);
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
+  };
 
-    if (minutes < 1) return 'Just now';
-    if (minutes < 60) return `${minutes}m ago`;
-    if (hours < 24) return `${hours}h ago`;
-    if (days < 7) return `${days}d ago`;
-    return date.toLocaleDateString();
+  const formatDateHeader = (dateString: string) => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    
+    const messageDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+
+    if (messageDate.getTime() === today.getTime()) return 'Today';
+    if (messageDate.getTime() === yesterday.getTime()) return 'Yesterday';
+    
+    return date.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
   };
 
   const handleReply = useCallback((message: Message | { message_id: string; encrypted_content?: string; sender?: { name: string } }) => {
@@ -1065,20 +1075,37 @@ export default function GroupChatPage() {
               </div>
             </div>
           ) : (
-            displayedMessages.map((msg) => {
-              const isMyMessage = !!msg.is_my_message;
-              return (
-                <MessageBubble
-                  key={msg.message_id}
-                  message={msg}
-                  isMyMessage={isMyMessage}
-                  onReply={handleReply}
-                  onEdit={handleEdit}
-                  onDelete={handleDelete}
-                  formatTime={formatTime}
-                />
-              );
-            })
+            <div className="flex flex-col gap-3">
+              {(() => {
+                let lastDate = "";
+                return displayedMessages.map((msg) => {
+                  const isMyMessage = !!msg.is_my_message;
+                  const messageDate = new Date(msg.created_at).toDateString();
+                  const showDateHeader = messageDate !== lastDate;
+                  lastDate = messageDate;
+
+                  return (
+                    <div key={msg.message_id} className="flex flex-col gap-3">
+                      {showDateHeader && (
+                        <div className="flex justify-center my-4">
+                          <span className="px-4 py-1.5 rounded-2xl text-[11px] font-bold tracking-wide uppercase glass-strong shadow-sm" style={{ color: 'var(--muted)', background: 'var(--white-10)' }}>
+                            {formatDateHeader(String(msg.created_at))}
+                          </span>
+                        </div>
+                      )}
+                      <MessageBubble
+                        message={msg}
+                        isMyMessage={isMyMessage}
+                        onReply={handleReply}
+                        onEdit={handleEdit}
+                        onDelete={handleDelete}
+                        formatTime={formatTime}
+                      />
+                    </div>
+                  );
+                });
+              })()}
+            </div>
           )}
           {!searchQuery.trim() && typingUsers.length > 0 && (
             <div className="flex animate-fade-in my-2">

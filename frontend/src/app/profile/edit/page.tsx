@@ -73,6 +73,23 @@ export default function ProfileEditPage() {
   const [privacyAllowAnonymousChats, setPrivacyAllowAnonymousChats] = useState(true);
   const [deletePassword, setDeletePassword] = useState('');
 
+  // Sync dob state with profile.dob when profile changes (after save)
+  useEffect(() => {
+    if (profile && profile.dob) {
+      // If dob is ISO string (with T and Z), convert to local yyyy-MM-dd
+      if (profile.dob.length > 10 && profile.dob.includes('T')) {
+        const date = new Date(profile.dob);
+        // Get local date in yyyy-MM-dd
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        setDob(`${year}-${month}-${day}`);
+      } else {
+        setDob(profile.dob);
+      }
+    }
+  }, [profile]);
+
   useEffect(() => {
     setMounted(true);
   }, []);
@@ -95,16 +112,8 @@ export default function ProfileEditPage() {
         const p = profileData.data;
         setProfile(p);
         setBio(p.bio || '');
-        // Handle date properly - extract just the date part
-        if (p.dob) {
-          const date = new Date(p.dob);
-          const year = date.getUTCFullYear();
-          const month = String(date.getUTCMonth() + 1).padStart(2, '0');
-          const day = String(date.getUTCDate()).padStart(2, '0');
-          setDob(`${year}-${month}-${day}`);
-        } else {
-          setDob('');
-        }
+        // Set dob as plain string (no Date conversion)
+        setDob(p.dob || '');
         setDpUrl(p.dp_url || '');
         setInstagramUrl(p.instagram_url || '');
         setTwitterUrl(p.twitter_url || '');

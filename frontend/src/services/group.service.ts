@@ -1,5 +1,4 @@
-import { API_BASE_URL } from './apiBase';
-const API_URL = `${API_BASE_URL}/api/groups`;
+import apiClient from '@/lib/apiClient';
 
 export interface CreateGroupData {
   group_name: string;
@@ -9,202 +8,80 @@ export interface CreateGroupData {
   max_members?: number;
 }
 
+const GROUPS_PREFIX = '/api/groups';
 export const groupService = {
   // Create a new group
   createGroup: async (groupData: CreateGroupData) => {
-    const response = await fetch(API_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      credentials: 'include',
-      body: JSON.stringify(groupData),
-    });
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.message || 'Failed to create group');
-    }
-
-    return response.json();
+    const response = await apiClient.post(GROUPS_PREFIX, groupData);
+    return response.data;
   },
 
   // Get all public groups
   getPublicGroups: async () => {
-    const response = await fetch(`${API_URL}/public`, {
-      credentials: 'include',
-    });
-
-    if (!response.ok) {
-      throw new Error('Failed to fetch public groups');
-    }
-
-    return response.json();
+    const response = await apiClient.get(`${GROUPS_PREFIX}/public`);
+    return response.data;
   },
 
   // Get user's groups
   getMyGroups: async () => {
-    const response = await fetch(`${API_URL}/my-groups`, {
-      credentials: 'include',
-    });
-
-    if (!response.ok) {
-      throw new Error('Failed to fetch your groups');
-    }
-
-    return response.json();
+    const response = await apiClient.get(`${GROUPS_PREFIX}/my-groups`);
+    return response.data;
   },
 
   // Get group details
   getGroupDetails: async (groupId: string) => {
-    const response = await fetch(`${API_URL}/${groupId}`, {
-      credentials: 'include',
-    });
-
-    if (!response.ok) {
-      throw new Error('Failed to fetch group details');
-    }
-
-    return response.json();
+    const response = await apiClient.get(`${GROUPS_PREFIX}/${groupId}`);
+    return response.data;
   },
 
   // Join a public group
   joinGroup: async (groupId: string, isAnonymous: boolean = false) => {
-    const response = await fetch(`${API_URL}/${groupId}/join`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      credentials: 'include',
-      body: JSON.stringify({ is_anonymous: isAnonymous }),
-    });
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.message || 'Failed to join group');
-    }
-
-    return response.json();
+    const response = await apiClient.post(`${GROUPS_PREFIX}/${groupId}/join`, { is_anonymous: isAnonymous });
+    return response.data;
   },
 
   // Get group members
   getGroupMembers: async (groupId: string) => {
-    const response = await fetch(`${API_URL}/${groupId}/members`, {
-      credentials: 'include',
-    });
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.message || 'Failed to fetch group members');
-    }
-
-    return response.json();
+    const response = await apiClient.get(`${GROUPS_PREFIX}/${groupId}/members`);
+    return response.data;
   },
 
   // Add member to group (for admins)
   addMemberToGroup: async (groupId: string, userId: string, isAnonymous: boolean = false) => {
-    const response = await fetch(`${API_URL}/${groupId}/members`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      credentials: 'include',
-      body: JSON.stringify({ user_id: userId, is_anonymous: isAnonymous }),
-    });
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.message || 'Failed to add member');
-    }
-
-    return response.json();
+    const response = await apiClient.post(`${GROUPS_PREFIX}/${groupId}/members`, { user_id: userId, is_anonymous: isAnonymous });
+    return response.data;
   },
 
   // Remove member from group (for admins)
   removeMemberFromGroup: async (groupId: string, memberId: string) => {
-    const response = await fetch(`${API_URL}/${groupId}/members/${memberId}`, {
-      method: 'DELETE',
-      credentials: 'include',
-    });
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.message || 'Failed to remove member');
-    }
-
-    return response.json();
+    const response = await apiClient.delete(`${GROUPS_PREFIX}/${groupId}/members/${memberId}`);
+    return response.data;
   },
 
   // Leave a group
   leaveGroup: async (groupId: string) => {
-    const response = await fetch(`${API_URL}/${groupId}/leave`, {
-      method: 'POST',
-      credentials: 'include',
-    });
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.message || 'Failed to leave group');
-    }
-
-    return response.json();
+    const response = await apiClient.post(`${GROUPS_PREFIX}/${groupId}/leave`);
+    return response.data;
   },
 
   // Update group details (for admins)
   updateGroup: async (groupId: string, groupData: Partial<CreateGroupData>) => {
-    const response = await fetch(`${API_URL}/${groupId}`, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      credentials: 'include',
-      body: JSON.stringify(groupData),
-    });
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.message || 'Failed to update group');
-    }
-
-    return response.json();
+    const response = await apiClient.put(`${GROUPS_PREFIX}/${groupId}`, groupData);
+    return response.data;
   },
 
   // Promote member to admin (for owners)
   promoteMemberToAdmin: async (groupId: string, memberId: string) => {
-    const response = await fetch(`${API_URL}/${groupId}/members/${memberId}/promote`, {
-      method: 'POST',
-      credentials: 'include',
-    });
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.message || 'Failed to promote member');
-    }
-
-    return response.json();
+    const response = await apiClient.post(`${GROUPS_PREFIX}/${groupId}/members/${memberId}/promote`);
+    return response.data;
   },
 
   // Get group messages
   getGroupMessages: async (groupId: string, limit: number = 50, before?: string, q?: string) => {
-    const url = new URL(`${API_URL}/${groupId}/messages`);
-    url.searchParams.set('limit', String(limit));
-    if (before) {
-      url.searchParams.set('before', before);
-    }
-    if (q) {
-      url.searchParams.set('q', q);
-    }
-
-    const response = await fetch(url.toString(), {
-      credentials: 'include',
+    const response = await apiClient.get(`${GROUPS_PREFIX}/${groupId}/messages`, {
+      params: { limit, before, q }
     });
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.message || 'Failed to fetch group messages');
-    }
-
-    return response.json();
+    return response.data;
   },
 
   // Send group message
@@ -220,21 +97,8 @@ export const groupService = {
     keyId?: string;
     parentMessageId?: string;
   }) => {
-    const response = await fetch(`${API_URL}/${groupId}/messages`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      credentials: 'include',
-      body: JSON.stringify(data),
-    });
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.message || 'Failed to send group message');
-    }
-
-    return response.json();
+    const response = await apiClient.post(`${GROUPS_PREFIX}/${groupId}/messages`, data);
+    return response.data;
   },
 
   // Create a poll (admins only)
@@ -246,140 +110,60 @@ export const groupService = {
     expires_in_hours?: number;
     options?: string[]; // For General polls
   }) => {
-    const response = await fetch(`${API_URL}/${groupId}/polls`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      credentials: 'include',
-      body: JSON.stringify(pollData),
-    });
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.message || 'Failed to create poll');
-    }
-
-    return response.json();
+    const response = await apiClient.post(`${GROUPS_PREFIX}/${groupId}/polls`, pollData);
+    return response.data;
   },
 
   // Get group polls
   getGroupPolls: async (groupId: string, status: string = 'active') => {
-    const url = new URL(`${API_URL}/${groupId}/polls`);
-    if (status && status !== 'all') {
-      url.searchParams.set('status', status);
-    }
-
-    const response = await fetch(url.toString(), {
-      credentials: 'include',
+    const response = await apiClient.get(`${GROUPS_PREFIX}/${groupId}/polls`, {
+      params: { status: status && status !== 'all' ? status : undefined }
     });
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.message || 'Failed to fetch polls');
-    }
-
-    return response.json();
+    return response.data;
   },
 
   // Vote on a poll
   voteOnPoll: async (groupId: string, pollId: string, voteValue?: boolean, optionId?: string) => {
-    // const body: any = {};
     const body: { vote_value?: boolean; option_id?: string } = {};
     if (typeof voteValue === 'boolean') body.vote_value = voteValue;
     if (optionId) body.option_id = optionId;
-    const response = await fetch(`${API_URL}/${groupId}/polls/${pollId}/vote`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      credentials: 'include',
-      body: JSON.stringify(body),
-    });
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.message || 'Failed to vote on poll');
-    }
-
-    return response.json();
+    const response = await apiClient.post(`${GROUPS_PREFIX}/${groupId}/polls/${pollId}/vote`, body);
+    return response.data;
   },
+
   // Get poll results (for General polls)
   getPollResults: async (groupId: string, pollId: string) => {
-    const response = await fetch(`${API_URL}/${groupId}/polls/${pollId}/results`, {
-      credentials: 'include',
-    });
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.message || 'Failed to fetch poll results');
-    }
-    return response.json();
+    const response = await apiClient.get(`${GROUPS_PREFIX}/${groupId}/polls/${pollId}/results`);
+    return response.data;
   },
 
   // Cancel an active poll (creator or admin)
   cancelPoll: async (groupId: string, pollId: string, reason?: string) => {
-    const response = await fetch(`${API_URL}/${groupId}/polls/${pollId}`, {
-      method: 'DELETE',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      credentials: 'include',
-      body: JSON.stringify({ reason }),
+    const response = await apiClient.delete(`${GROUPS_PREFIX}/${groupId}/polls/${pollId}`, {
+      data: { reason }
     });
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.message || 'Failed to cancel poll');
-    }
-
-    return response.json();
+    return response.data;
   },
 
   // Manually execute a passed poll (admin only)
   executePoll: async (groupId: string, pollId: string) => {
-    const response = await fetch(`${API_URL}/${groupId}/polls/${pollId}/execute`, {
-      method: 'POST',
-      credentials: 'include',
-    });
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.message || 'Failed to execute poll');
-    }
-
-    return response.json();
+    const response = await apiClient.post(`${GROUPS_PREFIX}/${groupId}/polls/${pollId}/execute`);
+    return response.data;
   },
 
   // Upload group chat image
   uploadImage: async (groupId: string, file: File) => {
     const formData = new FormData();
     formData.append('image', file);
-
-    const response = await fetch(`${API_URL}/${groupId}/upload-image`, {
-      method: 'POST',
-      credentials: 'include',
-      body: formData,
+    const response = await apiClient.post(`${GROUPS_PREFIX}/${groupId}/upload-image`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
     });
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.message || 'Failed to upload image');
-    }
-
-    return response.json();
+    return response.data;
   },
 
   // Get public keys of all participants in a group
   getGroupParticipantPublicKeys: async (groupId: string) => {
-    const response = await fetch(`${API_URL}/${groupId}/participants/keys`, {
-      credentials: 'include',
-    });
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.message || 'Failed to fetch group public keys');
-    }
-
-    return response.json();
+    const response = await apiClient.get(`${GROUPS_PREFIX}/${groupId}/participants/keys`);
+    return response.data;
   },
 };

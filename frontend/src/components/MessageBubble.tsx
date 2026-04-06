@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import dynamic from 'next/dynamic';
 import Image from 'next/image';
 import { messageManagementService } from '@/services/message-management.service';
@@ -83,11 +83,19 @@ export default function MessageBubble({
   }, [showFullEmojiPicker]);
 
   // Sync editContent when message updates (important for E2EE decryption)
+  // useEffect(() => {
+  //   if (isEditing) {
+  //     setEditContent(message.encrypted_content || '');
+  //   }
+  // }, [isEditing, message.encrypted_content]);
+
   useEffect(() => {
     if (isEditing) {
       setEditContent(message.encrypted_content || '');
     }
-  }, [isEditing, message.encrypted_content]);
+    // Only run when isEditing transitions to true
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isEditing && message.encrypted_content]);
 
   const handleReaction = useCallback(async (emoji: string) => {
     // console.log('[MessageBubble] Reaction clicked:', emoji);
@@ -144,11 +152,34 @@ export default function MessageBubble({
       }
       setShowEmojiPicker(false);
       console.log('[MessageBubble] Reaction successful!');
-    } catch (error: any) {
-      const msg = error?.response?.data?.message || error?.message || 'Unknown error';
-      // console.error('[MessageBubble] Reaction failed:', msg);
-      // console.error('[MessageBubble] Full error:', error);
-      // console.error('[MessageBubble] Error response:', error?.response);
+    } 
+    
+    // catch (error: any) {
+    //   const msg = error?.response?.data?.message || error?.message || 'Unknown error';
+    //   toast?.error?.(`Reaction failed: ${msg}`);
+    // }
+
+    catch (error: unknown) {
+      let msg = 'Unknown error';
+      function isAxiosError(err: unknown): err is { response: { data: { message?: string } } } {
+        return (
+          typeof err === 'object' &&
+          err !== null &&
+          'response' in err &&
+          typeof (err as { response: unknown }).response === 'object' &&
+          (err as { response: unknown }).response !== null &&
+          'data' in (err as { response: { data: unknown } }).response &&
+          typeof (err as { response: { data: unknown } }).response.data === 'object' &&
+          (err as { response: { data: unknown } }).response.data !== null
+        );
+      }
+
+      if (isAxiosError(error) && 'message' in error.response.data) {
+        msg = (error.response.data.message as string) || msg;
+      } 
+      else if (error instanceof Error && error.message) {
+        msg = error.message;
+      }
       toast?.error?.(`Reaction failed: ${msg}`);
     }
   }, [reactions, message.message_id, toast]);
@@ -175,11 +206,20 @@ export default function MessageBubble({
     }
   };
 
-  const canDeleteForEveryone = useMemo(() => {
-    if (!isMyMessage) return false;
-    const messageAge = Date.now() - new Date(message.created_at).getTime();
-    return messageAge <= 48 * 60 * 60 * 1000;
-  }, [isMyMessage, message.created_at]);
+  // const canDeleteForEveryone = useMemo(() => {
+  //   if (!isMyMessage) return false;
+  //   const messageAge = Date.now() - new Date(message.created_at).getTime();
+  //   return messageAge <= 48 * 60 * 60 * 1000;
+  // }, [isMyMessage, message.created_at]);
+
+  const [now, setNow] = useState(() => Date.now());
+    useEffect(() => {
+      const interval = setInterval(() => setNow(Date.now()), 60 * 1000);
+      return () => clearInterval(interval);
+    }, []);
+
+  const messageAge = now - new Date(message.created_at).getTime();
+  const canDeleteForEveryone = isMyMessage && messageAge <= 48 * 60 * 60 * 1000;
 
   // ── Quick-emoji strip ───────────────────────────────────────────────────────────
   const QuickEmojiStrip = showEmojiPicker && (
@@ -357,6 +397,10 @@ export default function MessageBubble({
                     height={200}
                     className="max-w-full rounded-xl cursor-pointer hover:opacity-90 transition-opacity"
                     style={{ objectFit: 'contain', height: 'auto' }}
+                    loading="lazy"
+                    placeholder="blur"
+                    blurDataURL="data:image/svg+xml,%3Csvg width='300' height='200' xmlns='http://www.w3.org/2000/svg'%3E%3Crect width='300' height='200' fill='%23e5e7eb'/%3E%3C/svg%3E"
+                    sizes="(max-width: 600px) 100vw, 300px"
                   />
                 </a>
               </div>

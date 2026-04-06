@@ -486,7 +486,7 @@ export default function ChatWindowPage() {
 
     // Send typing stopped event
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-    sendTyping(conversationId, false);
+    sendTyping(conversationId, 'conversation', false);
 
     try {
       setSending(true);
@@ -675,31 +675,36 @@ export default function ChatWindowPage() {
     setNewMessage(e.target.value);
     
     if (isConnected) {
-      sendTyping(conversationId, true);
+      sendTyping(conversationId, 'conversation', true);
       
       if (typingTimeoutRef.current) {
         clearTimeout(typingTimeoutRef.current);
       }
       
       typingTimeoutRef.current = setTimeout(() => {
-        sendTyping(conversationId, false);
+        sendTyping(conversationId, 'conversation', false);
       }, 2000);
     }
   };
 
   const formatTime = (dateString: string) => {
     const date = new Date(dateString);
-    const now = new Date();
-    const diff = now.getTime() - date.getTime();
-    const minutes = Math.floor(diff / 60000);
-    const hours = Math.floor(diff / 3600000);
-    const days = Math.floor(diff / 86400000);
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
+  };
 
-    if (minutes < 1) return 'Just now';
-    if (minutes < 60) return `${minutes}m ago`;
-    if (hours < 24) return `${hours}h ago`;
-    if (days < 7) return `${days}d ago`;
-    return date.toLocaleDateString();
+  const formatDateHeader = (dateString: string) => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    
+    const messageDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+
+    if (messageDate.getTime() === today.getTime()) return 'Today';
+    if (messageDate.getTime() === yesterday.getTime()) return 'Yesterday';
+    
+    return date.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
   };
 
   // Message management handlers
@@ -1231,21 +1236,36 @@ export default function ChatWindowPage() {
             </div>
           </div>
         ) : (
-          <>
-            {displayedMessages.map((message) => {
-              const isMyMessage = message.is_my_message;
-              return (
-                <MessageBubble
-                  key={message.message_id}
-                  message={message}
-                  isMyMessage={isMyMessage}
-                  onReply={handleReply}
-                  onEdit={handleEdit}
-                  onDelete={handleDelete}
-                  formatTime={formatTime}
-                />
-              );
-            })}
+          <div className="flex flex-col gap-4">
+            {(() => {
+              let lastDate = "";
+              return displayedMessages.map((message) => {
+                const isMyMessage = message.is_my_message;
+                const messageDate = new Date(message.created_at).toDateString();
+                const showDateHeader = messageDate !== lastDate;
+                lastDate = messageDate;
+
+                return (
+                  <div key={message.message_id} className="flex flex-col gap-4">
+                    {showDateHeader && (
+                      <div className="flex justify-center my-4">
+                        <span className="px-4 py-1.5 rounded-2xl text-[11px] font-bold tracking-wide uppercase glass-strong shadow-sm" style={{ color: 'var(--muted)', background: 'var(--white-10)' }}>
+                          {formatDateHeader(String(message.created_at))}
+                        </span>
+                      </div>
+                    )}
+                    <MessageBubble
+                      message={message}
+                      isMyMessage={isMyMessage}
+                      onReply={handleReply}
+                      onEdit={handleEdit}
+                      onDelete={handleDelete}
+                      formatTime={formatTime}
+                    />
+                  </div>
+                );
+              });
+            })()}
             {!searchQuery.trim() && isOtherTyping && (
               <div className="flex animate-fade-in my-2">
                 <div className="glass-strong rounded-2xl px-4 py-3 flex gap-1 bg-white/5 items-center w-fit">
@@ -1256,7 +1276,7 @@ export default function ChatWindowPage() {
               </div>
             )}
             <div ref={messagesEndRef} />
-          </>
+          </div>
         )}
       </div>
 

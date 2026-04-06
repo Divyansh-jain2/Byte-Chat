@@ -59,7 +59,7 @@ export interface Message {
   sender_name: string;
   sender_gender: string;
   sender_dp?: string;
-  message_type: 'text' | 'image' | 'file';
+  message_type: 'text' | 'image';
   encrypted_content: string;
   content_iv: string;
   content_auth_tag: string;

@@ -1,57 +1,193 @@
 import type { Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
+import { v4 as uuidv4 } from 'uuid';
 import { pool } from '../lib/db.js';
+import { redis } from '../lib/redis.js';
+import { config } from '../config/index.js';
+
+// Utils
+import { verifyAccessToken, verifyRefreshToken, generateAccessToken, generateRefreshToken } from '../utils/jwt.util.js';
 import { hashPassword, verifyPassword } from '../utils/password.util.js';
-import { generateAccessToken, generateRefreshToken } from '../utils/jwt.util.js';
 import { generateOTP, hashToken, generateRandomToken } from '../utils/otp.util.js';
-import {validateRollNumber, constructRollNumber, generateEmail, validatePassword,
+import { validateRollNumber, constructRollNumber, generateEmail, validatePassword, 
   validateName, validateBranch, validate5DigitRoll} from '../utils/validation.util.js';
 import { sendOTPEmail } from '../utils/email.util.js';
-import type { SignupRequest, VerifyOTPRequest, LoginRequest, ForgotPasswordRequest, ResetPasswordRequest } from '../types/auth.types.js';
-import { config } from '../config/index.js';
-import { redis } from '../lib/redis.js';
-import { createSession, deleteSession, storeRefreshToken, getRefreshTokenUser, deleteRefreshToken } from '../services/session.service.js';
-import { v4 as uuidv4 } from 'uuid';
-import {clearOtp, clearPasswordResetState, consumePasswordResetToken, incrementOtpSendAttempts, incrementOtpVerifyAttempts,
-  isOtpSendRateLimited, isOtpVerifyRateLimited, matchesOtp, otpExpirySeconds, storeOtp, storePasswordResetToken } from '../services/authOtpCache.service.js';
-import {
-  blacklistToken,
-  invalidateUserPermissionCache,
-  setUserTokenRevokeAfterNow,
-} from '../services/authCache.service.js';
-import type { TokenPayload } from '../types/auth.types.js';
 
+// Services
+import {isTokenBlacklisted, blacklistToken, setUserTokenRevokeAfterNow,
+  invalidateUserPermissionCache} from '../services/authCache.service.js';
+import {getSession, createSession, deleteSession, storeRefreshToken,
+  getRefreshTokenUser, deleteRefreshToken} from '../services/session.service.js';
+import {clearOtp, clearPasswordResetState, consumePasswordResetToken, incrementOtpSendAttempts,
+  incrementOtpVerifyAttempts, isOtpSendRateLimited, isOtpVerifyRateLimited, matchesOtp,
+  otpExpirySeconds, storeOtp, storePasswordResetToken} from '../services/authOtpCache.service.js';
+
+// Types
+import type {SignupRequest, VerifyOTPRequest, LoginRequest, ForgotPasswordRequest, 
+  ResetPasswordRequest, TokenPayload} from '../types/auth.types.js';
+
+
+
+// Helper: Extract bearer token from Authorization header
 function getBearerToken(req: Request): string | undefined {
   const authHeader = req.headers['authorization'];
   if (!authHeader) return undefined;
-
   const [scheme, token] = authHeader.split(' ');
-  if (scheme?.toLowerCase() !== 'bearer' || !token) return undefined;
-  return token;
+  return scheme?.toLowerCase() === 'bearer' ? token : undefined;
 }
 
+
+// Helper: Get remaining TTL of a JWT token in seconds
 function getTokenRemainingTtl(token: string): number {
-  const decoded = jwt.decode(token) as TokenPayload | null;
-  const nowEpoch = Math.floor(Date.now() / 1000);
-  if (decoded && typeof decoded.exp === 'number') {
-    const ttl = decoded.exp - nowEpoch;
-    return ttl > 0 ? ttl : 0;
+  try {
+    const decoded = jwt.decode(token) as TokenPayload | null;
+    if (!decoded?.exp) return 3600;
+    const now = Math.floor(Date.now() / 1000);
+    return Math.max(decoded.exp - now, 0);
+  } catch {
+    return 3600;
   }
-  return 900;
 }
 
+
+// Helper: Set access token as HTTP-only cookie
 function setAccessTokenCookie(res: Response, accessToken: string) {
   res.cookie('accessToken', accessToken, {
     httpOnly: true,
     secure: config.server.nodeEnv === 'production',
     sameSite: 'strict',
-    maxAge: 15 * 60 * 1000,
+    maxAge: 15 * 60 * 1000, // 15 minutes
   });
 }
 
-/**
- * SIGNUP - Step 1: Create user and send OTP
- */
+
+// CANCEL ALL SESSIONS (GLOBAL LOGOUT)
+export async function cancelAllSessionsHandler(req: Request, res: Response) {
+  try {
+    const accessToken = getBearerToken(req) || req.cookies?.accessToken;
+    if (!accessToken) {
+      return res.status(401).json({ success: false, message: 'No access token provided.' });
+    }
+
+    const payload = verifyAccessToken(accessToken);
+    if (!payload || !payload.userId) {
+      return res.status(401).json({ success: false, message: 'Invalid access token.' });
+    }
+
+    // Revoke all tokens by bumping version and setting revocation timestamp
+    await setUserTokenRevokeAfterNow(payload.userId);
+    await invalidateUserPermissionCache(payload.userId);
+
+    // Clear client-side cookies
+    res.clearCookie('accessToken');
+    res.clearCookie('refreshToken');
+
+    // Audit log
+    const ipAddress = req.ip || req.socket.remoteAddress || '0.0.0.0';
+    try {
+      await pool.query(
+        `SELECT log_audit_event(
+          $1::UUID, 'global_logout', 'user', $1::UUID, NULL,
+          jsonb_build_object('reason', 'user_requested_global_logout'),
+          $2::INET, $3::TEXT
+        )`,
+        [payload.userId, ipAddress, req.get('user-agent') || 'unknown']
+      );
+    } catch (auditError) {
+      console.error('Audit log error:', auditError);
+    }
+
+    return res.status(200).json({ success: true, message: 'All sessions cancelled successfully.' });
+  } catch (err) {
+    console.error('Cancel all sessions error:', err);
+    return res.status(500).json({ success: false, message: 'Internal server error.' });
+  }
+}
+
+
+// REFRESH TOKEN ROTATION
+export async function refreshTokenHandler(req: Request, res: Response) {
+  try {
+    const refreshToken = req.cookies?.refreshToken || req.body?.refreshToken;
+    if (!refreshToken) {
+      return res.status(401).json({ success: false, message: 'No refresh token provided.' });
+    }
+
+    const payload = verifyRefreshToken(refreshToken);
+    if (!payload || !payload.userId) {
+      return res.status(401).json({ success: false, message: 'Invalid refresh token.' });
+    }
+
+    // REUSE DETECTION
+    // 1. Check if token is blacklisted (already rotated or suspected stolen)
+    const isBlacklisted = await isTokenBlacklisted(refreshToken);
+    if (isBlacklisted) {
+      // Suspected reuse! For security, revoke EVERYTHING for this user.
+      await setUserTokenRevokeAfterNow(payload.userId);
+      return res.status(401).json({
+        success: false,
+        message: 'Security Alert: Refresh token reuse detected. All sessions revoked.'
+      });
+    }
+
+    // 2. Check if token belongs to this user in Redis
+    const refreshTokenHash = hashToken(refreshToken);
+    const userIdInRedis = await getRefreshTokenUser(refreshTokenHash);
+    if (!userIdInRedis || userIdInRedis !== payload.userId) {
+      // Token is valid but not in Redis (possibly already rotated/deleted)
+      await blacklistToken(refreshToken, getTokenRemainingTtl(refreshToken), 'reuse-detected');
+      await setUserTokenRevokeAfterNow(payload.userId);
+      return res.status(401).json({
+        success: false,
+        message: 'Security Alert: Refresh token reuse detected. All sessions revoked.'
+      });
+    }
+
+    // ROTATION: Burn old token and issue new ones
+    await deleteRefreshToken(refreshTokenHash);
+    await blacklistToken(refreshToken, getTokenRemainingTtl(refreshToken), 'rotated');
+
+    const newAccessToken = generateAccessToken(payload.userId, payload.rollNo);
+    const newRefreshToken = generateRefreshToken(payload.userId, payload.rollNo);
+    const newRefreshTokenHash = hashToken(newRefreshToken);
+    await storeRefreshToken(payload.userId, newRefreshTokenHash);
+
+    // Update session activity in Redis (assume sessionId is userId or provided in header)
+    const sessionId = (req.headers['x-session-id'] as string) || payload.userId;
+    const session = await getSession(sessionId);
+    if (session) {
+      await createSession(sessionId, {
+        ...session,
+        lastActivity: Date.now().toString(),
+      });
+    }
+
+    // Set cookies
+    res.cookie('refreshToken', newRefreshToken, {
+      httpOnly: true,
+      secure: config.server.nodeEnv === 'production',
+      sameSite: 'strict',
+      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+    });
+    setAccessTokenCookie(res, newAccessToken);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Token refreshed successfully.',
+      data: {
+        accessToken: newAccessToken,
+        userId: payload.userId,
+        rollNo: payload.rollNo
+      }
+    });
+  } catch (err) {
+    console.error('Refresh error:', err);
+    return res.status(500).json({ success: false, message: 'Internal server error.' });
+  }
+}
+
+
+// SIGNUP - Step 1: Create user and send OTP
 export async function signup(req: Request, res: Response) {
   try {
     const { degreeType, rollNumber, name, gender, branch, password, publicKey, encryptedPrivateKey } = req.body as SignupRequest;
@@ -203,9 +339,8 @@ export async function signup(req: Request, res: Response) {
   }
 }
 
-/**
- * SIGNUP - Step 2: Verify OTP
- */
+
+// SIGNUP - Step 2: Verify OTP
 export async function verifyOTP(req: Request, res: Response) {
   try {
     const { rollNo, otp, purpose } = req.body as VerifyOTPRequest;
@@ -358,9 +493,8 @@ export async function verifyOTP(req: Request, res: Response) {
   }
 }
 
-/**
- * LOGIN
- */
+
+// LOGIN
 export async function login(req: Request, res: Response) {
   try {
     const { rollNo, password } = req.body as LoginRequest;
@@ -540,9 +674,8 @@ export async function login(req: Request, res: Response) {
   }
 }
 
-/**
- * FORGOT PASSWORD - Step 1: Send OTP
- */
+
+// FORGOT PASSWORD - Step 1: Send OTP
 export async function forgotPassword(req: Request, res: Response) {
   try {
     const { rollNo } = req.body as ForgotPasswordRequest;
@@ -641,9 +774,8 @@ export async function forgotPassword(req: Request, res: Response) {
   }
 }
 
-/**
- * RESET PASSWORD - Step 2: Reset with OTP
- */
+
+// RESET PASSWORD - Step 2: Reset with OTP
 export async function resetPassword(req: Request, res: Response) {
   try {
     const { rollNo, otp, newPassword, resetToken } = req.body as ResetPasswordRequest & {
@@ -784,9 +916,8 @@ export async function resetPassword(req: Request, res: Response) {
   }
 }
 
-/**
- * LOGOUT
- */
+
+// LOGOUT
 export async function logout(req: Request, res: Response) {
   try {
     const refreshToken = req.cookies.refreshToken;
