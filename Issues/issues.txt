@@ -1,0 +1,7 @@
+1. cant block someone without starting a conversation -> we are getting a option to block someone in the dashboard 
+but that do not function, the only way to block someone is by starting a conversation first then only you can block 
+someone. 
+
+Suggested FIX: either dont give the user any way to block someone until they start a actual conversation 
+(i.e. atleast one msg is send) or give the user a way to block someone without even start the conversation.
+
